@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  # This is the name of your database service
+  postgres_db:
+    image: postgres:15
+    container_name: my-postgres-db # You can name this anything
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres         # Database username
+      POSTGRES_PASSWORD: 12345 # Database password
+      POSTGRES_DB: primierdd        # Database name
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # Saves data so it isn't lost when container stops
+
+volumes:
+  postgres_data:
