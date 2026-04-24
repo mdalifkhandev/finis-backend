@@ -1,0 +1,368 @@
+import {
+  Injectable,
+  BadRequestException,
+  UnauthorizedException,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import * as bcrypt from 'bcryptjs';
+import { v4 as uuidv4 } from 'uuid';
+import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from './mail.service';
+import { LoginDto } from './dto/login.dto';
+import { InviteDto } from './dto/invite.dto';
+import { AcceptInviteDto } from './dto/accept-invite.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { UserRole } from '../generated/prisma/client';
+
+const otpStore = new Map<string, { email: string; otp: string; expiresAt: Date }>();
+const resetTokenStore = new Map<string, { identifier: string; expiresAt: Date }>();
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private prisma: PrismaService,
+    private jwtService: JwtService,
+    private config: ConfigService,
+    private mailService: MailService,
+  ) {}
+
+  // ── LOGIN ──────────────────────────────────
+  async login(dto: LoginDto) {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ email: dto.identifier }, { phone: dto.identifier }],
+      },
+    });
+
+    if (!user) throw new UnauthorizedException('Invalid credentials');
+    if (user.status === 'suspended') throw new UnauthorizedException('Account suspended');
+    if (user.status === 'inactive') throw new UnauthorizedException('Account inactive');
+    if (user.status === 'pending') throw new UnauthorizedException('Account pending activation');
+
+    // FIX: passwordHash could be null in DB, guard it
+    if (!user.passwordHash) throw new UnauthorizedException('Invalid credentials');
+
+    const passwordMatch = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!passwordMatch) throw new UnauthorizedException('Invalid credentials');
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+
+    const token = this.generateToken(user.id, user.email, user.role);
+
+    return {
+      accessToken: token,
+      user: {
+        id: user.id,
+        email: user.email,
+        phone: user.phone,
+        fullName: user.fullName,
+        role: user.role,
+        avatarUrl: user.avatarUrl,
+        tenantId: user.tenantId,
+      },
+    };
+  }
+
+  // ── SEED SUPER ADMIN ──────────────────────
+  async seedSuperAdmin() {
+    const existing = await this.prisma.user.findFirst({
+      where: { role: UserRole.super_admin },
+    });
+
+    if (existing) throw new ConflictException('Super admin already exists');
+
+    const hash = await bcrypt.hash('Admin@12345', 10);
+
+    const admin = await this.prisma.user.create({
+      data: {
+        email: 'superadmin@finis.com',
+        fullName: 'Super Admin',
+        passwordHash: hash,
+        role: UserRole.super_admin,
+        status: 'active',
+      },
+    });
+
+    return {
+      message: 'Super admin created',
+      email: admin.email,
+      password: 'Admin@12345',
+    };
+  }
+
+  // ── INVITE ────────────────────────────────
+  async inviteUser(senderId: string, dto: InviteDto) {
+    if (!dto.email && !dto.phone) {
+      throw new BadRequestException('Email or phone required');
+    }
+
+    // FIX: role must be defined
+    if (!dto.role) {
+      throw new BadRequestException('Role is required');
+    }
+
+    if (dto.email) {
+      const exists = await this.prisma.user.findUnique({ where: { email: dto.email } });
+      if (exists) throw new ConflictException('User with this email already exists');
+    }
+
+    const pending = await this.prisma.invitation.findFirst({
+      where: {
+        OR: [
+          ...(dto.email ? [{ email: dto.email }] : []),
+          ...(dto.phone ? [{ phone: dto.phone }] : []),
+        ],
+        status: 'pending',
+      },
+    });
+    if (pending) throw new ConflictException('Pending invitation already exists');
+
+    const token = uuidv4();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    const invitation = await this.prisma.invitation.create({
+      data: {
+        senderId,
+        // FIX: use null instead of undefined for optional Prisma fields
+        email: dto.email ?? null,
+        phone: dto.phone ?? null,
+        role: dto.role,
+        token,
+        expiresAt,
+        status: 'pending',
+      },
+    });
+
+    if (dto.email) {
+      // FIX: dto.role is confirmed defined above
+      await this.mailService.sendInviteEmail(dto.email, token, dto.role);
+    }
+
+    return { message: 'Invitation sent', invitationId: invitation.id };
+  }
+
+  // ── ACCEPT INVITE ─────────────────────────
+  async acceptInvite(dto: AcceptInviteDto) {
+    // FIX: validate required fields
+    if (!dto.token) throw new BadRequestException('Token is required');
+    if (!dto.fullName) throw new BadRequestException('Full name is required');
+    if (!dto.password) throw new BadRequestException('Password is required');
+
+    const invitation = await this.prisma.invitation.findUnique({
+      where: { token: dto.token },
+    });
+
+    if (!invitation) throw new NotFoundException('Invalid invitation token');
+    if (invitation.status !== 'pending') throw new BadRequestException('Invitation already used or cancelled');
+    if (new Date() > invitation.expiresAt) {
+      await this.prisma.invitation.update({
+        where: { id: invitation.id },
+        data: { status: 'expired' },
+      });
+      throw new BadRequestException('Invitation expired');
+    }
+
+    // FIX: await hash first, then use it
+    const hash = await bcrypt.hash(dto.password, 10);
+
+    // FIX: email must be string (not null/undefined) for User model
+    // If phone-only invite, email won't be set — handle accordingly
+    const userEmail = invitation.email ?? `phone_${invitation.phone}@finis.internal`;
+
+    const user = await this.prisma.user.create({
+      data: {
+        email: userEmail,
+        phone: invitation.phone ?? null,
+        fullName: dto.fullName,
+        passwordHash: hash,
+        role: invitation.role,
+        status: 'active',
+      },
+    });
+
+    await this.prisma.invitation.update({
+      where: { id: invitation.id },
+      data: { status: 'accepted', receiverId: user.id },
+    });
+
+    const token = this.generateToken(user.id, user.email, user.role);
+
+    return {
+      message: 'Account created successfully',
+      accessToken: token,
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+      },
+    };
+  }
+
+
+
+// ── FORGOT PASSWORD ───────────────────────
+async forgotPassword(dto: ForgotPasswordDto) {
+  const user = await this.prisma.user.findFirst({
+    where: { email: dto.email },
+  });
+
+  if (!user) throw new NotFoundException('User not found');
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const forgotToken = uuidv4(); // ← token generate
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  // key = forgotToken, value = { email, otp, expiresAt }
+  otpStore.set(forgotToken, { email: dto.email, otp, expiresAt });
+
+  await this.mailService.sendOtpEmail(dto.email, otp);
+
+  return {
+    message: 'OTP sent to email',
+    forgotToken,
+    ...(this.config.get('NODE_ENV') !== 'production' && { otp }),
+  };
+}
+
+// ── VERIFY OTP ────────────────────────────
+async verifyOtp(dto: VerifyOtpDto) {
+  const stored = otpStore.get(dto.forgotToken);
+
+  if (!stored) throw new BadRequestException('Invalid or expired token');
+  if (new Date() > stored.expiresAt) {
+    otpStore.delete(dto.forgotToken);
+    throw new BadRequestException('OTP expired');
+  }
+  if (stored.otp !== dto.otp) throw new BadRequestException('Invalid OTP');
+
+  otpStore.delete(dto.forgotToken);
+
+  const resetToken = uuidv4();
+  resetTokenStore.set(resetToken, {
+    identifier: stored.email, 
+    expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+  });
+
+  return { message: 'OTP verified', resetToken };
+}
+  // ── RESET PASSWORD ────────────────────────
+  async resetPassword(dto: ResetPasswordDto) {
+    // FIX: validate required fields
+    if (!dto.resetToken) throw new BadRequestException('Reset token is required');
+    if (!dto.newPassword) throw new BadRequestException('New password is required');
+
+    const stored = resetTokenStore.get(dto.resetToken);
+
+    if (!stored) throw new BadRequestException('Invalid or expired reset token');
+    if (new Date() > stored.expiresAt) {
+      resetTokenStore.delete(dto.resetToken);
+      throw new BadRequestException('Reset token expired');
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ email: stored.identifier }, { phone: stored.identifier }],
+      },
+    });
+
+    if (!user) throw new NotFoundException('User not found');
+
+    // FIX: await hash, then pass as string
+    const hash = await bcrypt.hash(dto.newPassword, 10);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: hash },
+    });
+
+    resetTokenStore.delete(dto.resetToken);
+
+    return { message: 'Password updated successfully' };
+  }
+
+  // ── GET INVITATIONS ───────────────────────
+  async getInvitations(senderId: string) {
+    return this.prisma.invitation.findMany({
+      where: { senderId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  // ── RESEND INVITATION ─────────────────────
+  async resendInvitation(invitationId: string, senderId: string) {
+    const invitation = await this.prisma.invitation.findFirst({
+      where: { id: invitationId, senderId },
+    });
+
+    if (!invitation) throw new NotFoundException('Invitation not found');
+    if (invitation.status !== 'pending') throw new BadRequestException('Cannot resend non-pending invitation');
+
+    const newToken = uuidv4();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    await this.prisma.invitation.update({
+      where: { id: invitationId },
+      data: { token: newToken, expiresAt },
+    });
+
+    if (invitation.email) {
+      await this.mailService.sendInviteEmail(invitation.email, newToken, invitation.role);
+    }
+
+    return { message: 'Invitation resent' };
+  }
+
+  // ── CANCEL INVITATION ─────────────────────
+  async cancelInvitation(invitationId: string, senderId: string) {
+    const invitation = await this.prisma.invitation.findFirst({
+      where: { id: invitationId, senderId },
+    });
+
+    if (!invitation) throw new NotFoundException('Invitation not found');
+
+    await this.prisma.invitation.update({
+      where: { id: invitationId },
+      data: { status: 'cancelled' },
+    });
+
+    return { message: 'Invitation cancelled' };
+  }
+
+  // ── ME ────────────────────────────────────
+  async getMe(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        fullName: true,
+        role: true,
+        status: true,
+        avatarUrl: true,
+        tenantId: true,
+        department: true,
+        joinDate: true,
+        lastLoginAt: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  // ── HELPER ────────────────────────────────
+  private generateToken(userId: string, email: string, role: string) {
+    return this.jwtService.sign({ sub: userId, email, role });
+  }
+}

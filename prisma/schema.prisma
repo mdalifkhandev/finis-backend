@@ -323,6 +323,7 @@ model User {
   userSettings        UserSettings?
   invitationsSent     Invitation[]        @relation("InvitationSender")
   invitationsReceived Invitation[]        @relation("InvitationReceiver")
+  projectMemberships  ProjectMember[]     // Added relation to ProjectMember
 
   @@map("users")
 }
@@ -527,6 +528,7 @@ model ProjectMember {
   role      String?
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, userId])
   @@map("project_members")
