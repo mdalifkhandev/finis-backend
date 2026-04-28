@@ -5,12 +5,12 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateCompanyDto, UpdateCompanyDto, CreateContactDto, UpdateContactDto } from './dto/company.dto';
+import { CreateCompanyDto, UpdateCompanyDto, CreateContactDto, UpdateContactDto, PaginationQueryDto } from './dto/company.dto';
 import { File as MulterFile } from 'multer';
 
 @Injectable()
 export class CompanyService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   // ─── HELPER: verify admin owns this company ──────────────────────────────
   private async verifyOwner(companyId: string, adminId: string) {
@@ -24,26 +24,46 @@ export class CompanyService {
   }
 
   // ─── GET ALL MY COMPANIES ─────────────────────────────────────────────────
-  async getMyCompanies(adminId: string) {
-    return this.prisma.company.findMany({
-      where: { ownerId: adminId, isActive: true },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        name: true,
-        industry: true,
-        revenue: true,
-        projectLevel: true,
-        address: true,
-        website: true,
-        phone: true,
-        email: true,
-        logoUrl: true,
-        isActive: true,
-        createdAt: true,
-        _count: { select: { projects: true, members: true } },
+  async getMyCompanies(adminId: string, query: PaginationQueryDto) {
+    const { page = 1, limit = 10 } = query;
+    const skip = (page - 1) * limit;
+
+    const [companies, total] = await Promise.all([
+      this.prisma.company.findMany({
+        where: { ownerId: adminId, isActive: true },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          name: true,
+          industry: true,
+          revenue: true,
+          projectLevel: true,
+          address: true,
+          website: true,
+          phone: true,
+          email: true,
+          logoUrl: true,
+          isActive: true,
+          createdAt: true,
+          _count: { select: { projects: true, members: true } },
+        },
+      }),
+      this.prisma.company.count({
+        where: { ownerId: adminId, isActive: true },
+      }),
+    ]);
+
+    return {
+      data: companies,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
       },
-    });
+    };
   }
 
   // ─── GET COMPANY PROFILE ──────────────────────────────────────────────────
@@ -139,74 +159,93 @@ export class CompanyService {
   }
 
   // ─── CONTACTS ─────────────────────────────────────────────────────────────
-  async getContacts(companyId: string, adminId: string) {
-    await this.verifyOwner(companyId, adminId);
-    return this.prisma.contact.findMany({
-      where: { companyId },
-      orderBy: [{ isPrimary: 'desc' }, { fullName: 'asc' }],
-    });
-  }
-
-  async createContact(companyId: string, dto: CreateContactDto, adminId: string) {
+  async getContacts(companyId: string, adminId: string, query: PaginationQueryDto) {
     await this.verifyOwner(companyId, adminId);
 
-    // Only one primary contact allowed
-    if (dto.isPrimary) {
-      await this.prisma.contact.updateMany({
-        where: { companyId, isPrimary: true },
-        data: { isPrimary: false },
-      });
-    }
+    const { page = 1, limit = 20 } = query;
 
-    return this.prisma.contact.create({
-      data: {
-        companyId,
-        fullName: dto.fullName!,
-        role: dto.role,
-        email: dto.email,
-        phone: dto.phone,
-        isPrimary: dto.isPrimary ?? false,
+    // ✅ সব members একসাথে আনো — pagination পরে grouped data তে apply হবে
+    const members = await this.prisma.projectMember.findMany({
+      where: {
+        project: { companyId },
+        role: { in: ['manager', 'worker'] },
+      },
+      orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
+      include: {
+        project: {
+          select: { id: true, name: true },
+        },
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phone: true,
+            avatarUrl: true,
+            role: true,
+          },
+        },
       },
     });
-  }
 
-  async updateContact(
-    companyId: string,
-    contactId: string,
-    dto: UpdateContactDto,
-    adminId: string,
-  ) {
-    await this.verifyOwner(companyId, adminId);
+    // ✅ User দিয়ে group করো
+    const grouped = new Map<string, {
+      userId: string;
+      fullName: string;
+      email: string;
+      phone: string | null;
+      avatarUrl: string | null;
+      systemRole: string;
+      projects: { id: string; name: string; role: string; joinedAt: Date }[];
+    }>();
 
-    const contact = await this.prisma.contact.findFirst({
-      where: { id: contactId, companyId },
-    });
-    if (!contact) throw new NotFoundException('Contact not found');
-
-    if (dto.isPrimary) {
-      await this.prisma.contact.updateMany({
-        where: { companyId, isPrimary: true },
-        data: { isPrimary: false },
-      });
+    for (const member of members) {
+      const existing = grouped.get(member.user.id);
+      if (existing) {
+        existing.projects.push({
+          id: member.project.id,
+          name: member.project.name,
+          role: member.role ?? 'worker',
+          joinedAt: member.createdAt,
+        });
+      } else {
+        grouped.set(member.user.id, {
+          userId: member.user.id,
+          fullName: member.user.fullName,
+          email: member.user.email,
+          phone: member.user.phone ?? null,
+          avatarUrl: member.user.avatarUrl ?? null,
+          systemRole: member.user.role ?? '',
+          projects: [{
+            id: member.project.id,
+            name: member.project.name,
+            role: member.role ?? 'worker',
+            joinedAt: member.createdAt,
+          }],
+        });
+      }
     }
 
-    return this.prisma.contact.update({
-      where: { id: contactId },
-      data: dto,
-    });
+    // ✅ Grouped array এর উপর pagination apply করো
+    const allGrouped = Array.from(grouped.values());
+    const total = allGrouped.length;
+    const skip = (page - 1) * limit;
+    const paginated = allGrouped.slice(skip, skip + limit);
+
+    return {
+      data: paginated,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
-  async deleteContact(companyId: string, contactId: string, adminId: string) {
-    await this.verifyOwner(companyId, adminId);
 
-    const contact = await this.prisma.contact.findFirst({
-      where: { id: contactId, companyId },
-    });
-    if (!contact) throw new NotFoundException('Contact not found');
 
-    await this.prisma.contact.delete({ where: { id: contactId } });
-    return { message: 'Contact deleted successfully' };
-  }
+
 
   // ─── DOCUMENTS ────────────────────────────────────────────────────────────
   async getDocuments(companyId: string, adminId: string) {
@@ -276,30 +315,5 @@ export class CompanyService {
 
     await this.prisma.document.delete({ where: { id: documentId } });
     return { message: 'Document deleted successfully' };
-  }
-
-  // ─── COMPANY MEMBERS ──────────────────────────────────────────────────────
-  async getMembers(companyId: string, adminId: string) {
-    await this.verifyOwner(companyId, adminId);
-
-    return this.prisma.companyMember.findMany({
-      where: { companyId },
-      select: {
-        id: true,
-        role: true,
-        joinedAt: true,
-        user: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            phone: true,
-            avatarUrl: true,
-            role: true,
-            status: true,
-          },
-        },
-      },
-    });
   }
 }

@@ -27,6 +27,7 @@ import {
   UpdateCompanyDto,
   CreateContactDto,
   UpdateContactDto,
+  PaginationQueryDto,
 } from './dto/company.dto';
 
 const logoStorage = diskStorage({
@@ -41,16 +42,19 @@ const docStorage = diskStorage({
 
 @Controller('admin/companies')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.admin, UserRole.super_admin)
+@Roles(UserRole.admin, UserRole.super_admin,)
 export class CompanyController {
-  constructor(private companyService: CompanyService) {}
+  constructor(private companyService: CompanyService) { }
 
   // ─── COMPANIES ────────────────────────────────────────────────────────────
 
   /** GET /admin/companies — all my companies */
   @Get()
-  getMyCompanies(@CurrentUser('id') adminId: string) {
-    return this.companyService.getMyCompanies(adminId);
+  getMyCompanies(
+    @CurrentUser('id') adminId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.companyService.getMyCompanies(adminId, query);
   }
 
   /** POST /admin/companies — create company */
@@ -112,40 +116,11 @@ export class CompanyController {
   getContacts(
     @Param('id') companyId: string,
     @CurrentUser('id') adminId: string,
+    @Query() query: PaginationQueryDto,
   ) {
-    return this.companyService.getContacts(companyId, adminId);
+    return this.companyService.getContacts(companyId, adminId, query);
   }
 
-  /** POST /admin/companies/:id/contacts */
-  @Post(':id/contacts')
-  createContact(
-    @Param('id') companyId: string,
-    @Body() dto: CreateContactDto,
-    @CurrentUser('id') adminId: string,
-  ) {
-    return this.companyService.createContact(companyId, dto, adminId);
-  }
-
-  /** PUT /admin/companies/:id/contacts/:contactId */
-  @Put(':id/contacts/:contactId')
-  updateContact(
-    @Param('id') companyId: string,
-    @Param('contactId') contactId: string,
-    @Body() dto: UpdateContactDto,
-    @CurrentUser('id') adminId: string,
-  ) {
-    return this.companyService.updateContact(companyId, contactId, dto, adminId);
-  }
-
-  /** DELETE /admin/companies/:id/contacts/:contactId */
-  @Delete(':id/contacts/:contactId')
-  deleteContact(
-    @Param('id') companyId: string,
-    @Param('contactId') contactId: string,
-    @CurrentUser('id') adminId: string,
-  ) {
-    return this.companyService.deleteContact(companyId, contactId, adminId);
-  }
 
   // ─── DOCUMENTS ────────────────────────────────────────────────────────────
 
@@ -178,16 +153,5 @@ export class CompanyController {
     @CurrentUser('id') adminId: string,
   ) {
     return this.companyService.deleteDocument(companyId, docId, adminId);
-  }
-
-  // ─── MEMBERS ──────────────────────────────────────────────────────────────
-
-  /** GET /admin/companies/:id/members */
-  @Get(':id/members')
-  getMembers(
-    @Param('id') companyId: string,
-    @CurrentUser('id') adminId: string,
-  ) {
-    return this.companyService.getMembers(companyId, adminId);
   }
 }

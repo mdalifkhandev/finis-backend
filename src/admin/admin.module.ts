@@ -15,7 +15,13 @@ import { ProjectService } from './project/project.service';
 import { ProfileController } from './profile/profile.controller';
 import { ProfileService } from './profile/profile.service';
 
-import { GeofencingGateway } from './geofencing/geofencing.gateway';
+import { GeofencingGateway } from './project/geofencing.gateway';
+import { TeamController } from './project/team.controller';
+
+import { TaskController } from './task/task.controller';
+import { TaskService } from './task/task.service';
+import { InventoryController } from './inventory/inventory.controller';
+import { InventoryService } from './inventory/inventory.service';
 
 @Module({
   imports: [
@@ -33,7 +39,10 @@ import { GeofencingGateway } from './geofencing/geofencing.gateway';
     DashboardController,
     CompanyController,
     ProjectController,
+    TeamController,
     ProfileController,
+    TaskController,
+    InventoryController,
   ],
   providers: [
     DashboardService,
@@ -41,7 +50,9 @@ import { GeofencingGateway } from './geofencing/geofencing.gateway';
     ProjectService,
     ProfileService,
     GeofencingGateway,
+    TaskService,
+    InventoryService,
   ],
-  exports: [CompanyService, ProjectService],
+  exports: [CompanyService, ProjectService, InventoryService],
 })
 export class AdminModule {}

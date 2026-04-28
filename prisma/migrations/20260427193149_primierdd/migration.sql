@@ -305,6 +305,8 @@ CREATE TABLE "project_members" (
     "project_id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
     "role" TEXT,
+    "managerId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "project_members_pkey" PRIMARY KEY ("id")
 );
@@ -400,15 +402,29 @@ CREATE TABLE "work_schedule_assignments" (
 CREATE TABLE "attendances" (
     "id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
-    "date" DATE NOT NULL,
-    "check_in_time" TIMESTAMP(3),
-    "check_out_time" TIMESTAMP(3),
-    "status" "AttendanceStatus" NOT NULL DEFAULT 'present',
-    "hours_worked" DOUBLE PRECISION,
-    "notes" TEXT,
+    "date" TIMESTAMP(3) NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'present',
+    "totalHours" DOUBLE PRECISION,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "attendances_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "attendance_sessions" (
+    "id" UUID NOT NULL,
+    "attendance_id" UUID NOT NULL,
+    "check_in_time" TIMESTAMP(3) NOT NULL,
+    "check_out_time" TIMESTAMP(3),
+    "hours_worked" DOUBLE PRECISION,
+    "in_lat" DOUBLE PRECISION,
+    "in_lng" DOUBLE PRECISION,
+    "out_lat" DOUBLE PRECISION,
+    "out_lng" DOUBLE PRECISION,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "attendance_sessions_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -760,6 +776,9 @@ ALTER TABLE "projects" ADD CONSTRAINT "projects_company_id_fkey" FOREIGN KEY ("c
 ALTER TABLE "project_members" ADD CONSTRAINT "project_members_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "projects"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "project_members" ADD CONSTRAINT "project_members_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "floors" ADD CONSTRAINT "floors_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "projects"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -794,6 +813,9 @@ ALTER TABLE "work_schedule_assignments" ADD CONSTRAINT "work_schedule_assignment
 
 -- AddForeignKey
 ALTER TABLE "attendances" ADD CONSTRAINT "attendances_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "attendance_sessions" ADD CONSTRAINT "attendance_sessions_attendance_id_fkey" FOREIGN KEY ("attendance_id") REFERENCES "attendances"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "time_adjustment_requests" ADD CONSTRAINT "time_adjustment_requests_worker_id_fkey" FOREIGN KEY ("worker_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
