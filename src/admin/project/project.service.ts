@@ -51,6 +51,8 @@ export class ProjectService {
       startDate: true,
       endDate: true,
       budget: true,
+      spent: true,
+      remaining: true,
       location: true,
       numFloors: true,
       roomsPerFloor: true,
@@ -217,12 +219,9 @@ export class ProjectService {
       numFloors: project.numFloors,
       roomsPerFloor: project.roomsPerFloor,
       // Budget section (screen: Total Budget / Spent / Remaining)
-      budget: {
-        total: totalBudget,
-        spent,
-        remaining: totalBudget - spent,
-        usedPercent: totalBudget > 0 ? Math.round((spent / totalBudget) * 100) : 0,
-      },
+      budget: project.budget,
+      spent: project.spent,
+      remaining: project.remaining,
       // Client Info section
       client: {
         companyId: project.company.id,
@@ -254,6 +253,16 @@ export class ProjectService {
       if (!company) throw new ForbiddenException('Company not found or not yours');
     }
 
+    // Fetch the existing project to access its current values
+    const existingProject = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { budget: true, spent: true },
+    });
+
+    const budget = dto.budget ?? existingProject?.budget ?? 0;
+    const spent = dto.spent ?? existingProject?.spent ?? 0;
+    const remaining = dto.remaining ?? budget - spent;
+
     return this.prisma.project.update({
       where: { id: projectId },
       data: {
@@ -266,8 +275,10 @@ export class ProjectService {
         ...(dto.numFloors !== undefined && { numFloors: dto.numFloors }),
         ...(dto.roomsPerFloor !== undefined && { roomsPerFloor: dto.roomsPerFloor }),
         ...(dto.budget !== undefined && { budget: dto.budget }),
+        ...(dto.spent !== undefined && { spent: dto.spent }),
         ...(dto.location && { location: dto.location }),
         ...(dto.description !== undefined && { description: dto.description }),
+        remaining,
       },
       include: {
         company: { select: { id: true, name: true } },
@@ -644,43 +655,43 @@ export class ProjectService {
   async createGeofence(projectId: string, dto: CreateGeofenceDto, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
     return this.prisma.geofence.create({
-  data: {
-    projectId,
-    zoneName: dto.zoneName,
-    polygonCoords: dto.polygonCoords as any, // Cast to any or Prisma.InputJsonValue if imported
-    totalAreaSqft: dto.totalAreaSqft,
-    perimeterFt: dto.perimeterFt,
-    isActive: true,
-  },
-});
+      data: {
+        projectId,
+        zoneName: dto.zoneName,
+        polygonCoords: dto.polygonCoords as any, // Cast to any or Prisma.InputJsonValue if imported
+        totalAreaSqft: dto.totalAreaSqft,
+        perimeterFt: dto.perimeterFt,
+        isActive: true,
+      },
+    });
   }
 
-async updateGeofence(
-  projectId: string,
-  geofenceId: string,
-  dto: Partial<CreateGeofenceDto> & { isActive?: boolean },
-  userId: string,
-  userRole: string,
-) {
-  await this.verifyProjectAccess(projectId, userId, userRole);
+  async updateGeofence(
+    projectId: string,
+    geofenceId: string,
+    dto: Partial<CreateGeofenceDto> & { isActive?: boolean },
+    userId: string,
+    userRole: string,
+  ) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
 
-  const geo = await this.prisma.geofence.findFirst({
-    where: { id: geofenceId, projectId },
-  });
-  if (!geo) throw new NotFoundException('Geofence not found');
+    const geo = await this.prisma.geofence.findFirst({
+      where: { id: geofenceId, projectId },
+    });
+    if (!geo) throw new NotFoundException('Geofence not found');
 
-  const { polygonCoords, ...rest } = dto;   // ← this was missing
+    const { polygonCoords, ...rest } = dto;   // ← this was missing
 
-  return this.prisma.geofence.update({
-    where: { id: geofenceId },
-    data: {
-      ...rest,
-      ...(polygonCoords !== undefined && {
-        polygonCoords: polygonCoords as any,
-      }),
-    },
-  });
-}
+    return this.prisma.geofence.update({
+      where: { id: geofenceId },
+      data: {
+        ...rest,
+        ...(polygonCoords !== undefined && {
+          polygonCoords: polygonCoords as any,
+        }),
+      },
+    });
+  }
 
   async resolveViolation(violationId: string, userId: string) {
     await this.prisma.geofenceViolation.update({

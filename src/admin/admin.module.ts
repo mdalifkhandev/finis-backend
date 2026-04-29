@@ -1,6 +1,4 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
-import { MulterModule } from '@nestjs/platform-express';
 import { PrismaModule } from '../prisma/prisma.module';
 
 import { DashboardController } from './dashboard/dashboard.controller';
@@ -20,21 +18,12 @@ import { TeamController } from './project/team.controller';
 
 import { TaskController } from './task/task.controller';
 import { TaskService } from './task/task.service';
+
 import { InventoryController } from './inventory/inventory.controller';
 import { InventoryService } from './inventory/inventory.service';
 
 @Module({
-  imports: [
-    PrismaModule,
-    MulterModule.register({
-      dest: './uploads',
-      limits: { fileSize: 20 * 1024 * 1024 },
-    }),
-    JwtModule.register({
-      secret: process.env.JWT_SECRET || 'secret',
-      signOptions: { expiresIn: '7d' },
-    }),
-  ],
+  imports: [PrismaModule],
   controllers: [
     DashboardController,
     CompanyController,

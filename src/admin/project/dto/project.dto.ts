@@ -223,6 +223,18 @@ export class UpdateProjectDto {
   budget?: number;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  spent?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  remaining?: number;
+
+  @IsOptional()
   @IsString()
   location?: string;
 
