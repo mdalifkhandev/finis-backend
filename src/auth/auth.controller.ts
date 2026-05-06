@@ -1,5 +1,5 @@
 import {
-  Controller, Post, Get, Delete, Body, Param,
+  Controller, Post, Get, Delete, Body, Param, Query,
   UseGuards, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
@@ -68,8 +68,14 @@ export class AuthController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('super_admin', 'admin')
   @Get('invitations')
-  getInvitations(@CurrentUser('id') userId: string) {
-    return this.authService.getInvitations(userId);
+  getInvitations(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+    @Query('role') filterRole?: string,
+    @Query('status') filterStatus?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.authService.getInvitations(userId, userRole, filterRole, filterStatus, search);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

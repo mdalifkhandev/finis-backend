@@ -67,6 +67,8 @@ model User {
   lastLoginAt             DateTime?                @map("last_login_at")
   createdAt               DateTime                 @default(now()) @map("created_at")
   updatedAt               DateTime                 @updatedAt @map("updated_at")
+  stripeAccountId         String?                  @map("stripe_account_id")
+  stripeAccountStatus     String?                  @default("pending") @map("stripe_account_status")
   attendances             Attendance[]
   companies               Company[]                @relation("CompanyOwner")
   companyMembers          CompanyMember[]
@@ -244,7 +246,7 @@ model Project {
   startDate      DateTime?       @map("start_date") @db.Date
   endDate        DateTime?       @map("end_date") @db.Date
   budget         Float?
-  spent          Float?  
+  spent          Float?
   remaining      Float?
   location       String?
   description    String?
@@ -260,6 +262,7 @@ model Project {
   floors         Floor[]
   geofences      Geofence[]
   inventoryItems InventoryItem[]
+  payrolls       Payroll[]
   teamMembers    ProjectMember[]
   company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
   tasks          Task[]
@@ -476,10 +479,12 @@ model Payroll {
   employerCost   Float?        @map("employer_cost")
   status         PayrollStatus @default(draft)
   processedBy    String?       @map("processed_by") @db.Uuid
+   projectId      String?         @map("project_id") @db.Uuid
   processedAt    DateTime?     @map("processed_at")
   createdAt      DateTime      @default(now()) @map("created_at")
   company        Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   worker         User          @relation(fields: [workerId], references: [id])
+  project        Project?        @relation(fields: [projectId], references: [id])
 
   @@map("payrolls")
 }
@@ -635,7 +640,7 @@ model MessageThread {
   participants ThreadParticipant[]
 
   @@map("message_threads")
-} 
+}
 
 model ThreadParticipant {
   id       String        @id @default(uuid()) @db.Uuid

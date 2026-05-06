@@ -296,4 +296,41 @@ resolveViolation(
   ) {
     return this.projectService.deleteGeofence(id, geoId, userId, userRole);
   }
+
+
+  /** GET /admin/projects/:id/geofences/location-logs */
+@Get(':id/geofences/location-logs')
+getLocationLogs(
+  @Param('id') id: string,
+  @CurrentUser('id') userId: string,
+  @CurrentUser('role') userRole: string,
+  @Query('page') page?: string,
+  @Query('limit') limit?: string,
+) {
+  return this.projectService.getLocationLogs(
+    id,
+    userId,
+    userRole,
+    page ? parseInt(page) : 1,
+    limit ? parseInt(limit) : 20,
+  );
+}
+
+/** GET /admin/projects/:id/geofences/violations */
+@Get(':id/geofences/violations')
+getViolations(
+  @Param('id') id: string,
+  @CurrentUser('id') userId: string,
+  @CurrentUser('role') userRole: string,
+  @Query('page') page?: string,
+  @Query('limit') limit?: string,
+) {
+  return this.projectService.getViolations(
+    id,
+    userId,
+    userRole,
+    page ? parseInt(page) : 1,
+    limit ? parseInt(limit) : 20,
+  );
+}
 }

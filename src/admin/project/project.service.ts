@@ -582,9 +582,21 @@ export class ProjectService {
     page = 1,
     limit = 10,
     search?: string,
+    userRole?: string,
   ) {
+    // For admin/super_admin: show all accepted invitations from any admin/super_admin
+    // For others: show only their own invitations
+    const whereInvitation: any = {
+      status: 'accepted',
+      receiverId: { not: null },
+    };
+
+    if (userRole !== UserRole.admin && userRole !== UserRole.super_admin) {
+      whereInvitation.senderId = adminId;
+    }
+
     const acceptedInvitations = await this.prisma.invitation.findMany({
-      where: { senderId: adminId, status: 'accepted', receiverId: { not: null } },
+      where: whereInvitation,
       select: { receiverId: true },
     });
 
@@ -672,6 +684,19 @@ export class ProjectService {
       },
     });
 
+    // If worker was added under a manager, ensure worker-manager mapping exists
+    if (role === 'worker' && managerId) {
+      const existingMap = await this.prisma.workerManagerMap.findFirst({
+        where: { workerId: userId, managerId },
+      });
+
+      if (!existingMap) {
+        await this.prisma.workerManagerMap.create({
+          data: { managerId, workerId: userId },
+        });
+      }
+    }
+
     return {
       message: `${role} added successfully`,
       member: { memberId: member.id, ...member.user },
@@ -756,4 +781,122 @@ export class ProjectService {
     await this.prisma.geofence.delete({ where: { id: geofenceId } });
     return { message: 'Geofence deleted successfully' };
   }
+
+
+  // ─── LOCATION LOGS ─────────────────────────────────────────────────────────
+async getLocationLogs(
+  projectId: string,
+  userId: string,
+  userRole: string,
+  page = 1,
+  limit = 20,
+) {
+  await this.verifyProjectAccess(projectId, userId, userRole);
+
+  const skip = (page - 1) * limit;
+
+  const [logs, total] = await Promise.all([
+    this.prisma.locationLog.findMany({
+      where: {
+        geofence: { projectId },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            avatarUrl: true,
+            role: true,
+          },
+        },
+        geofence: {
+          select: {
+            id: true,
+            zoneName: true,
+          },
+        },
+      },
+      orderBy: { loggedAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    this.prisma.locationLog.count({
+      where: {
+        geofence: { projectId },
+      },
+    }),
+  ]);
+
+  return {
+    data: logs.map((log) => ({
+      id: log.id,
+      worker: log.user,
+      lat: log.lat,
+      lng: log.lng,
+      eventType: log.eventType,   // enter / exit / update
+      zoneName: log.geofence?.zoneName ?? null,
+      loggedAt: log.loggedAt,
+    })),
+    meta: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    },
+  };
+}
+
+// ─── VIOLATIONS ────────────────────────────────────────────────────────────
+async getViolations(
+  projectId: string,
+  userId: string,
+  userRole: string,
+  page = 1,
+  limit = 20,
+) {
+  await this.verifyProjectAccess(projectId, userId, userRole);
+
+  const skip = (page - 1) * limit;
+
+  const [violations, total] = await Promise.all([
+    this.prisma.geofenceViolation.findMany({
+      where: {
+        geofence: { projectId },
+      },
+      include: {
+        geofence: {
+          select: {
+            id: true,
+            zoneName: true,
+          },
+        },
+      },
+      orderBy: { occurredAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    this.prisma.geofenceViolation.count({
+      where: {
+        geofence: { projectId },
+      },
+    }),
+  ]);
+
+  return {
+    data: violations.map((v) => ({
+      id: v.id,
+      geofenceName: v.geofence.zoneName,
+      distanceM: v.distanceM,
+      description: v.description,
+      isResolved: v.isResolved,
+      occurredAt: v.occurredAt,
+    })),
+    meta: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    },
+  };
+}
 }

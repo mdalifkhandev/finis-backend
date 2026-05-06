@@ -29,7 +29,7 @@ export class AuthService {
     private jwtService: JwtService,
     private config: ConfigService,
     private mailService: MailService,
-  ) {}
+  ) { }
 
   // ── LOGIN ──────────────────────────────────
   async login(dto: LoginDto) {
@@ -188,6 +188,22 @@ export class AuthService {
       },
     });
 
+    if (invitation.role === UserRole.worker) {
+      const sender = await this.prisma.user.findUnique({
+        where: { id: invitation.senderId },
+        select: { role: true },
+      });
+
+      if (sender?.role === UserRole.manager) {
+        await this.prisma.workerManagerMap.create({
+          data: {
+            managerId: invitation.senderId,
+            workerId: user.id,
+          },
+        });
+      }
+    }
+
     await this.prisma.invitation.update({
       where: { id: invitation.id },
       data: { status: 'accepted', receiverId: user.id },
@@ -209,51 +225,51 @@ export class AuthService {
 
 
 
-// ── FORGOT PASSWORD ───────────────────────
-async forgotPassword(dto: ForgotPasswordDto) {
-  const user = await this.prisma.user.findFirst({
-    where: { email: dto.email },
-  });
+  // ── FORGOT PASSWORD ───────────────────────
+  async forgotPassword(dto: ForgotPasswordDto) {
+    const user = await this.prisma.user.findFirst({
+      where: { email: dto.email },
+    });
 
-  if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException('User not found');
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const forgotToken = uuidv4(); // ← token generate
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const forgotToken = uuidv4(); // ← token generate
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-  // key = forgotToken, value = { email, otp, expiresAt }
-  otpStore.set(forgotToken, { email: dto.email, otp, expiresAt });
+    // key = forgotToken, value = { email, otp, expiresAt }
+    otpStore.set(forgotToken, { email: dto.email, otp, expiresAt });
 
-  await this.mailService.sendOtpEmail(dto.email, otp);
+    await this.mailService.sendOtpEmail(dto.email, otp);
 
-  return {
-    message: 'OTP sent to email',
-    forgotToken,
-    ...(this.config.get('NODE_ENV') !== 'production' && { otp }),
-  };
-}
-
-// ── VERIFY OTP ────────────────────────────
-async verifyOtp(dto: VerifyOtpDto) {
-  const stored = otpStore.get(dto.forgotToken);
-
-  if (!stored) throw new BadRequestException('Invalid or expired token');
-  if (new Date() > stored.expiresAt) {
-    otpStore.delete(dto.forgotToken);
-    throw new BadRequestException('OTP expired');
+    return {
+      message: 'OTP sent to email',
+      forgotToken,
+      ...(this.config.get('NODE_ENV') !== 'production' && { otp }),
+    };
   }
-  if (stored.otp !== dto.otp) throw new BadRequestException('Invalid OTP');
 
-  otpStore.delete(dto.forgotToken);
+  // ── VERIFY OTP ────────────────────────────
+  async verifyOtp(dto: VerifyOtpDto) {
+    const stored = otpStore.get(dto.forgotToken);
 
-  const resetToken = uuidv4();
-  resetTokenStore.set(resetToken, {
-    identifier: stored.email, 
-    expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-  });
+    if (!stored) throw new BadRequestException('Invalid or expired token');
+    if (new Date() > stored.expiresAt) {
+      otpStore.delete(dto.forgotToken);
+      throw new BadRequestException('OTP expired');
+    }
+    if (stored.otp !== dto.otp) throw new BadRequestException('Invalid OTP');
 
-  return { message: 'OTP verified', resetToken };
-}
+    otpStore.delete(dto.forgotToken);
+
+    const resetToken = uuidv4();
+    resetTokenStore.set(resetToken, {
+      identifier: stored.email,
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    });
+
+    return { message: 'OTP verified', resetToken };
+  }
   // ── RESET PASSWORD ────────────────────────
   async resetPassword(dto: ResetPasswordDto) {
     // FIX: validate required fields
@@ -290,11 +306,131 @@ async verifyOtp(dto: VerifyOtpDto) {
   }
 
   // ── GET INVITATIONS ───────────────────────
-  async getInvitations(senderId: string) {
-    return this.prisma.invitation.findMany({
-      where: { senderId },
+  async getInvitations(
+    senderId: string,
+    userRole: string,
+    filterRole?: string,
+    filterStatus?: string,
+    search?: string,
+  ) {
+    const validRoles = ['admin', 'manager', 'worker'];
+    const validStatuses = ['pending', 'accepted', 'expired', 'cancelled'];
+
+    const where: any = (userRole === UserRole.super_admin || userRole === UserRole.admin) ? {} : { senderId };
+
+    // Filter by role if provided
+    if (filterRole && validRoles.includes(filterRole)) {
+      where.role = filterRole;
+
+      // If search is provided with role filter, search within role
+      if (search) {
+        const searchLower = search.toLowerCase();
+        where.OR = [
+          { email: { contains: searchLower, mode: 'insensitive' } },
+          { phone: { contains: searchLower, mode: 'insensitive' } },
+        ];
+      }
+    }
+    // Filter by status if provided
+    else if (filterStatus && validStatuses.includes(filterStatus)) {
+      where.status = filterStatus;
+
+      // If search is provided with status filter, search within status
+      if (search) {
+        const searchLower = search.toLowerCase();
+        where.OR = [
+          { email: { contains: searchLower, mode: 'insensitive' } },
+          { phone: { contains: searchLower, mode: 'insensitive' } },
+        ];
+      }
+    }
+    // If no filters, search across all
+    else if (search) {
+      const searchLower = search.toLowerCase();
+      const matchingRoles = validRoles.filter(r => r.includes(searchLower));
+      const matchingStatuses = validStatuses.filter(s => s.includes(searchLower));
+
+      where.OR = [
+        ...(matchingRoles.length > 0 ? [{ role: { in: matchingRoles } }] : []),
+        ...(matchingStatuses.length > 0 ? [{ status: { in: matchingStatuses } }] : []),
+        { email: { contains: searchLower, mode: 'insensitive' } },
+        { phone: { contains: searchLower, mode: 'insensitive' } },
+      ];
+    }
+
+    if (filterRole === 'worker') {
+      const workerMembers = await this.prisma.projectMember.findMany({
+        where: {
+          role: 'worker',
+          managerId: { not: null },
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              role: true,
+              avatarUrl: true,
+              status: true,
+              phone: true,
+            },
+          },
+        },
+      });
+
+      // managerId গুলো collect করো
+      const managerIds = [...new Set(workerMembers.map((m) => m.managerId).filter(Boolean))] as string[];
+
+      // manager details এক সাথে আনো
+      const managers = await this.prisma.user.findMany({
+        where: { id: { in: managerIds } },
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          role: true,
+          avatarUrl: true,
+        },
+      });
+
+      const managerMap = Object.fromEntries(managers.map((m) => [m.id, m]));
+
+      const workers = workerMembers.map((member) => ({
+        id: member.user.id,
+        fullName: member.user.fullName,
+        email: member.user.email,
+        role: member.user.role,
+        avatarUrl: member.user.avatarUrl,
+        status: member.user.status,
+        phone: member.user.phone,
+        managerId: member.managerId,
+        manager: member.managerId ? managerMap[member.managerId] ?? null : null,
+      }));
+
+      return { workers };
+    }
+
+    const invitations = await this.prisma.invitation.findMany({
+      where,
+      include: {
+        sender: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            role: true,
+            avatarUrl: true,
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     });
+
+    return invitations.map((invitation) => ({
+      ...invitation,
+      manager: invitation.role === UserRole.worker ? invitation.sender : null,
+    }));
   }
 
   // ── RESEND INVITATION ─────────────────────

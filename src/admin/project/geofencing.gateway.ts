@@ -43,6 +43,34 @@ function parsePolygonCoords(raw: any): { lat: number; lng: number }[] {
   return [];
 }
 
+// ─── Haversine distance (meters) ─────────────────────────────────────────────
+function haversineDistance(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ─── Polygon center calculate ─────────────────────────────────────────────────
+function polygonCenter(coords: { lat: number; lng: number }[]): {
+  lat: number;
+  lng: number;
+} {
+  const lat = coords.reduce((s, c) => s + c.lat, 0) / coords.length;
+  const lng = coords.reduce((s, c) => s + c.lng, 0) / coords.length;
+  return { lat, lng };
+}
+
 @WebSocketGateway({
   cors: { origin: '*' },
   namespace: '/geofencing',
@@ -76,7 +104,6 @@ export class GeofencingGateway
       const payload = this.jwtService.verify(token);
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
-        // ✅ avatarUrl যোগ করা হয়েছে
         select: {
           id: true,
           fullName: true,
@@ -119,31 +146,51 @@ export class GeofencingGateway
     }
   }
 
-  // ─── JOIN PROJECT ROOM ────────────────────────────────────────────────────
-  @SubscribeMessage('join_project')
-  async handleJoinProject(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { projectId: string },
-  ) {
-    const user = client.data.user;
-    if (!user) return;
+  // ─── JOIN PROJECT ROOM ─────────────────────────────────────────────────────
+@SubscribeMessage('join_project')
+async handleJoinProject(
+  @ConnectedSocket() client: Socket,
+  @MessageBody() data: { projectId: string },
+) {
+  const user = client.data.user;
+  if (!user) return;
 
-    const project = await this.prisma.project.findFirst({
-      where: {
-        id: data.projectId,
-        company: { ownerId: user.id },
-      },
+  // super_admin সব project দেখতে পারবে
+  if (user.role === 'super_admin') {
+    const project = await this.prisma.project.findUnique({
+      where: { id: data.projectId },
     });
 
     if (!project) {
-      client.emit('error', { message: 'Project not found or no access' });
+      client.emit('error', { message: 'Project not found' });
       return;
     }
 
     client.join(`project_${data.projectId}`);
     client.emit('joined_project', { projectId: data.projectId });
-    console.log(`👁️ ${user.fullName} watching project: ${data.projectId}`);
+    return;
   }
+
+  // admin/manager — company owner অথবা team member হলে access
+  const project = await this.prisma.project.findFirst({
+    where: {
+      id: data.projectId,
+      OR: [
+        { company: { ownerId: user.id } },
+        { teamMembers: { some: { userId: user.id } } },
+      ],
+    },
+  });
+
+  if (!project) {
+    client.emit('error', { message: 'Project not found or no access' });
+    return;
+  }
+
+  client.join(`project_${data.projectId}`);
+  client.emit('joined_project', { projectId: data.projectId });
+  console.log(`👁️ ${user.fullName} watching project: ${data.projectId}`);
+}
 
   // ─── LEAVE PROJECT ROOM ───────────────────────────────────────────────────
   @SubscribeMessage('leave_project')
@@ -173,7 +220,6 @@ export class GeofencingGateway
     let isInsideAny = false;
     let nearestGeofence: any = null;
 
-    // ✅ Loop যোগ করা হয়েছে — polygon check করে inside/outside বের করে
     for (const geo of geofences) {
       const polygonCoords = parsePolygonCoords(geo.polygonCoords);
       const inside =
@@ -194,10 +240,9 @@ export class GeofencingGateway
             eventType: 'update',
           },
         });
-        break; // একটা zone-এ ঢুকলেই যথেষ্ট
+        break;
       }
 
-      // outside হলে nearest track করো
       if (!nearestGeofence) {
         nearestGeofence = geo;
       }
@@ -216,14 +261,22 @@ export class GeofencingGateway
       });
     }
 
-    // ✅ Violation — radiusMeters বাদ, polygon-based description
+    // ─── Violation — actual distance calculate করে save ───────────────────
     if (!isInsideAny && nearestGeofence) {
+      const coords = parsePolygonCoords(nearestGeofence.polygonCoords);
+      const center =
+        coords.length > 0 ? polygonCenter(coords) : { lat, lng };
+
+      const distanceM = Math.round(
+        haversineDistance(lat, lng, center.lat, center.lng),
+      );
+
       const violation = await this.prisma.geofenceViolation.create({
         data: {
           geofenceId: nearestGeofence.id,
           userId: user.id,
-          distanceM: 0,
-          description: `Worker is outside the zone: ${nearestGeofence.zoneName}`,
+          distanceM,
+          description: `Worker is ${distanceM}m outside the zone: ${nearestGeofence.zoneName}`,
           isResolved: false,
         },
       });
@@ -233,6 +286,7 @@ export class GeofencingGateway
           id: violation.id,
           worker: { id: user.id, fullName: user.fullName },
           geofenceName: nearestGeofence.zoneName,
+          distanceM,
           occurredAt: violation.occurredAt,
         },
       });
@@ -319,7 +373,7 @@ export class GeofencingGateway
       worker: {
         id: user.id,
         fullName: user.fullName,
-        avatarUrl: user.avatarUrl, // ✅ এখন কাজ করবে
+        avatarUrl: user.avatarUrl,
       },
       zoneName: checkedInZone?.zoneName ?? 'Unknown Zone',
       isInsideZone: isInsideAny,
@@ -451,7 +505,7 @@ export class GeofencingGateway
       },
     });
 
-    const geofenceViolations = await this.prisma.geofenceViolation.count({
+    const outsideZoneCount = await this.prisma.geofenceViolation.count({
       where: {
         geofence: { projectId: data.projectId },
         isResolved: false,
@@ -460,7 +514,7 @@ export class GeofencingGateway
 
     client.emit('live_workers', {
       workersOnSite: attendances.length,
-      outsideZone: geofenceViolations,
+      outsideZone: outsideZoneCount,
       workers: attendances.map((a) => ({
         id: a.user.id,
         fullName: a.user.fullName,
@@ -469,4 +523,58 @@ export class GeofencingGateway
       })),
     });
   }
+
+  private async verifyProjectAccess(
+    projectId: string,
+    userId: string,
+    userRole: string,
+  ) {
+    if (userRole === 'super_admin') {
+      return;
+    }
+
+    const project = await this.prisma.project.findFirst({
+      where: {
+        id: projectId,
+        OR: [
+          { company: { ownerId: userId } },
+          { teamMembers: { some: { userId } } },
+        ],
+      },
+      select: { id: true },
+    });
+
+    if (!project) {
+      throw new Error('Project not found or no access');
+    }
+  }
+
+  async getGeofences(projectId: string, userId: string, userRole: string) {
+  await this.verifyProjectAccess(projectId, userId, userRole);
+
+  const geofences = await this.prisma.geofence.findMany({
+    where: { projectId },
+  });
+
+  return geofences.map((geo) => {
+    const coords = geo.polygonCoords
+      ? Array.isArray(geo.polygonCoords)
+        ? (geo.polygonCoords as { lat: number; lng: number }[])
+        : JSON.parse(geo.polygonCoords as string)
+      : [];
+
+    const center =
+      coords.length > 0
+        ? {
+            lat: coords.reduce((s: number, c: any) => s + c.lat, 0) / coords.length,
+            lng: coords.reduce((s: number, c: any) => s + c.lng, 0) / coords.length,
+          }
+        : null;
+
+    return {
+      ...geo,
+      center,   // ← "43.6332° N, -79.4186° W" এর জন্য
+    };
+  });
+}
 }

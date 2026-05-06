@@ -21,6 +21,10 @@ import { TaskService } from './task/task.service';
 
 import { InventoryController } from './inventory/inventory.controller';
 import { InventoryService } from './inventory/inventory.service';
+import { PayrollController } from './payroll/payroll.controller';
+import { PayrollService } from './payroll/payroll.service';
+import { StripeService } from './payroll/stripe.service';
+import { PublicPayrollController } from './payroll/public.payroll.controller';
 
 @Module({
   imports: [PrismaModule],
@@ -32,6 +36,8 @@ import { InventoryService } from './inventory/inventory.service';
     ProfileController,
     TaskController,
     InventoryController,
+    PayrollController,
+    PublicPayrollController,
   ],
   providers: [
     DashboardService,
@@ -41,7 +47,9 @@ import { InventoryService } from './inventory/inventory.service';
     GeofencingGateway,
     TaskService,
     InventoryService,
+    PayrollService,
+    StripeService,
   ],
-  exports: [CompanyService, ProjectService, InventoryService],
+  exports: [CompanyService, ProjectService, InventoryService, PayrollService, StripeService],
 })
 export class AdminModule {}
