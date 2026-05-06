@@ -25,7 +25,7 @@ import {
 
 @Controller('admin/tasks')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
+@Roles(UserRole.admin, UserRole.manager)
 export class TaskController {
   constructor(private taskService: TaskService) {}
 

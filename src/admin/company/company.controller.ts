@@ -42,7 +42,7 @@ const docStorage = diskStorage({
 
 @Controller('admin/companies')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.admin, UserRole.super_admin,)
+@Roles(UserRole.admin,)
 export class CompanyController {
   constructor(private companyService: CompanyService) { }
 
@@ -138,11 +138,10 @@ export class CompanyController {
   @UseInterceptors(FileInterceptor('file', { storage: docStorage }))
   uploadDocument(
     @Param('id') companyId: string,
-    @Query('projectId') projectId: string,
     @CurrentUser('id') adminId: string,
     @UploadedFile() file: MulterFile,
   ) {
-    return this.companyService.uploadDocument(companyId, projectId, adminId, file);
+    return this.companyService.uploadDocument(companyId, adminId, file);
   }
 
   /** DELETE /admin/companies/:id/documents/:docId */

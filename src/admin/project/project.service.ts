@@ -21,6 +21,22 @@ export class ProjectService {
   constructor(private prisma: PrismaService) { }
 
   // ─── ACCESS VERIFY ─────────────────────────────────────────────────────────
+  private isSuperAdmin(userRole?: string) {
+    return userRole === UserRole.super_admin;
+  }
+
+  private async verifyCompanyAccess(companyId: string, userId: string, userRole?: string) {
+    const company = await this.prisma.company.findFirst({
+      where: this.isSuperAdmin(userRole) ? { id: companyId } : { id: companyId, ownerId: userId },
+    });
+
+    if (!company) {
+      throw new ForbiddenException('Company not found or not yours');
+    }
+
+    return company;
+  }
+
   private async verifyProjectAccess(projectId: string, userId: string, userRole?: string) {
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
@@ -28,20 +44,24 @@ export class ProjectService {
     });
     if (!project) throw new NotFoundException('Project not found');
 
+    if (this.isSuperAdmin(userRole)) {
+      return project;
+    }
+
     if (userRole === UserRole.manager) {
       const member = await this.prisma.projectMember.findFirst({
         where: { projectId, userId, role: 'manager' },
       });
       if (!member) throw new ForbiddenException('You are not assigned to this project');
     } else {
-      if (project.company.ownerId !== userId)
+      if (project.managerId !== userId)
         throw new ForbiddenException('You do not have access to this project');
     }
     return project;
   }
 
   // ─── GET PROJECTS LIST ─────────────────────────────────────────────────────
-  async getMyProjects(userId: string, userRole: string, status?: string) {
+  async getMyProjects(userId: string, userRole: string, status?: string, search?: string) {
     const projectSelect = {
       id: true,
       name: true,
@@ -66,27 +86,52 @@ export class ProjectService {
       },
     };
 
-    if (userRole === UserRole.manager) {
+    if (this.isSuperAdmin(userRole)) {
       return this.prisma.project.findMany({
         where: {
-          teamMembers: { some: { userId, role: 'manager' } },
           ...(status && { status: status as any }),
+          ...(search && {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' as const } },
+              { description: { contains: search, mode: 'insensitive' as const } },
+              { location: { contains: search, mode: 'insensitive' as const } },
+            ],
+          }),
         },
         orderBy: { createdAt: 'desc' },
         select: projectSelect,
       });
     }
 
-    const myCompanies = await this.prisma.company.findMany({
-      where: { ownerId: userId, isActive: true },
-      select: { id: true },
-    });
-    const companyIds = myCompanies.map((c) => c.id);
+    if (userRole === UserRole.manager) {
+      return this.prisma.project.findMany({
+        where: {
+          teamMembers: { some: { userId, role: 'manager' } },
+          ...(status && { status: status as any }),
+          ...(search && {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' as const } },
+              { description: { contains: search, mode: 'insensitive' as const } },
+              { location: { contains: search, mode: 'insensitive' as const } },
+            ],
+          }),
+        },
+        orderBy: { createdAt: 'desc' },
+        select: projectSelect,
+      });
+    }
 
     return this.prisma.project.findMany({
       where: {
-        companyId: { in: companyIds },
+        managerId: userId,
         ...(status && { status: status as any }),
+        ...(search && {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' as const } },
+            { description: { contains: search, mode: 'insensitive' as const } },
+            { location: { contains: search, mode: 'insensitive' as const } },
+          ],
+        }),
       },
       orderBy: { createdAt: 'desc' },
       select: projectSelect,
@@ -94,11 +139,8 @@ export class ProjectService {
   }
 
   // ─── CREATE PROJECT ────────────────────────────────────────────────────────
-  async createProject(dto: CreateProjectDto, adminId: string) {
-    const company = await this.prisma.company.findFirst({
-      where: { id: dto.companyId, ownerId: adminId },
-    });
-    if (!company) throw new ForbiddenException('Company not found or not yours');
+  async createProject(dto: CreateProjectDto, adminId: string, userRole?: string) {
+    await this.verifyCompanyAccess(dto.companyId, adminId, userRole);
 
     const project = await this.prisma.project.create({
       data: {
@@ -192,7 +234,7 @@ export class ProjectService {
           },
         },
         expenses: { select: { amount: true, status: true } },
-        _count: { select: { tasks: true, documents: true, teamMembers: true, floors: true } },
+        _count: { select: { tasks: true, teamMembers: true, floors: true } },
       },
     });
 
@@ -247,10 +289,7 @@ export class ProjectService {
     await this.verifyProjectAccess(projectId, adminId, userRole);
 
     if (dto.companyId) {
-      const company = await this.prisma.company.findFirst({
-        where: { id: dto.companyId, ownerId: adminId },
-      });
-      if (!company) throw new ForbiddenException('Company not found or not yours');
+      await this.verifyCompanyAccess(dto.companyId, adminId, userRole);
     }
 
     // Fetch the existing project to access its current values
@@ -287,8 +326,8 @@ export class ProjectService {
   }
 
   // ─── DELETE PROJECT ────────────────────────────────────────────────────────
-  async deleteProject(projectId: string, adminId: string) {
-    await this.verifyProjectAccess(projectId, adminId);
+  async deleteProject(projectId: string, adminId: string, userRole?: string) {
+    await this.verifyProjectAccess(projectId, adminId, userRole);
     await this.prisma.project.delete({ where: { id: projectId } });
     return { message: 'Project deleted successfully' };
   }
@@ -693,7 +732,16 @@ export class ProjectService {
     });
   }
 
-  async resolveViolation(violationId: string, userId: string) {
+  async resolveViolation(violationId: string, userId: string, userRole?: string) {
+    const violation = await this.prisma.geofenceViolation.findUnique({
+      where: { id: violationId },
+      include: { geofence: { select: { projectId: true } } },
+    });
+
+    if (!violation) throw new NotFoundException('Violation not found');
+
+    await this.verifyProjectAccess(violation.geofence.projectId, userId, userRole);
+
     await this.prisma.geofenceViolation.update({
       where: { id: violationId },
       data: { isResolved: true },

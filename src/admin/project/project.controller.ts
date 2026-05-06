@@ -41,8 +41,9 @@ export class ProjectController {
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
     @Query('status') status?: string,
+    @Query('search') search?: string,
   ) {
-    return this.projectService.getMyProjects(userId, userRole, status);
+    return this.projectService.getMyProjects(userId, userRole, status, search);
   }
 
   /** POST /admin/projects */
@@ -51,8 +52,9 @@ export class ProjectController {
   createProject(
     @Body() dto: CreateProjectDto,
     @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
   ) {
-    return this.projectService.createProject(dto, adminId);
+    return this.projectService.createProject(dto, adminId, userRole);
   }
 
   // ─── PROJECT PROFILE (screen 1: budget, description, client info) ──────────
@@ -88,8 +90,9 @@ export class ProjectController {
   deleteProject(
     @Param('id') id: string,
     @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
   ) {
-    return this.projectService.deleteProject(id, adminId);
+    return this.projectService.deleteProject(id, adminId, userRole);
   }
 
   // ─── FLOOR PLAN (screen: Floor & Room Setup) ───────────────────────────────
@@ -210,8 +213,9 @@ export class ProjectController {
     @Param('id') id: string,
     @Body() dto: AddProjectMemberDto,
     @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
   ) {
-    return this.projectService.addMemberByRole(id, dto.userId, adminId, 'manager');
+    return this.projectService.addMemberByRole(id, dto.userId, adminId, 'manager', undefined, userRole);
   }
 
 /** POST /admin/projects/:id/team/workers */
@@ -277,8 +281,9 @@ addWorker(
 resolveViolation(
   @Param('violationId') violationId: string,
   @CurrentUser('id') userId: string,
+  @CurrentUser('role') userRole: string,
 ) {
-  return this.projectService.resolveViolation(violationId, userId);
+  return this.projectService.resolveViolation(violationId, userId, userRole);
 }
 
   /** DELETE /admin/projects/:id/geofences/:geoId */

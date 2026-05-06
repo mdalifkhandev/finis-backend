@@ -251,15 +251,8 @@ export class CompanyService {
   async getDocuments(companyId: string, adminId: string) {
     await this.verifyOwner(companyId, adminId);
 
-    // Get all projects of this company, then their documents
-    const projects = await this.prisma.project.findMany({
-      where: { companyId },
-      select: { id: true },
-    });
-    const projectIds = projects.map((p) => p.id);
-
     return this.prisma.document.findMany({
-      where: { projectId: { in: projectIds } },
+      where: { companyId },
       orderBy: { uploadedAt: 'desc' },
       select: {
         id: true,
@@ -268,7 +261,7 @@ export class CompanyService {
         fileType: true,
         fileSizeMb: true,
         uploadedAt: true,
-        project: { select: { id: true, name: true } },
+        company: { select: { id: true, name: true } },
         uploadedByUser: { select: { id: true, fullName: true } },
       },
     });
@@ -276,23 +269,16 @@ export class CompanyService {
 
   async uploadDocument(
     companyId: string,
-    projectId: string,
     adminId: string,
     file: MulterFile,
   ) {
     await this.verifyOwner(companyId, adminId);
 
-    // Verify project belongs to this company
-    const project = await this.prisma.project.findFirst({
-      where: { id: projectId, companyId },
-    });
-    if (!project) throw new NotFoundException('Project not found in this company');
-
     const fileSizeMb = file.size / (1024 * 1024);
 
     return this.prisma.document.create({
       data: {
-        projectId,
+        companyId,
         uploadedBy: adminId,
         fileName: file.originalname,
         fileUrl: `/uploads/documents/${file.filename}`,
@@ -307,10 +293,10 @@ export class CompanyService {
 
     const doc = await this.prisma.document.findUnique({
       where: { id: documentId },
-      include: { project: true },
+      select: { companyId: true },
     });
     if (!doc) throw new NotFoundException('Document not found');
-    if (doc.project.companyId !== companyId)
+    if (doc.companyId !== companyId)
       throw new ForbiddenException('Document does not belong to this company');
 
     await this.prisma.document.delete({ where: { id: documentId } });
