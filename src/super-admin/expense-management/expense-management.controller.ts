@@ -19,7 +19,7 @@ import {
   UpdateExpenseProjectDto,
 } from './dto/expense-management.dto';
 
-@Controller('admin/expense-management')
+@Controller('super_admin/expense-management')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.super_admin, UserRole.admin)
 export class ExpenseManagementController {

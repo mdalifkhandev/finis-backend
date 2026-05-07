@@ -11,6 +11,8 @@ import { TeamManagementService } from './team-management/team-management.service
 import { PayrollManagementController } from './payroll-management/payroll-management.controller';
 import { PayrollManagementService } from './payroll-management/payroll-management.service';
 import { StripeService } from '../admin/payroll/stripe.service';
+import { ExpenseManagementController } from './expense-management/expense-management.controller';
+import { ExpenseManagementService } from './expense-management/expense-management.service';
 
 @Module({
   imports: [PrismaModule],
@@ -20,6 +22,7 @@ import { StripeService } from '../admin/payroll/stripe.service';
     SuperAdminProjectController,
     TeamManagementController,
     PayrollManagementController,
+    ExpenseManagementController,
   ],
   providers: [
     SuperAdminDashboardService,
@@ -27,6 +30,7 @@ import { StripeService } from '../admin/payroll/stripe.service';
     SuperAdminProjectService,
     TeamManagementService,
     PayrollManagementService,
+    ExpenseManagementService,
     StripeService,
   ],
   exports: [],
