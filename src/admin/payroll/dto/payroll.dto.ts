@@ -47,13 +47,15 @@ export class CreatePayrollDto {
   @IsDateString()
   payPeriodEnd!: string;
 
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  regularHours!: number;
+  regularHours?: number;
 
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  overtimeHours!: number;
+  overtimeHours?: number;
 
   @IsNumber()
   @Min(0)

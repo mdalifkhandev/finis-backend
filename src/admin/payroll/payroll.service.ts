@@ -5,7 +5,6 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { StripeService } from './stripe.service';
 import { UserRole } from '../../generated/prisma/client';
 import {
   CreatePayrollDto,
@@ -14,81 +13,32 @@ import {
 
 @Injectable()
 export class PayrollService {
-  constructor(
-    private prisma: PrismaService,
-    private stripeService: StripeService,
-  ) { }
+  constructor(private prisma: PrismaService) { }
 
-  // ─── Worker Onboarding ────────────────────────────────────────────────────
-  async startWorkerOnboarding(workerId: string) {
-    const worker = await this.prisma.user.findUnique({
-      where: { id: workerId },
-      select: {
-        id: true,
-        email: true,
-        stripeAccountId: true,
+  private async getWorkedHoursForPeriod(
+    workerId: string,
+    payPeriodStart: string,
+    payPeriodEnd: string,
+  ) {
+    const startDate = new Date(payPeriodStart);
+    const endDate = new Date(payPeriodEnd);
+
+    const attendances = await this.prisma.attendance.findMany({
+      where: {
+        userId: workerId,
+        date: {
+          gte: startDate,
+          lte: endDate,
+        },
       },
-    });
-    if (!worker) throw new NotFoundException('Worker not found');
-
-    let stripeAccountId: string | null = worker.stripeAccountId;
-
-    if (!stripeAccountId) {
-      const account = await this.stripeService.createConnectedAccount(
-        worker.email,
-      );
-      stripeAccountId = account.id;
-
-      await this.prisma.user.update({
-        where: { id: workerId },
-        data: { stripeAccountId } as any,
-      });
-    }
-
-    if (!stripeAccountId) {
-      throw new Error('Stripe account ID is missing');
-    }
-
-    const link = await this.stripeService.createOnboardingLink(
-      stripeAccountId,
-      workerId,
-    );
-
-    return {
-      onboardingUrl: link.url,
-      expiresAt: new Date(link.expires_at * 1000),
-    };
-  }
-
-  async getOnboardingStatus(workerId: string) {
-    const worker = await this.prisma.user.findUnique({
-      where: { id: workerId },
       select: {
-        id: true,
-        stripeAccountId: true,
+        totalHours: true,
       },
     });
 
-    if (!worker?.stripeAccountId) {
-      return { status: 'not_started', isComplete: false };
-    }
-
-    const status = await this.stripeService.getAccountStatus(
-      worker.stripeAccountId,
-    );
-
-    if (status.isComplete) {
-      await this.prisma.user.update({
-        where: { id: workerId },
-        data: { stripeAccountStatus: 'active' } as any,
-      });
-    }
-
-    return {
-      status: status.isComplete ? 'active' : 'pending',
-      isComplete: status.isComplete,
-      payoutsEnabled: status.payoutsEnabled,
-    };
+    return Math.round(
+      attendances.reduce((sum, attendance) => sum + (attendance.totalHours ?? 0), 0) * 100,
+    ) / 100;
   }
 
   // ─── Create Payroll ───────────────────────────────────────────────────────
@@ -134,9 +84,18 @@ export class PayrollService {
     const wsibRate = config?.wsibRate ?? 0.0142;
     const vacationPayRate = config?.vacationPayRate ?? 0.04;
 
+    const workedHours = await this.getWorkedHoursForPeriod(
+      dto.workerId,
+      dto.payPeriodStart,
+      dto.payPeriodEnd,
+    );
+
+    const regularHours = workedHours;
+    const overtimeHours = 0;
+
     // Gross Pay calculate
-    const regularPay = dto.regularHours * dto.ratePerHour;
-    const overtimePay = dto.overtimeHours * dto.ratePerHour * 1.5;
+    const regularPay = regularHours * dto.ratePerHour;
+    const overtimePay = overtimeHours * dto.ratePerHour * 1.5;
     const grossPay = Math.round((regularPay + overtimePay) * 100) / 100;
 
     // Employee Deductions
@@ -161,8 +120,8 @@ export class PayrollService {
         ...(dto.projectId && { projectId: dto.projectId }),
         payPeriodStart: new Date(dto.payPeriodStart),
         payPeriodEnd: new Date(dto.payPeriodEnd),
-        regularHours: dto.regularHours,
-        overtimeHours: dto.overtimeHours,
+        regularHours,
+        overtimeHours,
         ratePerHour: dto.ratePerHour,
         grossPay,
         deductions,
@@ -398,7 +357,6 @@ export class PayrollService {
           select: {
             id: true,
             fullName: true,
-            stripeAccountId: true,
           },
         },
         project: {
@@ -422,76 +380,38 @@ export class PayrollService {
       workerName: string;
       projectId?: string;
       projectName?: string;
-      status: 'success' | 'failed';
-      amountPaid?: number;
-      transferId?: string;
-      reason?: string;
+      grossPay: number;
+      deductions: number;
+      netPay: number;
+      status: 'calculated';
     }> = [];
 
     for (const payroll of payrolls) {
-      const worker = payroll.worker;
-
-      if (!worker.stripeAccountId) {
-        results.push({
-          payrollId: payroll.id,
-          workerId: worker.id,
-          workerName: worker.fullName,
-          projectId: payroll.projectId ?? undefined,
-          projectName: payroll.project?.name,
-          status: 'failed',
-          reason: 'Worker has not completed Stripe onboarding',
-        });
-        continue;
-      }
-
-      try {
-        const netPay = payroll.netPay;
-        const amountInCents = Math.round(netPay * 100);
-
-        const transfer = await this.stripeService.transferToWorker(
-          amountInCents,
-          worker.stripeAccountId,
-          `Payroll for ${worker.fullName}${payroll.project ? ` — ${payroll.project.name}` : ''} — ${startDate.toDateString()}`,
-        );
-
-        await this.prisma.payroll.update({
-          where: { id: payroll.id },
-          data: {
-            status: 'paid',
-            processedBy: adminId,
-            processedAt: new Date(),
-          },
-        });
-
-        results.push({
-          payrollId: payroll.id,
-          workerId: worker.id,
-          workerName: worker.fullName,
-          projectId: payroll.projectId ?? undefined,
-          projectName: payroll.project?.name,
-          amountPaid: netPay,
-          transferId: transfer.id,
-          status: 'success',
-        });
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        results.push({
-          payrollId: payroll.id,
-          workerId: worker.id,
-          workerName: worker.fullName,
-          projectId: payroll.projectId ?? undefined,
-          projectName: payroll.project?.name,
-          status: 'failed',
-          reason,
-        });
-      }
+      results.push({
+        payrollId: payroll.id,
+        workerId: payroll.worker.id,
+        workerName: payroll.worker.fullName,
+        projectId: payroll.projectId ?? undefined,
+        projectName: payroll.project?.name,
+        grossPay: payroll.grossPay,
+        deductions: payroll.deductions,
+        netPay: payroll.netPay,
+        status: 'calculated',
+      });
     }
 
-    const success = results.filter((r) => r.status === 'success').length;
-    const failed = results.filter((r) => r.status === 'failed').length;
+    const totalGrossPay = results.reduce((sum, item) => sum + item.grossPay, 0);
+    const totalDeductions = results.reduce((sum, item) => sum + item.deductions, 0);
+    const totalNetPay = results.reduce((sum, item) => sum + item.netPay, 0);
 
     return {
-      message: `Payroll processed: ${success} success, ${failed} failed`,
+      message: `Payroll calculated for ${results.length} record(s)`,
+      summary: {
+        totalPayrolls: results.length,
+        totalGrossPay: Math.round(totalGrossPay * 100) / 100,
+        totalDeductions: Math.round(totalDeductions * 100) / 100,
+        totalNetPay: Math.round(totalNetPay * 100) / 100,
+      },
       results,
     };
   }

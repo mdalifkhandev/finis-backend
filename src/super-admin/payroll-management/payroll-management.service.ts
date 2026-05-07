@@ -3,7 +3,6 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { StripeService } from '../../admin/payroll/stripe.service';
 import { UserRole } from '../../generated/prisma/client';
 import {
     UpdatePayrollConfigDto,
@@ -27,7 +26,6 @@ const DEFAULT_CONFIG = {
 export class PayrollManagementService {
     constructor(
         private prisma: PrismaService,
-        private stripeService: StripeService,
     ) { }
 
     // ─── Config helper ────────────────────────────────────────────────────────
@@ -284,7 +282,6 @@ export class PayrollManagementService {
                     select: {
                         id: true,
                         fullName: true,
-                        stripeAccountId: true,
                     },
                 },
             },
@@ -294,61 +291,38 @@ export class PayrollManagementService {
             return { message: 'No approved payrolls found for current period', results: [] };
         }
 
-        const results: any[] = [];
+        const results: Array<{
+            payrollId: string;
+            workerName: string;
+            grossPay: number;
+            deductions: number;
+            netPay: number;
+            status: 'calculated';
+        }> = [];
 
         for (const payroll of payrolls) {
-            const worker = payroll.worker;
-
-            if (!worker.stripeAccountId) {
-                results.push({
-                    payrollId: payroll.id,
-                    workerName: worker.fullName,
-                    status: 'failed',
-                    reason: 'Worker has not completed Stripe onboarding',
-                });
-                continue;
-            }
-
-            try {
-                const amountInCents = Math.round(payroll.netPay * 100);
-
-                const transfer = await this.stripeService.transferToWorker(
-                    amountInCents,
-                    worker.stripeAccountId,
-                    `Payroll ${startDate.toDateString()} - ${endDate.toDateString()}`,
-                );
-
-                await this.prisma.payroll.update({
-                    where: { id: payroll.id },
-                    data: {
-                        status: 'paid',
-                        processedBy: userId,
-                        processedAt: new Date(),
-                    },
-                });
-
-                results.push({
-                    payrollId: payroll.id,
-                    workerName: worker.fullName,
-                    amountPaid: payroll.netPay,
-                    transferId: transfer.id,
-                    status: 'success',
-                });
-            } catch (err) {
-                results.push({
-                    payrollId: payroll.id,
-                    workerName: worker.fullName,
-                    status: 'failed',
-                    reason: err instanceof Error ? err.message : String(err),
-                });
-            }
+            results.push({
+                payrollId: payroll.id,
+                workerName: payroll.worker.fullName,
+                grossPay: payroll.grossPay,
+                deductions: payroll.deductions,
+                netPay: payroll.netPay,
+                status: 'calculated',
+            });
         }
 
-        const success = results.filter((r) => r.status === 'success').length;
-        const failed = results.filter((r) => r.status === 'failed').length;
+        const totalGrossPay = results.reduce((sum, item) => sum + item.grossPay, 0);
+        const totalDeductions = results.reduce((sum, item) => sum + item.deductions, 0);
+        const totalNetPay = results.reduce((sum, item) => sum + item.netPay, 0);
 
         return {
-            message: `Processed: ${success} success, ${failed} failed`,
+            message: `Calculated: ${results.length} payroll record(s)`,
+            summary: {
+                totalPayrolls: results.length,
+                totalGrossPay: Math.round(totalGrossPay * 100) / 100,
+                totalDeductions: Math.round(totalDeductions * 100) / 100,
+                totalNetPay: Math.round(totalNetPay * 100) / 100,
+            },
             results,
         };
     }

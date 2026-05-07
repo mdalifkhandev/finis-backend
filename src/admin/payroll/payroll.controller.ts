@@ -26,22 +26,6 @@ import {
 export class PayrollController {
   constructor(private payrollService: PayrollService) {}
 
-  // ─── Worker Onboarding ────────────────────────────────────────────────────
-
-  /** POST /admin/payroll/onboarding/start */
-  @Post('onboarding/start')
-  @Roles(UserRole.worker)
-  startOnboarding(@CurrentUser('id') workerId: string) {
-    return this.payrollService.startWorkerOnboarding(workerId);
-  }
-
-  /** GET /admin/payroll/onboarding/status */
-  @Get('onboarding/status')
-  @Roles(UserRole.worker)
-  getOnboardingStatus(@CurrentUser('id') workerId: string) {
-    return this.payrollService.getOnboardingStatus(workerId);
-  }
-
   // ─── Payroll CRUD ─────────────────────────────────────────────────────────
 
   /** POST /admin/payroll */

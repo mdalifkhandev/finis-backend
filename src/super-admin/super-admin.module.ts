@@ -10,7 +10,6 @@ import { TeamManagementController } from './team-management/team-management.cont
 import { TeamManagementService } from './team-management/team-management.service';
 import { PayrollManagementController } from './payroll-management/payroll-management.controller';
 import { PayrollManagementService } from './payroll-management/payroll-management.service';
-import { StripeService } from '../admin/payroll/stripe.service';
 import { ExpenseManagementController } from './expense-management/expense-management.controller';
 import { ExpenseManagementService } from './expense-management/expense-management.service';
 import { ReportsController } from './reports/reports.controller';
@@ -35,7 +34,6 @@ import { SubscriptionModule } from './subscription/subscription.module';
     TeamManagementService,
     PayrollManagementService,
     ExpenseManagementService,
-    StripeService,
     ReportsService,
   ],
   exports: [],

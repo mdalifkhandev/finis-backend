@@ -23,8 +23,6 @@ import { InventoryController } from './inventory/inventory.controller';
 import { InventoryService } from './inventory/inventory.service';
 import { PayrollController } from './payroll/payroll.controller';
 import { PayrollService } from './payroll/payroll.service';
-import { StripeService } from './payroll/stripe.service';
-import { PublicPayrollController } from './payroll/public.payroll.controller';
 
 @Module({
   imports: [PrismaModule],
@@ -37,7 +35,6 @@ import { PublicPayrollController } from './payroll/public.payroll.controller';
     TaskController,
     InventoryController,
     PayrollController,
-    PublicPayrollController,
   ],
   providers: [
     DashboardService,
@@ -48,8 +45,7 @@ import { PublicPayrollController } from './payroll/public.payroll.controller';
     TaskService,
     InventoryService,
     PayrollService,
-    StripeService,
   ],
-  exports: [CompanyService, ProjectService, InventoryService, PayrollService, StripeService],
+  exports: [CompanyService, ProjectService, InventoryService, PayrollService],
 })
 export class AdminModule {}
