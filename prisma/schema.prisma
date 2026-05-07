@@ -81,6 +81,7 @@ model User {
   messageSent             MessageParticipant?      @relation("MessageSender")
   notifications           Notification[]
   payrolls                Payroll[]
+  inventoryUsageLogs      InventoryUsageLog[]
   projectMemberships      ProjectMember[]
   taskReports             TaskReport[]
   assignedTasks           Task[]                   @relation("TaskAssignee")
@@ -547,6 +548,7 @@ model InventoryUsageLog {
   reason      String?
   loggedAt    DateTime      @default(now()) @map("logged_at")
   inventory   InventoryItem @relation(fields: [inventoryId], references: [id])
+  user        User          @relation(fields: [userId], references: [id])
 
   @@map("inventory_usage_logs")
 }

@@ -13,9 +13,12 @@ import { PayrollManagementService } from './payroll-management/payroll-managemen
 import { StripeService } from '../admin/payroll/stripe.service';
 import { ExpenseManagementController } from './expense-management/expense-management.controller';
 import { ExpenseManagementService } from './expense-management/expense-management.service';
+import { ReportsController } from './reports/reports.controller';
+import { ReportsService } from './reports/reports.service';
+import { SubscriptionModule } from './subscription/subscription.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, SubscriptionModule],
   controllers: [
     SuperAdminDashboardController,
     SuperAdminCompaniesController,
@@ -23,6 +26,7 @@ import { ExpenseManagementService } from './expense-management/expense-managemen
     TeamManagementController,
     PayrollManagementController,
     ExpenseManagementController,
+    ReportsController,
   ],
   providers: [
     SuperAdminDashboardService,
@@ -32,6 +36,7 @@ import { ExpenseManagementService } from './expense-management/expense-managemen
     PayrollManagementService,
     ExpenseManagementService,
     StripeService,
+    ReportsService,
   ],
   exports: [],
 })

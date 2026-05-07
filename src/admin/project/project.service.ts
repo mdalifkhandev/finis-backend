@@ -29,11 +29,7 @@ export class ProjectService {
     const company = await this.prisma.company.findFirst({
       where: this.isSuperAdmin(userRole) ? { id: companyId } : { id: companyId, ownerId: userId },
     });
-
-    if (!company) {
-      throw new ForbiddenException('Company not found or not yours');
-    }
-
+    if (!company) throw new ForbiddenException('Company not found or not yours');
     return company;
   }
 
@@ -44,9 +40,7 @@ export class ProjectService {
     });
     if (!project) throw new NotFoundException('Project not found');
 
-    if (this.isSuperAdmin(userRole)) {
-      return project;
-    }
+    if (this.isSuperAdmin(userRole)) return project;
 
     if (userRole === UserRole.manager) {
       const member = await this.prisma.projectMember.findFirst({
@@ -58,6 +52,65 @@ export class ProjectService {
         throw new ForbiddenException('You do not have access to this project');
     }
     return project;
+  }
+
+  // ─── PLAN LIMIT CHECKS ────────────────────────────────────────────────────
+
+  private async checkProjectLimit(adminId: string) {
+    const admin = await this.prisma.user.findUnique({
+      where: { id: adminId },
+      select: { tenantId: true },
+    });
+
+    if (!admin?.tenantId) return; // পুরনো account — limit নেই
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: admin.tenantId },
+      include: { plan: { select: { maxProjects: true } } },
+    });
+
+    if (!tenant) return;
+
+    if (tenant.status === 'suspended')
+      throw new ForbiddenException('Your account is suspended. Please contact support.');
+    if (tenant.status === 'cancelled')
+      throw new ForbiddenException('Your subscription has been cancelled.');
+
+    const max = tenant.plan.maxProjects;
+    if (max === null || max === undefined) return; // unlimited
+
+    // company → ownerId দিয়ে সব project count
+    const currentCount = await this.prisma.project.count({
+      where: { company: { ownerId: adminId } },
+    });
+
+    if (currentCount >= max) {
+      throw new ForbiddenException(
+        `Project limit reached (${currentCount}/${max}). Please upgrade your plan.`,
+      );
+    }
+  }
+
+  private async checkGeofencingAccess(adminId: string) {
+    const admin = await this.prisma.user.findUnique({
+      where: { id: adminId },
+      select: { tenantId: true },
+    });
+
+    if (!admin?.tenantId) return; // পুরনো account — limit নেই
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: admin.tenantId },
+      include: { plan: { select: { hasGeofencing: true } } },
+    });
+
+    if (!tenant) return;
+
+    if (!tenant.plan.hasGeofencing) {
+      throw new ForbiddenException(
+        'Geofencing is not available on your current plan. Please upgrade.',
+      );
+    }
   }
 
   // ─── GET PROJECTS LIST ─────────────────────────────────────────────────────
@@ -142,6 +195,11 @@ export class ProjectService {
   async createProject(dto: CreateProjectDto, adminId: string, userRole?: string) {
     await this.verifyCompanyAccess(dto.companyId, adminId, userRole);
 
+    // ✅ Project limit check — super_admin এর জন্য skip
+    if (!this.isSuperAdmin(userRole)) {
+      await this.checkProjectLimit(adminId);
+    }
+
     const project = await this.prisma.project.create({
       data: {
         companyId: dto.companyId,
@@ -210,7 +268,6 @@ export class ProjectService {
   }
 
   // ─── PROJECT PROFILE ───────────────────────────────────────────────────────
-  // Screen: Project Details — budget, spent, remaining, description, client info
   async getProjectProfile(projectId: string, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
 
@@ -219,13 +276,8 @@ export class ProjectService {
       include: {
         company: {
           select: {
-            id: true,
-            name: true,
-            logoUrl: true,
-            phone: true,
-            email: true,
-            website: true,
-            address: true,
+            id: true, name: true, logoUrl: true, phone: true, email: true,
+            website: true, address: true,
             contacts: {
               where: { isPrimary: true },
               select: { id: true, fullName: true, role: true, email: true, phone: true },
@@ -239,11 +291,6 @@ export class ProjectService {
     });
 
     if (!project) throw new NotFoundException('Project not found');
-
-    const totalBudget = project.budget ?? 0;
-    const spent = project.expenses
-      .filter((e) => e.status === 'approved')
-      .reduce((sum, e) => sum + e.amount, 0);
 
     const primaryContact = project.company.contacts?.[0] ?? null;
 
@@ -260,11 +307,9 @@ export class ProjectService {
       description: project.description,
       numFloors: project.numFloors,
       roomsPerFloor: project.roomsPerFloor,
-      // Budget section (screen: Total Budget / Spent / Remaining)
       budget: project.budget,
       spent: project.spent,
       remaining: project.remaining,
-      // Client Info section
       client: {
         companyId: project.company.id,
         companyName: project.company.name,
@@ -280,19 +325,13 @@ export class ProjectService {
   }
 
   // ─── UPDATE PROJECT ────────────────────────────────────────────────────────
-  async updateProject(
-    projectId: string,
-    dto: UpdateProjectDto,
-    adminId: string,
-    userRole: string,
-  ) {
+  async updateProject(projectId: string, dto: UpdateProjectDto, adminId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, adminId, userRole);
 
     if (dto.companyId) {
       await this.verifyCompanyAccess(dto.companyId, adminId, userRole);
     }
 
-    // Fetch the existing project to access its current values
     const existingProject = await this.prisma.project.findUnique({
       where: { id: projectId },
       select: { budget: true, spent: true },
@@ -319,9 +358,7 @@ export class ProjectService {
         ...(dto.description !== undefined && { description: dto.description }),
         remaining,
       },
-      include: {
-        company: { select: { id: true, name: true } },
-      },
+      include: { company: { select: { id: true, name: true } } },
     });
   }
 
@@ -333,7 +370,6 @@ export class ProjectService {
   }
 
   // ─── FLOOR PLAN ────────────────────────────────────────────────────────────
-  // Screen: Floor & Room Setup — floors with rooms, task counts, status, progress
   async getFloorPlan(projectId: string, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
 
@@ -345,9 +381,7 @@ export class ProjectService {
           orderBy: { name: 'asc' },
           include: {
             _count: { select: { tasks: true } },
-            tasks: {
-              select: { status: true },
-            },
+            tasks: { select: { status: true } },
           },
         },
         _count: { select: { tasks: true, rooms: true } },
@@ -386,8 +420,6 @@ export class ProjectService {
   }
 
   // ─── PROJECT ANALYSIS ──────────────────────────────────────────────────────
-  // Screen: Project Analysis — checklist of floors with task breakdown
-  // ─── PROJECT ANALYSIS ──────────────────────────────────────────────────────
   async getProjectAnalysis(projectId: string, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
 
@@ -398,9 +430,7 @@ export class ProjectService {
           orderBy: { floorNumber: 'asc' },
           include: {
             tasks: {
-              include: {
-                assignee: { select: { id: true, fullName: true, avatarUrl: true } },
-              },
+              include: { assignee: { select: { id: true, fullName: true, avatarUrl: true } } },
               orderBy: { createdAt: 'desc' },
             },
           },
@@ -410,17 +440,16 @@ export class ProjectService {
 
     if (!project) throw new NotFoundException('Project not found');
 
-    // Right screen: checklist — floor name header, tasks as checklist items
     const checklist = project.floors.map((floor) => ({
       floorId: floor.id,
-      floorName: floor.name,          // "Lobby", "Second Floor"
+      floorName: floor.name,
       floorStatus: floor.status,
       tasks: floor.tasks.map((task) => ({
         id: task.id,
-        title: task.title,            // "Redesign e-Commerce Dashboard"
+        title: task.title,
         isCompleted: task.status === 'completed',
-        unitCount: task.estimatedHours ?? 0,   // "2 Unites"
-        dueDate: task.dueDate,                 // "today"
+        unitCount: task.estimatedHours ?? 0,
+        dueDate: task.dueDate,
         assignee: task.assignee,
         status: task.status,
         priority: task.priority,
@@ -454,17 +483,10 @@ export class ProjectService {
     });
   }
 
-  async updateFloor(
-    projectId: string,
-    floorId: string,
-    dto: UpdateFloorDto,
-    userId: string,
-    userRole: string,
-  ) {
+  async updateFloor(projectId: string, floorId: string, dto: UpdateFloorDto, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
     const floor = await this.prisma.floor.findFirst({ where: { id: floorId, projectId } });
     if (!floor) throw new NotFoundException('Floor not found');
-
     return this.prisma.floor.update({
       where: { id: floorId },
       data: {
@@ -486,41 +508,19 @@ export class ProjectService {
   }
 
   // ─── ROOMS CRUD ────────────────────────────────────────────────────────────
-  async addRoom(
-    projectId: string,
-    floorId: string,
-    dto: AddRoomDto,
-    userId: string,
-    userRole: string,
-  ) {
+  async addRoom(projectId: string, floorId: string, dto: AddRoomDto, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
     const floor = await this.prisma.floor.findFirst({ where: { id: floorId, projectId } });
     if (!floor) throw new NotFoundException('Floor not found');
     return this.prisma.room.create({
-      data: {
-        floorId,
-        name: dto.name,
-        type: dto.type,
-        sizeSqft: dto.sizeSqft,
-        status: 'pending',
-        progress: 0,
-      },
+      data: { floorId, name: dto.name, type: dto.type, sizeSqft: dto.sizeSqft, status: 'pending', progress: 0 },
     });
   }
 
-  async updateRoom(
-    projectId: string,
-    roomId: string,
-    dto: UpdateRoomDto,
-    userId: string,
-    userRole: string,
-  ) {
+  async updateRoom(projectId: string, roomId: string, dto: UpdateRoomDto, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
-    const room = await this.prisma.room.findFirst({
-      where: { id: roomId, floor: { projectId } },
-    });
+    const room = await this.prisma.room.findFirst({ where: { id: roomId, floor: { projectId } } });
     if (!room) throw new NotFoundException('Room not found');
-
     return this.prisma.room.update({
       where: { id: roomId },
       data: {
@@ -535,9 +535,7 @@ export class ProjectService {
 
   async deleteRoom(projectId: string, roomId: string, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
-    const room = await this.prisma.room.findFirst({
-      where: { id: roomId, floor: { projectId } },
-    });
+    const room = await this.prisma.room.findFirst({ where: { id: roomId, floor: { projectId } } });
     if (!room) throw new NotFoundException('Room not found');
     await this.prisma.room.delete({ where: { id: roomId } });
     return { message: 'Room deleted successfully' };
@@ -546,67 +544,27 @@ export class ProjectService {
   // ─── TEAM ──────────────────────────────────────────────────────────────────
   async getTeamMembers(projectId: string, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
-
     const members = await this.prisma.projectMember.findMany({
       where: { projectId },
       include: {
         user: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            phone: true,
-            avatarUrl: true,
-            role: true,
-            status: true,
-            department: true,
-          },
+          select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true, status: true, department: true },
         },
       },
     });
-
-    const managers = members
-      .filter((m) => m.role === 'manager')
-      .map((m) => ({ memberId: m.id, ...m.user }));
-
-    const workers = members
-      .filter((m) => m.role === 'worker')
-      .map((m) => ({ memberId: m.id, managerId: m.managerId, ...m.user }));
-
+    const managers = members.filter((m) => m.role === 'manager').map((m) => ({ memberId: m.id, ...m.user }));
+    const workers = members.filter((m) => m.role === 'worker').map((m) => ({ memberId: m.id, managerId: m.managerId, ...m.user }));
     return { total: members.length, managers, workers };
   }
 
-  async getAvailableByRole(
-    adminId: string,
-    role: 'manager' | 'worker',
-    page = 1,
-    limit = 10,
-    search?: string,
-    userRole?: string,
-  ) {
-    // For admin/super_admin: show all accepted invitations from any admin/super_admin
-    // For others: show only their own invitations
-    const whereInvitation: any = {
-      status: 'accepted',
-      receiverId: { not: null },
-    };
-
+  async getAvailableByRole(adminId: string, role: 'manager' | 'worker', page = 1, limit = 10, search?: string, userRole?: string) {
+    const whereInvitation: any = { status: 'accepted', receiverId: { not: null } };
     if (userRole !== UserRole.admin && userRole !== UserRole.super_admin) {
       whereInvitation.senderId = adminId;
     }
-
-    const acceptedInvitations = await this.prisma.invitation.findMany({
-      where: whereInvitation,
-      select: { receiverId: true },
-    });
-
-    const invitedUserIds = acceptedInvitations
-      .map((i) => i.receiverId)
-      .filter(Boolean) as string[];
-
-    if (invitedUserIds.length === 0) {
-      return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
-    }
+    const acceptedInvitations = await this.prisma.invitation.findMany({ where: whereInvitation, select: { receiverId: true } });
+    const invitedUserIds = acceptedInvitations.map((i) => i.receiverId).filter(Boolean) as string[];
+    if (invitedUserIds.length === 0) return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
 
     const skip = (page - 1) * limit;
     const where = {
@@ -621,87 +579,37 @@ export class ProjectService {
         ],
       }),
     };
-
     const [data, total] = await Promise.all([
-      this.prisma.user.findMany({
-        where,
-        select: {
-          id: true,
-          fullName: true,
-          email: true,
-          phone: true,
-          avatarUrl: true,
-          role: true,
-          department: true,
-        },
-        orderBy: { fullName: 'asc' },
-        skip,
-        take: limit,
-      }),
+      this.prisma.user.findMany({ where, select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true, department: true }, orderBy: { fullName: 'asc' }, skip, take: limit }),
       this.prisma.user.count({ where }),
     ]);
-
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
 
-  async addMemberByRole(
-    projectId: string,
-    userId: string,
-    adminId: string,
-    role: 'manager' | 'worker',
-    managerId?: string,
-    userRole?: string,
-  ) {
+  async addMemberByRole(projectId: string, userId: string, adminId: string, role: 'manager' | 'worker', managerId?: string, userRole?: string) {
     await this.verifyProjectAccess(projectId, adminId, userRole);
-
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
-    if (user.role !== role)
-      throw new BadRequestException(`Only users with role '${role}' can be added as ${role}`);
-
+    if (user.role !== role) throw new BadRequestException(`Only users with role '${role}' can be added as ${role}`);
     const existing = await this.prisma.projectMember.findFirst({ where: { projectId, userId } });
     if (existing) throw new BadRequestException('User is already a team member');
-
-    // Manager শুধু worker add করতে পারবে, manager না
-    if (userRole === UserRole.manager && role === 'manager') {
-      throw new ForbiddenException('Managers cannot add other managers');
-    }
-
+    if (userRole === UserRole.manager && role === 'manager') throw new ForbiddenException('Managers cannot add other managers');
     if (role === 'worker') {
       if (!managerId) throw new BadRequestException('managerId is required for workers');
-      const manager = await this.prisma.projectMember.findFirst({
-        where: { projectId, userId: managerId, role: 'manager' },
-      });
+      const manager = await this.prisma.projectMember.findFirst({ where: { projectId, userId: managerId, role: 'manager' } });
       if (!manager) throw new NotFoundException('Manager not found in this project');
     }
-
     const member = await this.prisma.projectMember.create({
       data: { projectId, userId, role, ...(managerId && { managerId }) },
-      include: {
-        user: {
-          select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true },
-        },
-      },
+      include: { user: { select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true } } },
     });
-
-    // If worker was added under a manager, ensure worker-manager mapping exists
     if (role === 'worker' && managerId) {
-      const existingMap = await this.prisma.workerManagerMap.findFirst({
-        where: { workerId: userId, managerId },
-      });
-
-      if (!existingMap) {
-        await this.prisma.workerManagerMap.create({
-          data: { managerId, workerId: userId },
-        });
-      }
+      const existingMap = await this.prisma.workerManagerMap.findFirst({ where: { workerId: userId, managerId } });
+      if (!existingMap) await this.prisma.workerManagerMap.create({ data: { managerId, workerId: userId } });
     }
-
-    return {
-      message: `${role} added successfully`,
-      member: { memberId: member.id, ...member.user },
-    };
+    return { message: `${role} added successfully`, member: { memberId: member.id, ...member.user } };
   }
+
   async removeTeamMember(projectId: string, userId: string, adminId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, adminId, userRole);
     const member = await this.prisma.projectMember.findFirst({ where: { projectId, userId } });
@@ -718,11 +626,17 @@ export class ProjectService {
 
   async createGeofence(projectId: string, dto: CreateGeofenceDto, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
+
+    // ✅ Geofencing plan check — super_admin এর জন্য skip
+    if (!this.isSuperAdmin(userRole)) {
+      await this.checkGeofencingAccess(userId);
+    }
+
     return this.prisma.geofence.create({
       data: {
         projectId,
         zoneName: dto.zoneName,
-        polygonCoords: dto.polygonCoords as any, // Cast to any or Prisma.InputJsonValue if imported
+        polygonCoords: dto.polygonCoords as any,
         totalAreaSqft: dto.totalAreaSqft,
         perimeterFt: dto.perimeterFt,
         isActive: true,
@@ -730,30 +644,14 @@ export class ProjectService {
     });
   }
 
-  async updateGeofence(
-    projectId: string,
-    geofenceId: string,
-    dto: Partial<CreateGeofenceDto> & { isActive?: boolean },
-    userId: string,
-    userRole: string,
-  ) {
+  async updateGeofence(projectId: string, geofenceId: string, dto: Partial<CreateGeofenceDto> & { isActive?: boolean }, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
-
-    const geo = await this.prisma.geofence.findFirst({
-      where: { id: geofenceId, projectId },
-    });
+    const geo = await this.prisma.geofence.findFirst({ where: { id: geofenceId, projectId } });
     if (!geo) throw new NotFoundException('Geofence not found');
-
-    const { polygonCoords, ...rest } = dto;   // ← this was missing
-
+    const { polygonCoords, ...rest } = dto;
     return this.prisma.geofence.update({
       where: { id: geofenceId },
-      data: {
-        ...rest,
-        ...(polygonCoords !== undefined && {
-          polygonCoords: polygonCoords as any,
-        }),
-      },
+      data: { ...rest, ...(polygonCoords !== undefined && { polygonCoords: polygonCoords as any }) },
     });
   }
 
@@ -762,15 +660,9 @@ export class ProjectService {
       where: { id: violationId },
       include: { geofence: { select: { projectId: true } } },
     });
-
     if (!violation) throw new NotFoundException('Violation not found');
-
     await this.verifyProjectAccess(violation.geofence.projectId, userId, userRole);
-
-    await this.prisma.geofenceViolation.update({
-      where: { id: violationId },
-      data: { isResolved: true },
-    });
+    await this.prisma.geofenceViolation.update({ where: { id: violationId }, data: { isResolved: true } });
     return { message: 'Violation resolved' };
   }
 
@@ -782,121 +674,61 @@ export class ProjectService {
     return { message: 'Geofence deleted successfully' };
   }
 
-
   // ─── LOCATION LOGS ─────────────────────────────────────────────────────────
-async getLocationLogs(
-  projectId: string,
-  userId: string,
-  userRole: string,
-  page = 1,
-  limit = 20,
-) {
-  await this.verifyProjectAccess(projectId, userId, userRole);
-
-  const skip = (page - 1) * limit;
-
-  const [logs, total] = await Promise.all([
-    this.prisma.locationLog.findMany({
-      where: {
-        geofence: { projectId },
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            fullName: true,
-            avatarUrl: true,
-            role: true,
-          },
+  async getLocationLogs(projectId: string, userId: string, userRole: string, page = 1, limit = 20) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+    const skip = (page - 1) * limit;
+    const [logs, total] = await Promise.all([
+      this.prisma.locationLog.findMany({
+        where: { geofence: { projectId } },
+        include: {
+          user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          geofence: { select: { id: true, zoneName: true } },
         },
-        geofence: {
-          select: {
-            id: true,
-            zoneName: true,
-          },
-        },
-      },
-      orderBy: { loggedAt: 'desc' },
-      skip,
-      take: limit,
-    }),
-    this.prisma.locationLog.count({
-      where: {
-        geofence: { projectId },
-      },
-    }),
-  ]);
+        orderBy: { loggedAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.locationLog.count({ where: { geofence: { projectId } } }),
+    ]);
+    return {
+      data: logs.map((log) => ({
+        id: log.id,
+        worker: log.user,
+        lat: log.lat,
+        lng: log.lng,
+        eventType: log.eventType,
+        zoneName: log.geofence?.zoneName ?? null,
+        loggedAt: log.loggedAt,
+      })),
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
 
-  return {
-    data: logs.map((log) => ({
-      id: log.id,
-      worker: log.user,
-      lat: log.lat,
-      lng: log.lng,
-      eventType: log.eventType,   // enter / exit / update
-      zoneName: log.geofence?.zoneName ?? null,
-      loggedAt: log.loggedAt,
-    })),
-    meta: {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    },
-  };
-}
-
-// ─── VIOLATIONS ────────────────────────────────────────────────────────────
-async getViolations(
-  projectId: string,
-  userId: string,
-  userRole: string,
-  page = 1,
-  limit = 20,
-) {
-  await this.verifyProjectAccess(projectId, userId, userRole);
-
-  const skip = (page - 1) * limit;
-
-  const [violations, total] = await Promise.all([
-    this.prisma.geofenceViolation.findMany({
-      where: {
-        geofence: { projectId },
-      },
-      include: {
-        geofence: {
-          select: {
-            id: true,
-            zoneName: true,
-          },
-        },
-      },
-      orderBy: { occurredAt: 'desc' },
-      skip,
-      take: limit,
-    }),
-    this.prisma.geofenceViolation.count({
-      where: {
-        geofence: { projectId },
-      },
-    }),
-  ]);
-
-  return {
-    data: violations.map((v) => ({
-      id: v.id,
-      geofenceName: v.geofence.zoneName,
-      distanceM: v.distanceM,
-      description: v.description,
-      isResolved: v.isResolved,
-      occurredAt: v.occurredAt,
-    })),
-    meta: {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    },
-  };
-}
+  // ─── VIOLATIONS ────────────────────────────────────────────────────────────
+  async getViolations(projectId: string, userId: string, userRole: string, page = 1, limit = 20) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+    const skip = (page - 1) * limit;
+    const [violations, total] = await Promise.all([
+      this.prisma.geofenceViolation.findMany({
+        where: { geofence: { projectId } },
+        include: { geofence: { select: { id: true, zoneName: true } } },
+        orderBy: { occurredAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.geofenceViolation.count({ where: { geofence: { projectId } } }),
+    ]);
+    return {
+      data: violations.map((v) => ({
+        id: v.id,
+        geofenceName: v.geofence.zoneName,
+        distanceM: v.distanceM,
+        description: v.description,
+        isResolved: v.isResolved,
+        occurredAt: v.occurredAt,
+      })),
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
 }

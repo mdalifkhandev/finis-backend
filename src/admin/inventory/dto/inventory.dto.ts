@@ -9,17 +9,18 @@ import {
   IsNotEmpty,
 } from 'class-validator';
 import { PartialType } from '@nestjs/mapped-types';
+import { Type } from 'class-transformer';
 
 // ─────────────────────────────────────────────
-// Inventory Item DTOs
+// CREATE / UPDATE
 // ─────────────────────────────────────────────
 
 export class CreateInventoryItemDto {
-
   @IsUUID()
   projectId!: string;
 
   @IsString()
+  @IsNotEmpty()
   name!: string;
 
   @IsOptional()
@@ -45,32 +46,29 @@ export class CreateInventoryItemDto {
 
 export class UpdateInventoryItemDto extends PartialType(CreateInventoryItemDto) {}
 
+// positive quantity = restock | negative quantity = usage
 export class UpdateStockDto {
   @IsInt()
   @IsNotEmpty()
-  quantity!: number; // positive = restock, negative = usage
+  quantity!: number;
 
   @IsOptional()
   @IsString()
   reason?: string;
-
-  @IsOptional()
-  @IsUUID()
-  projectId?: string;
 }
 
 // ─────────────────────────────────────────────
-// Inventory Damage DTOs
+// DAMAGE
 // ─────────────────────────────────────────────
 
-export enum InventoryDamageStatus {
-  UNRESOLVED = 'unresolved',
-  IN_REPAIR = 'in_repair',
-  RESOLVED = 'resolved',
+export enum DamageStatus {
+  UNRESOLVED  = 'unresolved',
+  IN_REPAIR   = 'in_repair',
+  RESOLVED    = 'resolved',
   WRITTEN_OFF = 'written_off',
 }
 
-export class CreateInventoryDamageDto {
+export class CreateDamageDto {
   @IsUUID()
   inventoryId!: string;
 
@@ -88,18 +86,19 @@ export class CreateInventoryDamageDto {
 }
 
 export class UpdateDamageStatusDto {
-  @IsEnum(InventoryDamageStatus)
-  status!: InventoryDamageStatus;
+  @IsEnum(DamageStatus)
+  status!: DamageStatus;
 }
 
 // ─────────────────────────────────────────────
-// Query / Filter DTOs
+// QUERY PARAMS
 // ─────────────────────────────────────────────
 
 export class InventoryQueryDto {
+  /** Optional: narrow results to one project (dropdown filter) */
   @IsOptional()
-@IsUUID()
-projectId?: string;
+  @IsUUID()
+  projectId?: string;
 
   @IsOptional()
   @IsString()
@@ -113,16 +112,36 @@ projectId?: string;
   @IsString()
   location?: string;
 
-  /** Filter: only low stock items */
+  /** true → show only low-stock items */
   @IsOptional()
   lowStock?: boolean;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   page?: number = 1;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  limit?: number = 20;
+}
+
+export class PaginationDto {
+  @IsOptional()
+  @IsUUID()
+  projectId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   limit?: number = 20;

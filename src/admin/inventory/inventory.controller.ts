@@ -16,9 +16,10 @@ import {
   CreateInventoryItemDto,
   UpdateInventoryItemDto,
   UpdateStockDto,
-  CreateInventoryDamageDto,
+  CreateDamageDto,
   UpdateDamageStatusDto,
   InventoryQueryDto,
+  PaginationDto,
 } from './dto/inventory.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -29,96 +30,140 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
-  // ─────────────────────────────────────────────
-  // INVENTORY ITEMS
-  // ─────────────────────────────────────────────
+  // ════════════════════════════════════════════
+  // STATIC ROUTES  ← must come before /:id routes
+  // ════════════════════════════════════════════
 
   /**
-   * GET /inventory/:projectId
-   * Get all inventory items for a company (with stats & filters)
+   * GET /inventory/projects
+   * Project dropdown list — { id, name } only.
+   * Used in "Add Product" modal to select a project.
+   *
+   * super_admin → all projects
+   * admin       → their company's projects
+   * others      → projects they are a member of
    */
-  @Get(':projectId')
+  @Get('projects')
   @Roles('super_admin', 'admin', 'manager', 'worker', 'viewer')
-  getInventoryItems(
-    @Param('projectId', ParseUUIDPipe) projectId: string,
-    @Query() query: InventoryQueryDto,
-  ) {
-    return this.inventoryService.getInventoryItems(projectId, query);
+  getProjectList(@Request() req: any) {
+    return this.inventoryService.getProjectList(req.user);
   }
 
   /**
-   * GET /inventory/:projectId/low-stock
-   * Get low stock alerts for dashboard
+   * GET /inventory/summary
+   * Three stat cards on both screens:
+   *   • totalProducts      (blue card)
+   *   • lowStockAlerts     (warning card)
+   *   • unresolvedDamages  (red card)
+   *
+   * Optional ?projectId=uuid to scope to one project.
    */
-  @Get(':projectId/low-stock')
-  @Roles('super_admin', 'admin', 'manager')
-  getLowStockAlerts(@Param('projectId', ParseUUIDPipe) projectId: string) {
-    return this.inventoryService.getLowStockAlerts(projectId);
+  @Get('summary')
+  @Roles('super_admin', 'admin', 'manager', 'worker', 'viewer')
+  getSummary(@Request() req: any, @Query('projectId') projectId?: string) {
+    return this.inventoryService.getSummary(req.user, projectId);
   }
 
   /**
-   * GET /inventory/:projectId/damages
-   * Get all damage reports for a company
+   * GET /inventory/all
+   * "Stock List" tab — paginated inventory table.
+   * Columns: Product/Category | Current Stock | Unit | Threshold | Status | Actions
+   *
+   * Query: projectId?, search?, category?, location?, lowStock?, page?, limit?
    */
-  @Get(':projectId/damages')
-  @Roles('super_admin', 'admin', 'manager')
-  getDamageReports(@Param('projectId', ParseUUIDPipe) projectId: string) {
-    return this.inventoryService.getDamageReports(projectId);
+  @Get('all')
+  @Roles('super_admin', 'admin', 'manager', 'worker', 'viewer')
+  getInventoryItems(@Request() req: any, @Query() query: InventoryQueryDto) {
+    return this.inventoryService.getInventoryItems(req.user, query);
   }
+
+  /**
+   * GET /inventory/low-stock
+   * "Low Stock Alerts" — all low-stock items with project name.
+   * Used in mobile alert banner.
+   */
+  @Get('low-stock')
+  @Roles('super_admin', 'admin', 'manager', 'worker', 'viewer')
+  getLowStockAlerts(@Request() req: any, @Query('projectId') projectId?: string) {
+    return this.inventoryService.getLowStockAlerts(req.user, projectId);
+  }
+
+  /**
+   * GET /inventory/usage-history
+   * "Usage History" tab — paginated log of all stock changes.
+   * Shows who changed what, when, and by how much.
+   *
+   * Query: projectId?, page?, limit?
+   */
+  @Get('usage-history')
+  @Roles('super_admin', 'admin', 'manager')
+  getUsageHistory(@Request() req: any, @Query() query: PaginationDto) {
+    return this.inventoryService.getUsageHistory(req.user, query);
+  }
+
+  /**
+   * GET /inventory/damages
+   * "Damages & Defects" tab — paginated damage reports.
+   * Badge count = unresolved damages.
+   *
+   * Query: projectId?, page?, limit?
+   */
+  @Get('damages')
+  @Roles('super_admin', 'admin', 'manager')
+  getDamageReports(@Request() req: any, @Query() query: PaginationDto) {
+    return this.inventoryService.getDamageReports(req.user, query);
+  }
+
+  // ════════════════════════════════════════════
+  // SINGLE ITEM ROUTES  (projectId + itemId)
+  // ════════════════════════════════════════════
 
   /**
    * GET /inventory/:projectId/item/:id
-   * Get single inventory item detail
+   * Full item detail (with recent usage + damage history).
    */
   @Get(':projectId/item/:id')
   @Roles('super_admin', 'admin', 'manager', 'worker', 'viewer')
-  getInventoryItemById(
+  getItemById(
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.inventoryService.getInventoryItemById(id, projectId);
+    return this.inventoryService.getItemById(id, projectId);
   }
 
-  /**
-   * GET /inventory/:projectId/item/:id/history
-   * Get stock usage history for an item
-   */
-  @Get(':projectId/item/:id/history')
-  @Roles('super_admin', 'admin', 'manager')
-  getUsageHistory(
-    @Param('projectId', ParseUUIDPipe) projectId: string,
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
-    return this.inventoryService.getUsageHistory(id, projectId);
-  }
+  // ════════════════════════════════════════════
+  // WRITE OPERATIONS
+  // ════════════════════════════════════════════
 
   /**
    * POST /inventory
-   * Create a new inventory item
+   * "Add Product" button — create a new inventory item.
+   * projectId comes from the form body (selected from dropdown).
    */
   @Post()
   @Roles('super_admin', 'admin', 'manager')
-  createInventoryItem(@Body() dto: CreateInventoryItemDto) {
-    return this.inventoryService.createInventoryItem(dto);
+  createItem(@Body() dto: CreateInventoryItemDto) {
+    return this.inventoryService.createItem(dto);
   }
 
   /**
    * PATCH /inventory/:projectId/item/:id
-   * Update inventory item details
+   * Edit item details (name, category, location, threshold, unit).
    */
   @Patch(':projectId/item/:id')
   @Roles('super_admin', 'admin', 'manager')
-  updateInventoryItem(
+  updateItem(
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateInventoryItemDto,
   ) {
-    return this.inventoryService.updateInventoryItem(id, projectId, dto);
+    return this.inventoryService.updateItem(id, projectId, dto);
   }
 
   /**
    * PATCH /inventory/:projectId/item/:id/stock
-   * Update stock quantity (restock or usage)
+   * "Usage" action button — log stock change (restock or usage).
+   * quantity > 0 = restock | quantity < 0 = usage
    */
   @Patch(':projectId/item/:id/stock')
   @Roles('super_admin', 'admin', 'manager', 'worker')
@@ -133,34 +178,30 @@ export class InventoryController {
 
   /**
    * DELETE /inventory/:projectId/item/:id
-   * Delete an inventory item
+   * Delete an inventory item permanently.
    */
   @Delete(':projectId/item/:id')
   @Roles('super_admin', 'admin')
-  deleteInventoryItem(
+  deleteItem(
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.inventoryService.deleteInventoryItem(id, projectId);
+    return this.inventoryService.deleteItem(id, projectId);
   }
-
-  // ─────────────────────────────────────────────
-  // DAMAGE REPORTS
-  // ─────────────────────────────────────────────
 
   /**
    * POST /inventory/damages
-   * Report a damage
+   * "Damage" action button — report a damage on an item.
    */
   @Post('damages')
   @Roles('super_admin', 'admin', 'manager', 'worker')
-  reportDamage(@Body() dto: CreateInventoryDamageDto, @Request() req: any) {
+  reportDamage(@Body() dto: CreateDamageDto, @Request() req: any) {
     return this.inventoryService.reportDamage(req.user.id, dto);
   }
 
   /**
    * PATCH /inventory/damages/:damageId/status
-   * Update damage status (resolve, write-off, etc.)
+   * Resolve / write-off a damage report.
    */
   @Patch('damages/:damageId/status')
   @Roles('super_admin', 'admin', 'manager')
