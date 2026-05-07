@@ -17,7 +17,7 @@ export class PayrollService {
   constructor(
     private prisma: PrismaService,
     private stripeService: StripeService,
-  ) {}
+  ) { }
 
   // ─── Worker Onboarding ────────────────────────────────────────────────────
   async startWorkerOnboarding(workerId: string) {
@@ -105,14 +105,12 @@ export class PayrollService {
       throw new BadRequestException('User is not a worker');
     }
 
-    // Project check — projectId দিলে verify করো
     if (dto.projectId) {
       const project = await this.prisma.project.findUnique({
         where: { id: dto.projectId },
       });
       if (!project) throw new NotFoundException('Project not found');
 
-      // Worker সেই project এর member কিনা
       const isMember = await this.prisma.projectMember.findFirst({
         where: { projectId: dto.projectId, userId: dto.workerId },
       });
@@ -121,23 +119,55 @@ export class PayrollService {
       }
     }
 
-    const grossPay    = dto.grossPay;
-    const deductions  = dto.deductions ?? 0;
-    const netPay      = dto.netPay ?? grossPay - deductions;
+    // ─── Config থেকে calculation ──────────────────────────────────────────
+    const config = await this.prisma.payrollConfig.findUnique({
+      where: { companyId: dto.companyId },
+    });
+
+    // Config না থাকলে default values
+    const cppEmployeeRate = config?.cppEmployeeRate ?? 0.0595;
+    const eiEmployeeRate = config?.eiEmployeeRate ?? 0.0166;
+    const federalTaxRate = config?.federalTaxRate ?? 0.15;
+    const provincialTaxRate = config?.provincialTaxRate ?? 0.0505;
+    const cppEmployerRate = config?.cppEmployerRate ?? 0.0595;
+    const eiEmployerRate = config?.eiEmployerRate ?? 0.0232;
+    const wsibRate = config?.wsibRate ?? 0.0142;
+    const vacationPayRate = config?.vacationPayRate ?? 0.04;
+
+    // Gross Pay calculate
+    const regularPay = dto.regularHours * dto.ratePerHour;
+    const overtimePay = dto.overtimeHours * dto.ratePerHour * 1.5;
+    const grossPay = Math.round((regularPay + overtimePay) * 100) / 100;
+
+    // Employee Deductions
+    const cppEmployee = Math.round(grossPay * cppEmployeeRate * 100) / 100;
+    const eiEmployee = Math.round(grossPay * eiEmployeeRate * 100) / 100;
+    const federalTax = Math.round(grossPay * federalTaxRate * 100) / 100;
+    const provincialTax = Math.round(grossPay * provincialTaxRate * 100) / 100;
+    const deductions = Math.round((cppEmployee + eiEmployee + federalTax + provincialTax) * 100) / 100;
+    const netPay = Math.round((grossPay - deductions) * 100) / 100;
+
+    // Employer Cost
+    const cppEmployer = Math.round(grossPay * cppEmployerRate * 100) / 100;
+    const eiEmployer = Math.round(grossPay * eiEmployerRate * 100) / 100;
+    const wsib = Math.round(grossPay * wsibRate * 100) / 100;
+    const vacationPay = Math.round(grossPay * vacationPayRate * 100) / 100;
+    const employerCost = Math.round((grossPay + cppEmployer + eiEmployer + wsib + vacationPay) * 100) / 100;
 
     return this.prisma.payroll.create({
       data: {
-        companyId:      dto.companyId,
-        workerId:       dto.workerId,
+        companyId: dto.companyId,
+        workerId: dto.workerId,
         ...(dto.projectId && { projectId: dto.projectId }),
         payPeriodStart: new Date(dto.payPeriodStart),
-        payPeriodEnd:   new Date(dto.payPeriodEnd),
-        regularHours:   dto.regularHours,
-        overtimeHours:  dto.overtimeHours,
-        ratePerHour:    dto.ratePerHour,
+        payPeriodEnd: new Date(dto.payPeriodEnd),
+        regularHours: dto.regularHours,
+        overtimeHours: dto.overtimeHours,
+        ratePerHour: dto.ratePerHour,
         grossPay,
         deductions,
         netPay,
+        employerCost,
         status: 'draft',
       },
       include: {
@@ -172,12 +202,12 @@ export class PayrollService {
     const y = year ? parseInt(year) : now.getFullYear();
 
     const startDate = new Date(y, m, 1);
-    const endDate   = new Date(y, m + 1, 0);
+    const endDate = new Date(y, m + 1, 0);
 
     const payrolls = await this.prisma.payroll.findMany({
       where: {
         payPeriodStart: { gte: startDate },
-        payPeriodEnd:   { lte: endDate },
+        payPeriodEnd: { lte: endDate },
         ...(projectId && { projectId }),
       },
       include: {
@@ -204,7 +234,7 @@ export class PayrollService {
       0,
     );
     const totalPay = payrolls.reduce((s, p) => s + p.grossPay, 0);
-    const pending  = payrolls.filter((p) => p.status === 'draft').length;
+    const pending = payrolls.filter((p) => p.status === 'draft').length;
 
     const inventoryAlerts = await this.prisma.inventoryItem.count({
       where: {
@@ -221,14 +251,14 @@ export class PayrollService {
         inventoryAlerts,
       },
       workers: payrolls.map((p) => ({
-        payrollId:    p.id,
-        project:      p.project,
-        worker:       p.worker,
-        hours:        p.regularHours,
+        payrollId: p.id,
+        project: p.project,
+        worker: p.worker,
+        hours: p.regularHours,
         overtimeHours: p.overtimeHours,
-        rate:         p.ratePerHour,
-        total:        p.grossPay,
-        status:       p.status,
+        rate: p.ratePerHour,
+        total: p.grossPay,
+        status: p.status,
       })),
     };
   }
@@ -261,28 +291,28 @@ export class PayrollService {
       throw new ForbiddenException('Access denied');
     }
 
-    const regularPay    = payroll.regularHours * payroll.ratePerHour;
-    const overtimePay   = payroll.overtimeHours * payroll.ratePerHour * 1.5;
+    const regularPay = payroll.regularHours * payroll.ratePerHour;
+    const overtimePay = payroll.overtimeHours * payroll.ratePerHour * 1.5;
     const siteAllowance = 250;
-    const grossPay      = regularPay + overtimePay + siteAllowance;
+    const grossPay = regularPay + overtimePay + siteAllowance;
 
-    const federalTax      = Math.round(grossPay * 0.15   * 100) / 100;
-    const stateTax        = Math.round(grossPay * 0.0505 * 100) / 100;
-    const socialSec       = Math.round(grossPay * 0.062  * 100) / 100;
-    const medicare        = Math.round(grossPay * 0.0145 * 100) / 100;
+    const federalTax = Math.round(grossPay * 0.15 * 100) / 100;
+    const stateTax = Math.round(grossPay * 0.0505 * 100) / 100;
+    const socialSec = Math.round(grossPay * 0.062 * 100) / 100;
+    const medicare = Math.round(grossPay * 0.0145 * 100) / 100;
     const totalDeductions = federalTax + stateTax + socialSec + medicare;
-    const netPay          = Math.round((grossPay - totalDeductions) * 100) / 100;
+    const netPay = Math.round((grossPay - totalDeductions) * 100) / 100;
 
     return {
       payrollId: payroll.id,
-      worker:    payroll.worker,
-      project:   payroll.project,
+      worker: payroll.worker,
+      project: payroll.project,
       payPeriod: {
         start: payroll.payPeriodStart,
-        end:   payroll.payPeriodEnd,
+        end: payroll.payPeriodEnd,
       },
       earnings: {
-        regularHours:  payroll.regularHours,
+        regularHours: payroll.regularHours,
         regularPay,
         overtimeHours: payroll.overtimeHours,
         overtimePay,
@@ -292,7 +322,7 @@ export class PayrollService {
       deductions: {
         federalTax,
         stateTax,
-        socialSecurity:  socialSec,
+        socialSecurity: socialSec,
         medicare,
         totalDeductions: Math.round(totalDeductions * 100) / 100,
       },
@@ -319,7 +349,7 @@ export class PayrollService {
     return this.prisma.payroll.update({
       where: { id: payrollId },
       data: {
-        status:      'approved',
+        status: 'approved',
         processedBy: adminId,
         processedAt: new Date(),
       },
@@ -354,13 +384,13 @@ export class PayrollService {
     const y = year ? parseInt(year) : now.getFullYear();
 
     const startDate = new Date(y, m, 1);
-    const endDate   = new Date(y, m + 1, 0);
+    const endDate = new Date(y, m + 1, 0);
 
     const payrolls = await this.prisma.payroll.findMany({
       where: {
-        status:        'approved',
+        status: 'approved',
         payPeriodStart: { gte: startDate },
-        payPeriodEnd:   { lte: endDate },
+        payPeriodEnd: { lte: endDate },
         ...(projectId && { projectId }),
       },
       include: {
@@ -387,15 +417,15 @@ export class PayrollService {
     }
 
     const results: Array<{
-      payrollId:   string;
-      workerId:    string;
-      workerName:  string;
-      projectId?:  string;
+      payrollId: string;
+      workerId: string;
+      workerName: string;
+      projectId?: string;
       projectName?: string;
-      status:      'success' | 'failed';
+      status: 'success' | 'failed';
       amountPaid?: number;
       transferId?: string;
-      reason?:     string;
+      reason?: string;
     }> = [];
 
     for (const payroll of payrolls) {
@@ -403,19 +433,19 @@ export class PayrollService {
 
       if (!worker.stripeAccountId) {
         results.push({
-          payrollId:   payroll.id,
-          workerId:    worker.id,
-          workerName:  worker.fullName,
-          projectId:   payroll.projectId ?? undefined,
+          payrollId: payroll.id,
+          workerId: worker.id,
+          workerName: worker.fullName,
+          projectId: payroll.projectId ?? undefined,
           projectName: payroll.project?.name,
-          status:      'failed',
-          reason:      'Worker has not completed Stripe onboarding',
+          status: 'failed',
+          reason: 'Worker has not completed Stripe onboarding',
         });
         continue;
       }
 
       try {
-        const netPay       = payroll.netPay;
+        const netPay = payroll.netPay;
         const amountInCents = Math.round(netPay * 100);
 
         const transfer = await this.stripeService.transferToWorker(
@@ -427,38 +457,38 @@ export class PayrollService {
         await this.prisma.payroll.update({
           where: { id: payroll.id },
           data: {
-            status:      'paid',
+            status: 'paid',
             processedBy: adminId,
             processedAt: new Date(),
           },
         });
 
         results.push({
-          payrollId:   payroll.id,
-          workerId:    worker.id,
-          workerName:  worker.fullName,
-          projectId:   payroll.projectId ?? undefined,
+          payrollId: payroll.id,
+          workerId: worker.id,
+          workerName: worker.fullName,
+          projectId: payroll.projectId ?? undefined,
           projectName: payroll.project?.name,
-          amountPaid:  netPay,
-          transferId:  transfer.id,
-          status:      'success',
+          amountPaid: netPay,
+          transferId: transfer.id,
+          status: 'success',
         });
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         results.push({
-          payrollId:   payroll.id,
-          workerId:    worker.id,
-          workerName:  worker.fullName,
-          projectId:   payroll.projectId ?? undefined,
+          payrollId: payroll.id,
+          workerId: worker.id,
+          workerName: worker.fullName,
+          projectId: payroll.projectId ?? undefined,
           projectName: payroll.project?.name,
-          status:      'failed',
+          status: 'failed',
           reason,
         });
       }
     }
 
     const success = results.filter((r) => r.status === 'success').length;
-    const failed  = results.filter((r) => r.status === 'failed').length;
+    const failed = results.filter((r) => r.status === 'failed').length;
 
     return {
       message: `Payroll processed: ${success} success, ${failed} failed`,

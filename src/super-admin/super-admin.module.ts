@@ -8,6 +8,9 @@ import { SuperAdminProjectController } from './projects/project.controller';
 import { SuperAdminProjectService } from './projects/project.service';
 import { TeamManagementController } from './team-management/team-management.controller';
 import { TeamManagementService } from './team-management/team-management.service';
+import { PayrollManagementController } from './payroll-management/payroll-management.controller';
+import { PayrollManagementService } from './payroll-management/payroll-management.service';
+import { StripeService } from '../admin/payroll/stripe.service';
 
 @Module({
   imports: [PrismaModule],
@@ -16,12 +19,15 @@ import { TeamManagementService } from './team-management/team-management.service
     SuperAdminCompaniesController,
     SuperAdminProjectController,
     TeamManagementController,
+    PayrollManagementController,
   ],
   providers: [
     SuperAdminDashboardService,
     SuperAdminCompaniesService,
     SuperAdminProjectService,
     TeamManagementService,
+    PayrollManagementService,
+    StripeService,
   ],
   exports: [],
 })

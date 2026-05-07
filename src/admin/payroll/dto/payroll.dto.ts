@@ -31,15 +31,15 @@ export class ProcessPayrollDto {
 
 // ─── Create Payroll Manually ──────────────────────────────────────────────────
 export class CreatePayrollDto {
+  @IsOptional()
+  @IsString()
+  projectId?: string;
+
   @IsString()
   workerId!: string;
 
-  @IsOptional()
   @IsString()
   companyId!: string;
-
-  @IsString()
-  projectId!: string;
 
   @IsDateString()
   payPeriodStart!: string;
@@ -58,18 +58,4 @@ export class CreatePayrollDto {
   @IsNumber()
   @Min(0)
   ratePerHour!: number;
-
-  @IsNumber()
-  @Min(0)
-  grossPay!: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  deductions?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  netPay?: number;
 }
