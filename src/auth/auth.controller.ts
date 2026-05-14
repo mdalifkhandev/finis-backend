@@ -24,6 +24,13 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  logout(@CurrentUser('id') userId: string) {
+    return this.authService.logout(userId);
+  }
+
   @Post('seed-super-admin')
   seedSuperAdmin() {
     return this.authService.seedSuperAdmin();

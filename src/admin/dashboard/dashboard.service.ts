@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardQueryDto } from './dto/dashboard.dto';
+import { Prisma, ProjectStatus, UserRole } from '../../generated/prisma/client';
 
 @Injectable()
 export class DashboardService {
   constructor(private prisma: PrismaService) {}
 
-  async getAdminDashboard(adminId: string, query: DashboardQueryDto) {
+  async getAdminDashboard(adminId: string, userRole: string, query: DashboardQueryDto) {
     const {
       projectsPage = 1,
       projectsLimit = 10,
@@ -16,16 +17,81 @@ export class DashboardService {
       invitationsLimit = 10,
     } = query;
 
-    const myCompanies = await this.prisma.company.findMany({
-      where: { ownerId: adminId, isActive: true },
-      select: { id: true },
-    });
+    const myCompanies = userRole === UserRole.admin
+      ? await this.prisma.company.findMany({
+          where: { ownerId: adminId, isActive: true },
+          select: { id: true },
+        })
+      : [];
     const companyIds = myCompanies.map((c) => c.id);
+
+    const projectWhere: Prisma.ProjectWhereInput =
+      userRole === UserRole.manager
+        ? {
+            teamMembers: {
+              some: {
+                userId: adminId,
+                role: 'manager',
+              },
+            },
+          }
+        : {
+            companyId: { in: companyIds },
+          };
+
+    const workerWhere: Prisma.UserWhereInput =
+      userRole === UserRole.manager
+        ? {
+            projectMemberships: {
+              some: {
+                managerId: adminId,
+              },
+            },
+          }
+        : {
+            companyMembers: { some: { companyId: { in: companyIds } } },
+          };
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const attendanceWhere = {
+
+
+    const activeProjectQuery: Prisma.ProjectWhereInput = {
+      ...projectWhere,
+      status: ProjectStatus.active,
+    };
+
+    const attendanceUserWhere: Prisma.UserWhereInput =
+      userRole === UserRole.manager
+        ? {
+            projectMemberships: {
+              some: {
+                project: {
+                  teamMembers: {
+                    some: {
+                      userId: adminId,
+                      role: 'manager',
+                    },
+                  },
+                },
+              },
+            },
+          }
+        : {
+            OR: [
+              { companyMembers: { some: { companyId: { in: companyIds } } } },
+              {
+                projectMemberships: {
+                  some: {
+                    project: { companyId: { in: companyIds } },
+                  },
+                },
+              },
+            ],
+          };
+
+    const attendanceWhere2 = {
       date: today,
       status: 'present',
       sessions: {
@@ -34,12 +100,32 @@ export class DashboardService {
           checkOutTime: null,
         },
       },
-      user: {
-        companyMembers: { some: { companyId: { in: companyIds } } },
-      },
+      user: attendanceUserWhere,
     };
 
-    const [
+    const inventoryAlertsQuery =
+      userRole === UserRole.manager
+        ? this.prisma.$queryRaw<{ count: bigint }[]>`
+            SELECT COUNT(*) as count FROM inventory_items
+            WHERE project_id IN (
+              SELECT id FROM projects
+              WHERE id IN (
+                SELECT project_id FROM project_members
+                WHERE user_id = ${adminId} AND role = 'manager'
+              )
+            )
+            AND current_qty <= min_stock_qty
+          `.then((r) => Number(r[0]?.count ?? 0))
+        : this.prisma.$queryRaw<{ count: bigint }[]>`
+            SELECT COUNT(*) as count FROM inventory_items
+            WHERE project_id IN (
+              SELECT id FROM projects
+              WHERE company_id = ANY(${companyIds}::uuid[])
+            )
+            AND current_qty <= min_stock_qty
+          `.then((r) => Number(r[0]?.count ?? 0));
+
+      const [
       activeProjectsCount,
       workersOnSiteCount,
       payrollPendingCount,
@@ -53,31 +139,27 @@ export class DashboardService {
     ] = await Promise.all([
       // ── Stats ──────────────────────────────────────
       this.prisma.project.count({
-        where: { companyId: { in: companyIds }, status: 'active' },
+        where: activeProjectQuery,
       }),
 
-      this.prisma.attendance.count({ where: attendanceWhere }),
+      this.prisma.attendance.count({ where: attendanceWhere2 }),
 
       this.prisma.payroll.count({
-        where: { companyId: { in: companyIds }, status: 'draft' },
+        where:
+          userRole === UserRole.manager
+            ? { status: 'draft' }
+            : { companyId: { in: companyIds }, status: 'draft' },
       }),
 
-      this.prisma.$queryRaw<{ count: bigint }[]>`
-        SELECT COUNT(*) as count FROM inventory_items
-        WHERE project_id IN (
-          SELECT id FROM projects
-          WHERE company_id = ANY(${companyIds}::uuid[])
-        )
-        AND current_qty <= min_stock_qty
-      `.then((r) => Number(r[0]?.count ?? 0)),
+      inventoryAlertsQuery,
 
       // ── Active Projects (paginated) ────────────────
       this.prisma.project.count({
-        where: { companyId: { in: companyIds }, status: 'active' },
+        where: activeProjectQuery,
       }),
 
       this.prisma.project.findMany({
-        where: { companyId: { in: companyIds }, status: 'active' },
+        where: activeProjectQuery,
         skip: (projectsPage - 1) * projectsLimit,
         take: projectsLimit,
         orderBy: { createdAt: 'desc' },
@@ -93,10 +175,10 @@ export class DashboardService {
       }),
 
       // ── Workers On Site (paginated) ────────────────
-      this.prisma.attendance.count({ where: attendanceWhere }),
+      this.prisma.attendance.count({ where: attendanceWhere2 }),
 
       this.prisma.attendance.findMany({
-        where: attendanceWhere,
+        where: attendanceWhere2,
         skip: (workersPage - 1) * workersLimit,
         take: workersLimit,
         include: {
@@ -107,7 +189,10 @@ export class DashboardService {
               avatarUrl: true,
               role: true,
               companyMembers: {
-                where: { companyId: { in: companyIds } },
+                where:
+                  userRole === UserRole.manager
+                    ? {}
+                    : { companyId: { in: companyIds } },
                 select: { role: true },
                 take: 1,
               },
@@ -174,7 +259,7 @@ export class DashboardService {
           id: a.user.id,
           fullName: a.user.fullName,
           avatarUrl: a.user.avatarUrl,
-          role: a.user.companyMembers[0]?.role ?? a.user.role,
+          role: a.user.companyMembers?.[0]?.role ?? a.user.role,
           checkInTime: a.sessions[0]?.checkInTime ?? null,
         })),
         meta: {

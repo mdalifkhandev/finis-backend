@@ -71,6 +71,16 @@ export class AuthService {
     };
   }
 
+  async logout(userId: string) {
+    if (!userId) {
+      throw new BadRequestException('User id is required');
+    }
+
+    return {
+      message: 'Logged out successfully',
+    };
+  }
+
   // ── SEED SUPER ADMIN ──────────────────────
   async seedSuperAdmin() {
     const existing = await this.prisma.user.findFirst({

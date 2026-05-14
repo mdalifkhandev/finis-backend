@@ -16,8 +16,9 @@ export class DashboardController {
   @Get()
   getDashboard(
     @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
     @Query() query: DashboardQueryDto,
   ) {
-    return this.dashboardService.getAdminDashboard(adminId, query);
+    return this.dashboardService.getAdminDashboard(adminId, userRole, query);
   }
 }
