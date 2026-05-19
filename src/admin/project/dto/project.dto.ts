@@ -140,6 +140,16 @@ export class CreateProjectDto {
   priority?: string;
 
   @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  isWholeHouse?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  houseSections?: string[];
+
+  @IsOptional()
   @IsDateString()
   startDate?: string;
 
@@ -199,6 +209,16 @@ export class UpdateProjectDto {
   @IsOptional()
   @IsString()
   priority?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  isWholeHouse?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  houseSections?: string[];
 
   @IsOptional()
   @IsEnum(ProjectStatus)

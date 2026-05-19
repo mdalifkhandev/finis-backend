@@ -253,6 +253,8 @@ model Project {
   description    String?
   status         ProjectStatus   @default(planning)
   priority       String?
+  isWholeHouse   Boolean         @default(false) @map("is_whole_house")
+  houseSections  String[]        @default([]) @map("house_sections")
   numFloors      Int?            @map("num_floors")
   roomsPerFloor  Int?            @map("rooms_per_floor")
   progress       Float?          @default(0)

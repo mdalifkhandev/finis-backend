@@ -14,11 +14,43 @@ import {
   UpdateRoomDto,
   CreateGeofenceDto,
 } from './dto/project.dto';
-import { UserStatus, UserRole } from '../../generated/prisma/client';
+import { UserStatus, UserRole, ProjectType } from '../../generated/prisma/client';
 
 @Injectable()
 export class ProjectService {
   constructor(private prisma: PrismaService) { }
+
+  private readonly allowedHouseSections = ['basement', 'upstairs', 'main_floor', 'exterior'];
+
+  private normalizeHouseSections(sections?: string[]) {
+    if (!sections) return [];
+    return [...new Set(sections.map((s) => s.trim().toLowerCase()).filter(Boolean))];
+  }
+
+  private validateHouseSetup(type: ProjectType | null | undefined, isWholeHouse: boolean, houseSections: string[]) {
+    if (type !== ProjectType.house) {
+      return { isWholeHouse: false, houseSections: [] as string[] };
+    }
+
+    const invalid = houseSections.filter((section) => !this.allowedHouseSections.includes(section));
+    if (invalid.length > 0) {
+      throw new BadRequestException(
+        `Invalid house sections: ${invalid.join(', ')}. Allowed: ${this.allowedHouseSections.join(', ')}`,
+      );
+    }
+
+    if (isWholeHouse) {
+      return { isWholeHouse: true, houseSections: [] as string[] };
+    }
+
+    if (houseSections.length === 0) {
+      throw new BadRequestException(
+        'For house projects, either set isWholeHouse=true or provide at least one house section.',
+      );
+    }
+
+    return { isWholeHouse: false, houseSections };
+  }
 
   // ─── ACCESS VERIFY ─────────────────────────────────────────────────────────
   private isSuperAdmin(userRole?: string) {
@@ -196,10 +228,17 @@ export class ProjectService {
   async createProject(dto: CreateProjectDto, adminId: string, userRole?: string) {
     await this.verifyCompanyAccess(dto.companyId, adminId, userRole);
 
-    // ✅ Project limit check — super_admin এর জন্য skip
+    //  Project limit check — super_admin skip
     if (!this.isSuperAdmin(userRole)) {
       await this.checkProjectLimit(adminId);
     }
+
+    const normalizedSections = this.normalizeHouseSections(dto.houseSections);
+    const houseSetup = this.validateHouseSetup(
+      dto.type,
+      dto.isWholeHouse ?? false,
+      normalizedSections,
+    );
 
     const project = await this.prisma.project.create({
       data: {
@@ -215,6 +254,8 @@ export class ProjectService {
         numFloors: dto.numFloors,
         roomsPerFloor: dto.roomsPerFloor,
         ...(dto.priority !== undefined && { priority: dto.priority }),
+        isWholeHouse: houseSetup.isWholeHouse,
+        houseSections: houseSetup.houseSections,
         status: 'planning',
         progress: 0,
       },
@@ -302,6 +343,8 @@ export class ProjectService {
       type: project.type,
       status: project.status,
       priority: project.priority,
+      isWholeHouse: project.isWholeHouse,
+      houseSections: project.houseSections,
       progress: project.progress,
       startDate: project.startDate,
       endDate: project.endDate,
@@ -336,12 +379,18 @@ export class ProjectService {
 
     const existingProject = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { budget: true, spent: true },
+      select: { budget: true, spent: true, type: true, isWholeHouse: true, houseSections: true },
     });
 
     const budget = dto.budget ?? existingProject?.budget ?? 0;
     const spent = dto.spent ?? existingProject?.spent ?? 0;
     const remaining = dto.remaining ?? budget - spent;
+
+    const nextType = dto.type ?? existingProject?.type;
+    const nextIsWholeHouse = dto.isWholeHouse ?? existingProject?.isWholeHouse ?? false;
+    const nextSectionsSource = dto.houseSections ?? existingProject?.houseSections ?? [];
+    const normalizedSections = this.normalizeHouseSections(nextSectionsSource);
+    const houseSetup = this.validateHouseSetup(nextType, nextIsWholeHouse, normalizedSections);
 
     return this.prisma.project.update({
       where: { id: projectId },
@@ -350,6 +399,8 @@ export class ProjectService {
         ...(dto.companyId && { companyId: dto.companyId }),
         ...(dto.type && { type: dto.type }),
         ...(dto.priority !== undefined && { priority: dto.priority }),
+        isWholeHouse: houseSetup.isWholeHouse,
+        houseSections: houseSetup.houseSections,
         ...(dto.status && { status: dto.status }),
         ...(dto.startDate && { startDate: new Date(dto.startDate) }),
         ...(dto.endDate && { endDate: new Date(dto.endDate) }),
