@@ -5,7 +5,7 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
@@ -55,7 +55,12 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
-    const token = this.generateToken(user.id, user.email, user.role);
+    const token = this.generateToken(
+      user.id,
+      user.email,
+      user.role,
+      dto.rememberMe ? '30d' : undefined,
+    );
 
     return {
       accessToken: token,
@@ -135,28 +140,56 @@ export class AuthService {
     });
     if (pending) throw new ConflictException('Pending invitation already exists');
 
-    const token = uuidv4();
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      // Auto-register user on invite with a random 6-digit password
+      const plainPassword = Math.floor(100000 + Math.random() * 900000).toString();
+      const passwordHash = await bcrypt.hash(plainPassword, 10);
 
-    const invitation = await this.prisma.invitation.create({
-      data: {
-        senderId,
-        // FIX: use null instead of undefined for optional Prisma fields
-        email: dto.email ?? null,
-        phone: dto.phone ?? null,
-        role: dto.role,
-        token,
-        expiresAt,
-        status: 'pending',
-      },
-    });
+      const userEmail = dto.email ?? `phone_${dto.phone}@finis.internal`;
 
-    if (dto.email) {
-      // FIX: dto.role is confirmed defined above
-      await this.mailService.sendInviteEmail(dto.email, token, dto.role);
-    }
+      const user = await this.prisma.user.create({
+        data: {
+          email: userEmail,
+          phone: dto.phone ?? null,
+          fullName: dto.email ? dto.email.split('@')[0] : 'Invited User',
+          passwordHash,
+          role: dto.role,
+          status: 'active',
+        },
+      });
 
-    return { message: 'Invitation sent', invitationId: invitation.id };
+      // If role is worker and sender is manager, link them
+      if (dto.role === UserRole.worker) {
+        const sender = await this.prisma.user.findUnique({ where: { id: senderId }, select: { role: true } });
+        if (sender?.role === UserRole.manager) {
+          await this.prisma.workerManagerMap.create({ data: { managerId: senderId, workerId: user.id } });
+        }
+      }
+
+      // Create invitation record but mark as accepted
+      const token = uuidv4();
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const invitation = await this.prisma.invitation.create({
+        data: {
+          senderId,
+          email: dto.email ?? null,
+          phone: dto.phone ?? null,
+          role: dto.role,
+          token,
+          expiresAt,
+          status: 'accepted',
+          receiverId: user.id,
+        },
+      });
+
+      // Send credentials by email when email provided
+      if (dto.email) {
+        await this.mailService.sendCredentialsEmail(dto.email, plainPassword, dto.role);
+      }
+
+      // Also log credentials to console as requested
+      console.log('Invited user credentials ->', { email: user.email, password: plainPassword });
+
+      return { message: 'User invited and registered', userId: user.id, invitationId: invitation.id };
   }
 
   // ── ACCEPT INVITE ─────────────────────────
@@ -508,7 +541,9 @@ export class AuthService {
   }
 
   // ── HELPER ────────────────────────────────
-  private generateToken(userId: string, email: string, role: string) {
-    return this.jwtService.sign({ sub: userId, email, role });
+  private generateToken(userId: string, email: string, role: string, expiresIn?: string) {
+    const signOptions: JwtSignOptions = expiresIn ? { expiresIn: expiresIn as JwtSignOptions['expiresIn'] } : {};
+
+    return this.jwtService.sign({ sub: userId, email, role }, signOptions);
   }
 }

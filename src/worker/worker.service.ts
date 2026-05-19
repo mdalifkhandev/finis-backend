@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import type { File as MulterFile } from 'multer';
 import {
   SubmitTaskReportDto,
   CheckInDto,
@@ -599,7 +600,7 @@ export class WorkerService {
     return user;
   }
 
-  async updateProfile(workerId: string, dto: UpdateProfileDto) {
+  async updateProfile(workerId: string, dto: UpdateProfileDto, avatarFile?: MulterFile) {
     return this.prisma.user.update({
       where: { id: workerId },
       data: {
@@ -607,7 +608,9 @@ export class WorkerService {
         phone: dto.phone,
         dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
         address: dto.address,
-        avatarUrl: dto.avatarUrl,
+        avatarUrl: avatarFile
+          ? `/uploads/avatars/${avatarFile.filename}`
+          : dto.avatarUrl,
       },
       select: {
         id: true,

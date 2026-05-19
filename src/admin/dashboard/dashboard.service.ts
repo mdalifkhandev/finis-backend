@@ -202,6 +202,13 @@ export class DashboardService {
             where: { checkOutTime: null },
             orderBy: { checkInTime: 'desc' },
             take: 1,
+            select: {
+              checkInTime: true,
+              inLat: true,
+              inLng: true,
+              outLat: true,
+              outLng: true,
+            },
           },
         },
       }),
@@ -237,7 +244,7 @@ export class DashboardService {
       },
 
       activeProjects: {
-        data: activeProjects.map((p) => ({
+        data: activeProjects.slice(0, 2).map((p) => ({
           id: p.id,
           name: p.name,
           status: p.status,
@@ -246,38 +253,196 @@ export class DashboardService {
           companyName: p.company.name,
           teamCount: p._count.teamMembers,
         })),
-        meta: {
-          total: totalProjects,
-          page: projectsPage,
-          limit: projectsLimit,
-          totalPages: Math.ceil(totalProjects / projectsLimit),
-        },
       },
 
       workersOnSite: {
-        data: workersOnSite.map((a) => ({
+        data: workersOnSite.slice(0, 3).map((a) => ({
           id: a.user.id,
           fullName: a.user.fullName,
           avatarUrl: a.user.avatarUrl,
           role: a.user.companyMembers?.[0]?.role ?? a.user.role,
           checkInTime: a.sessions[0]?.checkInTime ?? null,
+          location: a.sessions[0]
+            ? {
+                lat: a.sessions[0].inLat ?? a.sessions[0].outLat ?? null,
+                lng: a.sessions[0].inLng ?? a.sessions[0].outLng ?? null,
+              }
+            : null,
         })),
-        meta: {
-          total: totalWorkersOnSite,
-          page: workersPage,
-          limit: workersLimit,
-          totalPages: Math.ceil(totalWorkersOnSite / workersLimit),
+      },
+    };
+  }
+
+  async getAllActiveWorkers(adminId: string, userRole: string, query: DashboardQueryDto) {
+    const { workersPage = 1, workersLimit = 10 } = query;
+
+    const myCompanies = userRole === UserRole.admin
+      ? await this.prisma.company.findMany({ where: { ownerId: adminId, isActive: true }, select: { id: true } })
+      : [];
+    const companyIds = myCompanies.map((c) => c.id);
+
+    const attendanceUserWhere: Prisma.UserWhereInput =
+      userRole === UserRole.manager
+        ? {
+            projectMemberships: {
+              some: {
+                project: {
+                  teamMembers: {
+                    some: {
+                      userId: adminId,
+                      role: 'manager',
+                    },
+                  },
+                },
+              },
+            },
+          }
+        : {
+            OR: [
+              { companyMembers: { some: { companyId: { in: companyIds } } } },
+              {
+                projectMemberships: {
+                  some: {
+                    project: { companyId: { in: companyIds } },
+                  },
+                },
+              },
+            ],
+          };
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const attendanceWhere2 = {
+      date: today,
+      status: 'present',
+      sessions: {
+        some: {
+          checkInTime: { not: undefined },
+          checkOutTime: null,
         },
       },
+      user: attendanceUserWhere,
+    } as Prisma.AttendanceWhereInput;
 
-      pendingInvitations: {
-        data: pendingInvitations,
-        meta: {
-          total: totalInvitations,
-          page: invitationsPage,
-          limit: invitationsLimit,
-          totalPages: Math.ceil(totalInvitations / invitationsLimit),
+    const totalWorkersOnSite = await this.prisma.attendance.count({ where: attendanceWhere2 });
+
+    const workersOnSite = await this.prisma.attendance.findMany({
+      where: attendanceWhere2,
+      skip: (workersPage - 1) * workersLimit,
+      take: workersLimit,
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            avatarUrl: true,
+            role: true,
+            companyMembers: {
+              where: userRole === UserRole.manager ? {} : { companyId: { in: companyIds } },
+              select: { role: true },
+              take: 1,
+            },
+          },
         },
+        sessions: {
+          where: { checkOutTime: null },
+          orderBy: { checkInTime: 'desc' },
+          take: 1,
+          select: {
+            checkInTime: true,
+            inLat: true,
+            inLng: true,
+            outLat: true,
+            outLng: true,
+          },
+        },
+      },
+    });
+
+    return {
+      data: workersOnSite.map((a) => ({
+        id: a.user.id,
+        fullName: a.user.fullName,
+        avatarUrl: a.user.avatarUrl,
+        role: a.user.companyMembers?.[0]?.role ?? a.user.role,
+        checkInTime: a.sessions[0]?.checkInTime ?? null,
+        location: a.sessions[0]
+          ? {
+              lat: a.sessions[0].inLat ?? a.sessions[0].outLat ?? null,
+              lng: a.sessions[0].inLng ?? a.sessions[0].outLng ?? null,
+            }
+          : null,
+      })),
+      meta: {
+        total: totalWorkersOnSite,
+        page: workersPage,
+        limit: workersLimit,
+        totalPages: Math.ceil(totalWorkersOnSite / workersLimit),
+      },
+    };
+  }
+
+  async getAllActiveProjects(adminId: string, userRole: string, query: DashboardQueryDto) {
+    const { projectsPage = 1, projectsLimit = 10 } = query;
+
+    const myCompanies = userRole === UserRole.admin
+      ? await this.prisma.company.findMany({ where: { ownerId: adminId, isActive: true }, select: { id: true } })
+      : [];
+    const companyIds = myCompanies.map((c) => c.id);
+
+    const projectWhere: Prisma.ProjectWhereInput =
+      userRole === UserRole.manager
+        ? {
+            teamMembers: {
+              some: {
+                userId: adminId,
+                role: 'manager',
+              },
+            },
+          }
+        : {
+            companyId: { in: companyIds },
+          };
+
+    const activeProjectQuery: Prisma.ProjectWhereInput = {
+      ...projectWhere,
+      status: ProjectStatus.active,
+    };
+
+    const totalProjects = await this.prisma.project.count({ where: activeProjectQuery });
+
+    const projects = await this.prisma.project.findMany({
+      where: activeProjectQuery,
+      skip: (projectsPage - 1) * projectsLimit,
+      take: projectsLimit,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        progress: true,
+        endDate: true,
+        company: { select: { name: true } },
+        _count: { select: { teamMembers: true } },
+      },
+    });
+
+    return {
+      data: projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        status: p.status,
+        progress: p.progress ?? 0,
+        endDate: p.endDate,
+        companyName: p.company.name,
+        teamCount: p._count.teamMembers,
+      })),
+      meta: {
+        total: totalProjects,
+        page: projectsPage,
+        limit: projectsLimit,
+        totalPages: Math.ceil(totalProjects / projectsLimit),
       },
     };
   }

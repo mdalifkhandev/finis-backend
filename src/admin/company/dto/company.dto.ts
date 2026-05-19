@@ -85,6 +85,12 @@ export class UpdateCompanyDto {
   @IsOptional()
   @IsString()
   projectLevel?: string;
+
+  // logo file upload এর পর service নিজেই set করে
+  // কিন্তু কেউ body তে পাঠালেও ignore করার জন্য optional রাখা
+  @IsOptional()
+  @IsString()
+  logoUrl?: string;
 }
 
 export class CreateContactDto {
@@ -142,4 +148,8 @@ export class PaginationQueryDto {
   @IsInt()
   @Min(1)
   limit?: number = 10;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
 }

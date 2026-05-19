@@ -48,6 +48,35 @@ export class MailService {
     }
   }
 
+  async sendCredentialsEmail(email: string, password: string, role: string) {
+    const appUrl = this.config.get('APP_URL');
+    const loginLink = `${appUrl}/auth/login`;
+
+    try {
+      await this.transporter.sendMail({
+        from: this.config.get('MAIL_FROM'),
+        to: email,
+        subject: 'Your account has been created - Finis',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #1a3c5e;">Your account is ready</h2>
+            <p>Your account has been created with role <strong>${role}</strong>.</p>
+            <p>Login using the credentials below:</p>
+            <div style="font-size:16px;color:#1a3c5e;margin:12px 0;">
+              <div><strong>Email:</strong> ${email}</div>
+              <div><strong>Password:</strong> ${password}</div>
+            </div>
+            <a href="${loginLink}" style="background:#1a3c5e;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;margin:16px 0;">Login</a>
+            <p style="color:#666;">You can change your password after logging in.</p>
+          </div>
+        `,
+      });
+      this.logger.log(`Credentials email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send credentials email to ${email}`, error);
+    }
+  }
+
   async sendOtpEmail(email: string, otp: string) {
     try {
       await this.transporter.sendMail({

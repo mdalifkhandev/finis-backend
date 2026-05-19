@@ -136,6 +136,10 @@ export class CreateProjectDto {
   type?: ProjectType;
 
   @IsOptional()
+  @IsString()
+  priority?: string;
+
+  @IsOptional()
   @IsDateString()
   startDate?: string;
 
@@ -191,6 +195,10 @@ export class UpdateProjectDto {
   @IsOptional()
   @IsEnum(ProjectType)
   type?: ProjectType;
+
+  @IsOptional()
+  @IsString()
+  priority?: string;
 
   @IsOptional()
   @IsEnum(ProjectStatus)

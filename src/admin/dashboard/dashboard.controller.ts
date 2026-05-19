@@ -21,4 +21,22 @@ export class DashboardController {
   ) {
     return this.dashboardService.getAdminDashboard(adminId, userRole, query);
   }
+
+  @Get('active-workers')
+  getActiveWorkers(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+    @Query() query: DashboardQueryDto,
+  ) {
+    return this.dashboardService.getAllActiveWorkers(adminId, userRole, query);
+  }
+
+  @Get('active-projects')
+  getActiveProjects(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+    @Query() query: DashboardQueryDto,
+  ) {
+    return this.dashboardService.getAllActiveProjects(adminId, userRole, query);
+  }
 }

@@ -9,8 +9,14 @@ import {
   Param,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   ParseUUIDPipe,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { WorkerService } from './worker.service';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -26,6 +32,12 @@ import {
   CreateSupportRequestDto,
   UpdateLocationDto,
 } from './dto/worker.dto';
+import type { File as MulterFile } from 'multer';
+
+const avatarStorage = diskStorage({
+  destination: './uploads/avatars',
+  filename: (_, file, cb) => cb(null, `${uuidv4()}${extname(file.originalname)}`),
+});
 
 @Controller('worker')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -219,11 +231,13 @@ export class WorkerController {
    * Profile update (name, phone, DOB, address, avatar)
    */
   @Put('profile')
+  @UseInterceptors(FileInterceptor('avatarUrl', { storage: avatarStorage }))
   updateProfile(
     @CurrentUser('id') workerId: string,
     @Body() dto: UpdateProfileDto,
+    @UploadedFile() file?: MulterFile,
   ) {
-    return this.workerService.updateProfile(workerId, dto);
+    return this.workerService.updateProfile(workerId, dto, file);
   }
 
   /**

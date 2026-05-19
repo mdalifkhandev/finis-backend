@@ -4,13 +4,14 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCompanyDto, UpdateCompanyDto, CreateContactDto, UpdateContactDto, PaginationQueryDto } from './dto/company.dto';
 import { File as MulterFile } from 'multer';
 
 @Injectable()
 export class CompanyService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService, private config: ConfigService) { }
 
   private async verifyOwner(companyId: string, adminId: string) {
     const company = await this.prisma.company.findUnique({ where: { id: companyId } });
@@ -26,7 +27,7 @@ export class CompanyService {
       select: { tenantId: true },
     });
 
-    if (!admin?.tenantId) return; // পুরনো account — limit নেই
+    if (!admin?.tenantId) return;
 
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: admin.tenantId },
@@ -41,9 +42,8 @@ export class CompanyService {
       throw new ForbiddenException('Your subscription has been cancelled.');
 
     const max = tenant.plan.maxCompanies;
-    if (max === null || max === undefined) return; // unlimited
+    if (max === null || max === undefined) return;
 
-    // ✅ ownerId দিয়ে count করো — Tenant._count.companies কাজ করে না
     const currentCount = await this.prisma.company.count({
       where: { ownerId: adminId, isActive: true },
     });
@@ -56,12 +56,29 @@ export class CompanyService {
   }
 
   async getMyCompanies(adminId: string, query: PaginationQueryDto) {
-    const { page = 1, limit = 10 } = query;
+    const { page = 1, limit = 10, search } = query;
     const skip = (page - 1) * limit;
+
+    const where: any = { ownerId: adminId, isActive: true };
+    if (search && search.trim()) {
+      const s = search.trim();
+      where.AND = [
+        {
+          OR: [
+            { name: { contains: s, mode: 'insensitive' } },
+            { industry: { contains: s, mode: 'insensitive' } },
+            { email: { contains: s, mode: 'insensitive' } },
+            { phone: { contains: s, mode: 'insensitive' } },
+            { website: { contains: s, mode: 'insensitive' } },
+            { address: { contains: s, mode: 'insensitive' } },
+          ],
+        },
+      ];
+    }
 
     const [companies, total] = await Promise.all([
       this.prisma.company.findMany({
-        where: { ownerId: adminId, isActive: true },
+        where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -81,11 +98,17 @@ export class CompanyService {
           _count: { select: { projects: true, members: true } },
         },
       }),
-      this.prisma.company.count({ where: { ownerId: adminId, isActive: true } }),
+      this.prisma.company.count({ where }),
     ]);
 
+
+    const normalized = companies.map((c) => ({
+      ...c,
+      logoUrl: c.logoUrl ?? null,
+    }));
+
     return {
-      data: companies,
+      data: normalized,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -102,8 +125,12 @@ export class CompanyService {
   }
 
   // ─── CREATE COMPANY ───────────────────────────────────────────────────────
-  async createCompany(dto: CreateCompanyDto, adminId: string, logoUrl?: string) {
-    await this.checkCompanyLimit(adminId); // ✅ limit check
+  async createCompany(dto: CreateCompanyDto, adminId: string, logoFilename?: string) {
+    await this.checkCompanyLimit(adminId);
+
+
+    const logoUrl = logoFilename ? `/uploads/logos/${logoFilename}` : undefined;
+
     return this.prisma.company.create({
       data: {
         ownerId: adminId,
@@ -121,11 +148,18 @@ export class CompanyService {
     });
   }
 
-  async updateCompany(companyId: string, dto: UpdateCompanyDto, adminId: string, logoUrl?: string) {
+  async updateCompany(companyId: string, dto: UpdateCompanyDto, adminId: string, logoFilename?: string) {
     await this.verifyOwner(companyId, adminId);
+
+    const { logoUrl: _, ...restDto } = dto; // body এর logoUrl বাদ দাও
+    const logoUrl = logoFilename ? `/uploads/logos/${logoFilename}` : undefined;
+
     return this.prisma.company.update({
       where: { id: companyId },
-      data: { ...dto, ...(logoUrl && { logoUrl }) },
+      data: {
+        ...restDto,
+        ...(logoUrl && { logoUrl }), // শুধু file upload হলেই update হবে
+      },
     });
   }
 
@@ -141,7 +175,7 @@ export class CompanyService {
       where: { companyId },
       orderBy: { createdAt: 'desc' },
       select: {
-        id: true, name: true, type: true, status: true, progress: true,
+        id: true, name: true, type: true, status: true, priority: true, progress: true,
         startDate: true, endDate: true, budget: true, location: true,
         _count: { select: { teamMembers: true, tasks: true } },
         teamMembers: {

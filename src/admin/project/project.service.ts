@@ -120,6 +120,7 @@ export class ProjectService {
       name: true,
       type: true,
       status: true,
+      priority: true,
       progress: true,
       startDate: true,
       endDate: true,
@@ -213,6 +214,7 @@ export class ProjectService {
         description: dto.description,
         numFloors: dto.numFloors,
         roomsPerFloor: dto.roomsPerFloor,
+        ...(dto.priority !== undefined && { priority: dto.priority }),
         status: 'planning',
         progress: 0,
       },
@@ -347,6 +349,7 @@ export class ProjectService {
         ...(dto.name && { name: dto.name }),
         ...(dto.companyId && { companyId: dto.companyId }),
         ...(dto.type && { type: dto.type }),
+        ...(dto.priority !== undefined && { priority: dto.priority }),
         ...(dto.status && { status: dto.status }),
         ...(dto.startDate && { startDate: new Date(dto.startDate) }),
         ...(dto.endDate && { endDate: new Date(dto.endDate) }),
@@ -558,12 +561,12 @@ export class ProjectService {
   }
 
   async getAvailableByRole(adminId: string, role: 'manager' | 'worker', page = 1, limit = 10, search?: string, userRole?: string) {
-    const whereInvitation: any = { status: 'accepted', receiverId: { not: null } };
+    const whereInvitation: any = { receiverId: { not: null } };
     if (userRole !== UserRole.admin && userRole !== UserRole.super_admin) {
       whereInvitation.senderId = adminId;
     }
-    const acceptedInvitations = await this.prisma.invitation.findMany({ where: whereInvitation, select: { receiverId: true } });
-    const invitedUserIds = acceptedInvitations.map((i) => i.receiverId).filter(Boolean) as string[];
+    const invitations = await this.prisma.invitation.findMany({ where: whereInvitation, select: { receiverId: true } });
+    const invitedUserIds = invitations.map((i) => i.receiverId).filter(Boolean) as string[];
     if (invitedUserIds.length === 0) return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
 
     const skip = (page - 1) * limit;
