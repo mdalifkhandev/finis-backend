@@ -153,6 +153,8 @@ export class ProjectService {
       type: true,
       status: true,
       priority: true,
+      isWholeHouse: true,
+      houseSections: true,
       progress: true,
       startDate: true,
       endDate: true,
@@ -392,28 +394,81 @@ export class ProjectService {
     const normalizedSections = this.normalizeHouseSections(nextSectionsSource);
     const houseSetup = this.validateHouseSetup(nextType, nextIsWholeHouse, normalizedSections);
 
-    return this.prisma.project.update({
+    // Prepare update payload
+    const updateData: any = {
+      ...(dto.name && { name: dto.name }),
+      ...(dto.companyId && { companyId: dto.companyId }),
+      ...(dto.type && { type: dto.type }),
+      ...(dto.priority !== undefined && { priority: dto.priority }),
+      isWholeHouse: houseSetup.isWholeHouse,
+      houseSections: houseSetup.houseSections,
+      ...(dto.status && { status: dto.status }),
+      ...(dto.startDate && { startDate: new Date(dto.startDate) }),
+      ...(dto.endDate && { endDate: new Date(dto.endDate) }),
+      ...(dto.numFloors !== undefined && { numFloors: dto.numFloors }),
+      ...(dto.roomsPerFloor !== undefined && { roomsPerFloor: dto.roomsPerFloor }),
+      ...(dto.budget !== undefined && { budget: dto.budget }),
+      ...(dto.spent !== undefined && { spent: dto.spent }),
+      ...(dto.location && { location: dto.location }),
+      ...(dto.description !== undefined && { description: dto.description }),
+      remaining,
+    };
+
+    // Update project metadata first
+    const updatedProject = await this.prisma.project.update({
       where: { id: projectId },
-      data: {
-        ...(dto.name && { name: dto.name }),
-        ...(dto.companyId && { companyId: dto.companyId }),
-        ...(dto.type && { type: dto.type }),
-        ...(dto.priority !== undefined && { priority: dto.priority }),
-        isWholeHouse: houseSetup.isWholeHouse,
-        houseSections: houseSetup.houseSections,
-        ...(dto.status && { status: dto.status }),
-        ...(dto.startDate && { startDate: new Date(dto.startDate) }),
-        ...(dto.endDate && { endDate: new Date(dto.endDate) }),
-        ...(dto.numFloors !== undefined && { numFloors: dto.numFloors }),
-        ...(dto.roomsPerFloor !== undefined && { roomsPerFloor: dto.roomsPerFloor }),
-        ...(dto.budget !== undefined && { budget: dto.budget }),
-        ...(dto.spent !== undefined && { spent: dto.spent }),
-        ...(dto.location && { location: dto.location }),
-        ...(dto.description !== undefined && { description: dto.description }),
-        remaining,
-      },
+      data: updateData,
       include: { company: { select: { id: true, name: true } } },
     });
+
+    // Handle floor-plan updates: either auto-generate or replace with provided floors
+    // If requested, remove existing floors and recreate according to payload
+    if (dto.autoGenerateFloors && dto.numFloors && dto.roomsPerFloor) {
+      // wipe existing floors
+      await this.prisma.floor.deleteMany({ where: { projectId } });
+
+      for (let i = 0; i < dto.numFloors; i++) {
+        const rooms = [] as any[];
+        for (let j = 0; j < dto.roomsPerFloor; j++) {
+          rooms.push({ name: `Room ${j + 1}`, status: 'pending', progress: 0 });
+        }
+        await this.prisma.floor.create({
+          data: {
+            projectId,
+            name: `Floor ${i + 1}`,
+            floorNumber: i + 1,
+            status: 'pending',
+            rooms: { create: rooms },
+          },
+        });
+      }
+    } else if (dto.floors && dto.floors.length > 0) {
+      // Replace existing floors with provided structure
+      await this.prisma.floor.deleteMany({ where: { projectId } });
+
+      for (const f of dto.floors) {
+        const roomsToCreate = (f.rooms ?? []).map((r: any) => ({
+          name: r.name,
+          type: r.type,
+          sizeSqft: r.sizeSqft,
+          status: r.status ?? 'pending',
+          progress: r.progress ?? 0,
+        }));
+
+        await this.prisma.floor.create({
+          data: {
+            projectId,
+            name: f.name,
+            floorNumber: f.floorNumber,
+            status: f.status ?? 'pending',
+            rooms: { create: roomsToCreate },
+          },
+        });
+      }
+    }
+
+    // Return full profile like createProject
+    return this.getProjectProfile(updatedProject.id, adminId, 'admin');
   }
 
   // ─── DELETE PROJECT ────────────────────────────────────────────────────────

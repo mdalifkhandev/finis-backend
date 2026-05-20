@@ -175,7 +175,7 @@ export class CompanyService {
       where: { companyId },
       orderBy: { createdAt: 'desc' },
       select: {
-        id: true, name: true, type: true, status: true, priority: true, progress: true,
+        id: true, name: true, type: true, status: true, priority: true, isWholeHouse: true, houseSections: true, progress: true,
         startDate: true, endDate: true, budget: true, location: true,
         _count: { select: { teamMembers: true, tasks: true } },
         teamMembers: {
