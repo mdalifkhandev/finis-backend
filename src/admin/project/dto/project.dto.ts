@@ -39,16 +39,10 @@ export class CreateRoomDto {
 
 export class AddRoomDto {
   @IsString()
-  name!: string;
+  startRoomNumber!: string;
 
-  @IsOptional()
   @IsString()
-  type?: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Type(() => Number)
-  sizeSqft?: number;
+  endRoomNumber!: string;
 }
 
 export class UpdateRoomDto {
@@ -92,25 +86,15 @@ export class CreateFloorDto {
   @ValidateNested({ each: true })
   @Type(() => CreateRoomDto)
   rooms?: CreateRoomDto[];
+
+  @IsOptional()
+  @IsEnum(FloorStatus)
+  status?: FloorStatus;
 }
 
 export class AddFloorDto {
   @IsString()
   name!: string;
-
-  @IsNumber()
-  @Type(() => Number)
-  floorNumber!: number;
-
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => CreateRoomDto)
-  rooms?: CreateRoomDto[];
-  
-  @IsOptional()
-  @IsEnum(FloorStatus)
-  status?: FloorStatus;
 }
 
 export class UpdateFloorDto {
@@ -248,7 +232,7 @@ export class UpdateProjectDto {
 
   @IsOptional()
   @IsArray()
-  floors?: AddFloorDto[];
+  floors?: CreateFloorDto[];
 
   @IsOptional()
   @IsEnum(ProjectStatus)

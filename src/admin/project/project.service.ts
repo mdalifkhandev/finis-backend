@@ -446,7 +446,8 @@ export class ProjectService {
       // Replace existing floors with provided structure
       await this.prisma.floor.deleteMany({ where: { projectId } });
 
-      for (const f of dto.floors) {
+      for (let idx = 0; idx < dto.floors.length; idx++) {
+        const f = dto.floors[idx];
         const roomsToCreate = (f.rooms ?? []).map((r: any) => ({
           name: r.name,
           type: r.type,
@@ -459,7 +460,7 @@ export class ProjectService {
           data: {
             projectId,
             name: f.name,
-            floorNumber: f.floorNumber,
+            floorNumber: typeof f.floorNumber === 'number' ? f.floorNumber : idx + 1,
             status: f.status ?? 'pending',
             rooms: { create: roomsToCreate },
           },
@@ -571,21 +572,21 @@ export class ProjectService {
   // ─── FLOORS CRUD ───────────────────────────────────────────────────────────
   async addFloor(projectId: string, dto: AddFloorDto, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
-    const floor = await this.prisma.floor.create({
-      data: { projectId, name: dto.name, floorNumber: dto.floorNumber, status: 'pending' },
-    });
-    if (dto.rooms && dto.rooms.length > 0) {
-      await this.prisma.room.createMany({
-        data: dto.rooms.map((r) => ({
-          floorId: floor.id,
-          name: r.name,
-          type: r.type,
-          sizeSqft: r.sizeSqft,
-          status: 'pending' as const,
-          progress: 0,
-        })),
-      });
+    if (!dto || !dto.name) {
+      throw new BadRequestException('Floor name is required');
     }
+
+    const existingFloorCount = await this.prisma.floor.count({ where: { projectId } });
+    const nextNumber = existingFloorCount + 1;
+
+    const floor = await this.prisma.floor.create({
+      data: {
+        projectId,
+        name: dto.name,
+        floorNumber: nextNumber,
+      },
+    });
+
     return this.prisma.floor.findUnique({
       where: { id: floor.id },
       include: { rooms: true, _count: { select: { tasks: true, rooms: true } } },
@@ -619,11 +620,56 @@ export class ProjectService {
   // ─── ROOMS CRUD ────────────────────────────────────────────────────────────
   async addRoom(projectId: string, floorId: string, dto: AddRoomDto, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
-    const floor = await this.prisma.floor.findFirst({ where: { id: floorId, projectId } });
-    if (!floor) throw new NotFoundException('Floor not found');
-    return this.prisma.room.create({
-      data: { floorId, name: dto.name, type: dto.type, sizeSqft: dto.sizeSqft, status: 'pending', progress: 0 },
+    const floor = await this.prisma.floor.findUnique({ where: { id: floorId } });
+    if (!floor || floor.projectId !== projectId) {
+      throw new NotFoundException('Floor not found for this project');
+    }
+
+    const parseRoomLabel = (value: string) => {
+      const trimmed = value.trim();
+      const match = trimmed.match(/^(.*?)(\d+)$/);
+
+      if (!match) {
+        throw new BadRequestException('Room number must end with digits, like A1 or Y20');
+      }
+
+      return {
+        prefix: match[1],
+        number: Number(match[2]),
+      };
+    };
+
+    const start = parseRoomLabel(dto.startRoomNumber);
+    const end = parseRoomLabel(dto.endRoomNumber);
+
+    if (start.prefix !== end.prefix) {
+      throw new BadRequestException('Start and end room prefix must be the same');
+    }
+
+    const from = Math.min(start.number, end.number);
+    const to = Math.max(start.number, end.number);
+
+    if (from < 1) {
+      throw new BadRequestException('Room number must start from 1 or greater');
+    }
+
+    if (to - from + 1 > 200) {
+      throw new BadRequestException('Too many rooms requested');
+    }
+
+    const roomsData = Array.from({ length: to - from + 1 }, (_, index) => {
+      const roomNumber = from + index;
+      return {
+        floorId,
+        name: `${start.prefix}${roomNumber}`,
+        status: 'pending' as const,
+        progress: 0,
+      };
     });
+
+    await this.prisma.room.createMany({ data: roomsData });
+
+    return { message: `${roomsData.length} rooms created` };
   }
 
   async updateRoom(projectId: string, roomId: string, dto: UpdateRoomDto, userId: string, userRole: string) {

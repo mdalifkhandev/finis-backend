@@ -33,7 +33,7 @@ app.useStaticAssets(join(process.cwd(), 'uploads'), {
   prefix: '/uploads',
 });
 
-  const port = process.env.PORT || 4000;
+  const port =  6000;
 
   await app.listen(port, '0.0.0.0');
 
