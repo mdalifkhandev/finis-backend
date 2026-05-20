@@ -529,6 +529,24 @@ export class ProjectService {
     }));
   }
 
+  async getFloorNames(projectId: string, userId: string, userRole: string) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+
+    const floors = await this.prisma.floor.findMany({
+      where: { projectId },
+      orderBy: { floorNumber: 'asc' },
+      select: { id: true, name: true, floorNumber: true, status: true, progress: true },
+    });
+
+    return floors.map((floor) => ({
+      id: floor.id,
+      floorNumber: floor.floorNumber,
+      name: floor.name,
+      status: floor.status,
+      progress: floor.progress,
+    }));
+  }
+
   // ─── PROJECT ANALYSIS ──────────────────────────────────────────────────────
   async getProjectAnalysis(projectId: string, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
@@ -672,6 +690,37 @@ export class ProjectService {
     return { message: `${roomsData.length} rooms created` };
   }
 
+  async getRoomNames(projectId: string, floorId: string, userId: string, userRole: string) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+
+    const floor = await this.prisma.floor.findUnique({
+      where: { id: floorId },
+      select: { id: true, projectId: true },
+    });
+
+    if (!floor || floor.projectId !== projectId) {
+      throw new NotFoundException('Floor not found for this project');
+    }
+
+    const rooms = await this.prisma.room.findMany({
+      where: { floorId },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true , status: true, progress: true, type: true},
+    });
+
+    return rooms.map((room) => {
+      const match = room.name.trim().match(/^(.*?)(\d+)$/);
+      return {
+        id: room.id,
+        roomNumber: match ? Number(match[2]) : null,
+        name: room.name,
+        status: room.status,
+        progress: room.progress,
+        type: room.type,
+      };
+    });
+  }
+
   async updateRoom(projectId: string, roomId: string, dto: UpdateRoomDto, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
     const room = await this.prisma.room.findFirst({ where: { id: roomId, floor: { projectId } } });
@@ -697,7 +746,7 @@ export class ProjectService {
   }
 
   // ─── TEAM ──────────────────────────────────────────────────────────────────
-  async getTeamMembers(projectId: string, userId: string, userRole: string) {
+  async getTeamMembers(projectId: string, userId: string, userRole: string, role?: 'manager' | 'worker') {
     await this.verifyProjectAccess(projectId, userId, userRole);
     const members = await this.prisma.projectMember.findMany({
       where: { projectId },
@@ -709,6 +758,14 @@ export class ProjectService {
     });
     const managers = members.filter((m) => m.role === 'manager').map((m) => ({ memberId: m.id, ...m.user }));
     const workers = members.filter((m) => m.role === 'worker').map((m) => ({ memberId: m.id, managerId: m.managerId, ...m.user }));
+
+    if (role === 'manager') {
+      return { total: managers.length, managers, workers: [] };
+    }
+    if (role === 'worker') {
+      return { total: workers.length, managers: [], workers };
+    }
+
     return { total: members.length, managers, workers };
   }
 

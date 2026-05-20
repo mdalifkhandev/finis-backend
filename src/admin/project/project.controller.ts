@@ -109,6 +109,18 @@ export class ProjectController {
     return this.projectService.getFloorPlan(id, userId, userRole);
   }
 
+  /** GET /admin/projects/:id/floors
+   *  Returns: floor names only
+   */
+  @Get(':id/floors')
+  getFloorNames(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.getFloorNames(id, userId, userRole);
+  }
+
   /** POST /admin/projects/:id/floors */
   @Post(':id/floors')
   addFloor(
@@ -157,6 +169,19 @@ export class ProjectController {
     return this.projectService.addRoom(id, floorId, dto, userId, userRole);
   }
 
+  /** GET /admin/projects/:id/floors/:floorId/rooms
+   *  Returns: room names only
+   */
+  @Get(':id/floors/:floorId/rooms')
+  getRoomNames(
+    @Param('id') id: string,
+    @Param('floorId') floorId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.getRoomNames(id, floorId, userId, userRole);
+  }
+
   /** PUT /admin/projects/:id/rooms/:roomId */
   @Put(':id/rooms/:roomId')
   updateRoom(
@@ -202,8 +227,9 @@ export class ProjectController {
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
+    @Query('role') role?: 'manager' | 'worker',
   ) {
-    return this.projectService.getTeamMembers(id, userId, userRole);
+    return this.projectService.getTeamMembers(id, userId, userRole, role);
   }
 
   /** POST /admin/projects/:id/team/managers */

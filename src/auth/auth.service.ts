@@ -33,11 +33,57 @@ export class AuthService {
 
   // ── LOGIN ──────────────────────────────────
   async login(dto: LoginDto) {
-    const user = await this.prisma.user.findFirst({
-      where: {
-        OR: [{ email: dto.identifier }, { phone: dto.identifier }],
-      },
-    });
+    const identifier = dto.identifier.trim();
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    let user:
+      | {
+          id: string;
+          email: string;
+          phone: string | null;
+          fullName: string;
+          role: UserRole;
+          status: string;
+          tenantId: string | null;
+          avatarUrl: string | null;
+          passwordHash: string | null;
+        }
+      | null = null;
+    try {
+      if (emailPattern.test(identifier)) {
+        user = await this.prisma.user.findUnique({
+          where: { email: identifier },
+          select: {
+            id: true,
+            email: true,
+            phone: true,
+            fullName: true,
+            role: true,
+            status: true,
+            tenantId: true,
+            avatarUrl: true,
+            passwordHash: true,
+          },
+        });
+      } else {
+        user = await this.prisma.user.findFirst({
+          where: { phone: identifier },
+          select: {
+            id: true,
+            email: true,
+            phone: true,
+            fullName: true,
+            role: true,
+            status: true,
+            tenantId: true,
+            avatarUrl: true,
+            passwordHash: true,
+          },
+        });
+      }
+    } catch {
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     if (!user) throw new UnauthorizedException('Invalid credentials');
     if (user.status === 'suspended') throw new UnauthorizedException('Account suspended');
