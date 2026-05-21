@@ -745,28 +745,26 @@ export class ProjectService {
     return { message: 'Room deleted successfully' };
   }
 
-  // ─── TEAM ──────────────────────────────────────────────────────────────────
-  async getTeamMembers(projectId: string, userId: string, userRole: string, role?: 'manager' | 'worker') {
+
+  async getManagers(projectId: string, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
-    const members = await this.prisma.projectMember.findMany({
-      where: { projectId },
-      include: {
-        user: {
-          select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true, status: true, department: true },
-        },
-      },
+
+    const managers = await this.prisma.projectMember.findMany({
+      where: { projectId, role: 'manager' },
+      include: { user: { select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true, status: true, department: true } } },
     });
-    const managers = members.filter((m) => m.role === 'manager').map((m) => ({ memberId: m.id, ...m.user }));
-    const workers = members.filter((m) => m.role === 'worker').map((m) => ({ memberId: m.id, managerId: m.managerId, ...m.user }));
 
-    if (role === 'manager') {
-      return { total: managers.length, managers, workers: [] };
-    }
-    if (role === 'worker') {
-      return { total: workers.length, managers: [], workers };
-    }
+    return managers.map((m) => ({ memberId: m.id, ...m.user }));
+  }
 
-    return { total: members.length, managers, workers };
+  async getManagerWorkersCount(projectId: string, managerId: string, userId: string, userRole: string) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+
+    const count = await this.prisma.projectMember.count({
+      where: { projectId, role: 'worker', managerId },
+    });
+
+    return { projectId, managerId, workerCount: count };
   }
 
   async getAvailableByRole(adminId: string, role: 'manager' | 'worker', page = 1, limit = 10, search?: string, userRole?: string) {

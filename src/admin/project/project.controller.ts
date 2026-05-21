@@ -221,15 +221,25 @@ export class ProjectController {
 
   // ─── TEAM ──────────────────────────────────────────────────────────────────
 
-  /** GET /admin/projects/:id/team */
-  @Get(':id/team')
-  getTeamMembers(
+  /** GET /admin/projects/:id/team/managers */
+  @Get(':id/team/managers')
+  getManagers(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
-    @Query('role') role?: 'manager' | 'worker',
   ) {
-    return this.projectService.getTeamMembers(id, userId, userRole, role);
+    return this.projectService.getManagers(id, userId, userRole);
+  }
+
+  /** GET /admin/projects/:id/team/managers/:managerId/workers-count */
+  @Get(':id/team/managers/:managerId/workers-count')
+  getManagerWorkersCount(
+    @Param('id') id: string,
+    @Param('managerId') managerId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.getManagerWorkersCount(id, managerId, userId, userRole);
   }
 
   /** POST /admin/projects/:id/team/managers */
