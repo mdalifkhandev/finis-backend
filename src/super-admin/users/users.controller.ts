@@ -1,0 +1,18 @@
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
+import { RolesGuard } from '../../auth/guards/roles.guard';
+import { Roles } from '../../auth/decorators/roles.decorator';
+import { UserRole } from '../../generated/prisma/client';
+import { SuperAdminUsersService } from './users.service';
+
+@Controller('super-admin/users')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.super_admin)
+export class SuperAdminUsersController {
+  constructor(private readonly usersService: SuperAdminUsersService) {}
+
+  @Get()
+  async getUsers(@Query('role') role?: string, @Query('projectId') projectId?: string) {
+    return this.usersService.getUsers(role, projectId);
+  }
+}
