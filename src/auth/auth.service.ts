@@ -325,9 +325,16 @@ export class AuthService {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const forgotToken = uuidv4(); // ← token generate
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
-    // key = forgotToken, value = { email, otp, expiresAt }
-    otpStore.set(forgotToken, { email: dto.email, otp, expiresAt });
+    // Store OTP and a short-lived token on the user record (DB-backed).
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        otp,
+        otpExpiresAt: expiresAt,
+        resetToken: forgotToken,
+        resetExpiresAt: expiresAt,
+      },
+    });
 
     await this.mailService.sendOtpEmail(dto.email, otp);
 
@@ -340,56 +347,50 @@ export class AuthService {
 
   // ── VERIFY OTP ────────────────────────────
   async verifyOtp(dto: VerifyOtpDto) {
-    const stored = otpStore.get(dto.forgotToken);
-
-    if (!stored) throw new BadRequestException('Invalid or expired token');
-    if (new Date() > stored.expiresAt) {
-      otpStore.delete(dto.forgotToken);
+    // Lookup the user by the short-lived reset token stored on the user.
+    const user = await this.prisma.user.findFirst({ where: { resetToken: dto.forgotToken } });
+    if (!user) throw new BadRequestException('Invalid or expired token');
+    if (!user.otp || !user.otpExpiresAt) throw new BadRequestException('OTP not found');
+    if (new Date() > user.otpExpiresAt) {
+      // Clear otp fields
+      await this.prisma.user.update({ where: { id: user.id }, data: { otp: null, otpExpiresAt: null, resetToken: null, resetExpiresAt: null } });
       throw new BadRequestException('OTP expired');
     }
-    if (stored.otp !== dto.otp) throw new BadRequestException('Invalid OTP');
+    if (user.otp !== dto.otp) throw new BadRequestException('Invalid OTP');
 
-    otpStore.delete(dto.forgotToken);
-
+    // OTP is valid — generate a new reset token for password reset step
     const resetToken = uuidv4();
-    resetTokenStore.set(resetToken, {
-      identifier: stored.email,
-      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    const resetExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        otp: null,
+        otpExpiresAt: null,
+        resetToken,
+        resetExpiresAt,
+      },
     });
 
     return { message: 'OTP verified', resetToken };
   }
   // ── RESET PASSWORD ────────────────────────
   async resetPassword(dto: ResetPasswordDto) {
-    // FIX: validate required fields
     if (!dto.resetToken) throw new BadRequestException('Reset token is required');
     if (!dto.newPassword) throw new BadRequestException('New password is required');
 
-    const stored = resetTokenStore.get(dto.resetToken);
-
-    if (!stored) throw new BadRequestException('Invalid or expired reset token');
-    if (new Date() > stored.expiresAt) {
-      resetTokenStore.delete(dto.resetToken);
+    // Find the user by resetToken stored on the user record
+    const user = await this.prisma.user.findFirst({ where: { resetToken: dto.resetToken } });
+    if (!user) throw new BadRequestException('Invalid or expired reset token');
+    if (!user.resetExpiresAt || new Date() > user.resetExpiresAt) {
+      // Clear any stale token
+      if (user.id) await this.prisma.user.update({ where: { id: user.id }, data: { resetToken: null, resetExpiresAt: null } });
       throw new BadRequestException('Reset token expired');
     }
 
-    const user = await this.prisma.user.findFirst({
-      where: {
-        OR: [{ email: stored.identifier }, { phone: stored.identifier }],
-      },
-    });
-
-    if (!user) throw new NotFoundException('User not found');
-
-    // FIX: await hash, then pass as string
     const hash = await bcrypt.hash(dto.newPassword, 10);
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { passwordHash: hash },
-    });
-
-    resetTokenStore.delete(dto.resetToken);
+    await this.prisma.user.update({ where: { id: user.id }, data: { passwordHash: hash, resetToken: null, resetExpiresAt: null } });
 
     return { message: 'Password updated successfully' };
   }

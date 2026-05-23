@@ -72,6 +72,18 @@ export class ProjectController {
     return this.projectService.getProjectProfile(id, userId, userRole);
   }
 
+  /** GET /admin/projects/:id/documents
+   *  Returns: all documents uploaded for the project
+   */
+  @Get(':id/documents')
+  getProjectDocuments(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.getProjectDocuments(id, userId, userRole);
+  }
+
   /** PUT /admin/projects/:id — Edit Project screen */
   @Put(':id')
   @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)

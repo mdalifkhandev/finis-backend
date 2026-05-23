@@ -14,7 +14,7 @@ import {
   UpdateRoomDto,
   CreateGeofenceDto,
 } from './dto/project.dto';
-import { UserStatus, UserRole, ProjectType } from '../../generated/prisma/client';
+import { UserStatus, UserRole, ProjectType, FloorStatus, ProjectStatus } from '../../generated/prisma/client';
 
 @Injectable()
 export class ProjectService {
@@ -84,6 +84,42 @@ export class ProjectService {
         throw new ForbiddenException('You do not have access to this project');
     }
     return project;
+  }
+
+  private async syncFloorAndProjectStatus(projectId: string, floorId: string) {
+    const [floorRooms, projectRooms] = await Promise.all([
+      this.prisma.room.findMany({
+        where: { floorId },
+        select: { status: true },
+      }),
+      this.prisma.room.findMany({
+        where: { floor: { projectId } },
+        select: { status: true },
+      }),
+    ]);
+
+    const floorStatus = floorRooms.length === 0
+      ? FloorStatus.pending
+      : floorRooms.every((room) => room.status === 'completed')
+        ? FloorStatus.completed
+        : FloorStatus.in_progress;
+
+    const projectStatus = projectRooms.length === 0
+      ? ProjectStatus.planning
+      : projectRooms.every((room) => room.status === 'completed')
+        ? ProjectStatus.completed
+        : ProjectStatus.active;
+
+    await this.prisma.$transaction([
+      this.prisma.floor.update({
+        where: { id: floorId },
+        data: { status: floorStatus },
+      }),
+      this.prisma.project.update({
+        where: { id: projectId },
+        data: { status: projectStatus },
+      }),
+    ]);
   }
 
   // ─── PLAN LIMIT CHECKS ────────────────────────────────────────────────────
@@ -687,6 +723,8 @@ export class ProjectService {
 
     await this.prisma.room.createMany({ data: roomsData });
 
+    await this.syncFloorAndProjectStatus(projectId, floorId);
+
     return { message: `${roomsData.length} rooms created` };
   }
 
@@ -723,9 +761,13 @@ export class ProjectService {
 
   async updateRoom(projectId: string, roomId: string, dto: UpdateRoomDto, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
-    const room = await this.prisma.room.findFirst({ where: { id: roomId, floor: { projectId } } });
+    const room = await this.prisma.room.findFirst({
+      where: { id: roomId, floor: { projectId } },
+      select: { id: true, floorId: true },
+    });
     if (!room) throw new NotFoundException('Room not found');
-    return this.prisma.room.update({
+
+    const updatedRoom = await this.prisma.room.update({
       where: { id: roomId },
       data: {
         ...(dto.name && { name: dto.name }),
@@ -735,13 +777,23 @@ export class ProjectService {
         ...(dto.progress !== undefined && { progress: dto.progress }),
       },
     });
+
+    await this.syncFloorAndProjectStatus(projectId, room.floorId);
+
+    return updatedRoom;
   }
 
   async deleteRoom(projectId: string, roomId: string, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
-    const room = await this.prisma.room.findFirst({ where: { id: roomId, floor: { projectId } } });
+    const room = await this.prisma.room.findFirst({
+      where: { id: roomId, floor: { projectId } },
+      select: { id: true, floorId: true },
+    });
     if (!room) throw new NotFoundException('Room not found');
     await this.prisma.room.delete({ where: { id: roomId } });
+
+    await this.syncFloorAndProjectStatus(projectId, room.floorId);
+
     return { message: 'Room deleted successfully' };
   }
 
@@ -811,6 +863,35 @@ export class ProjectService {
       tasks,
       stats,
     };
+  }
+
+  async getProjectDocuments(projectId: string, userId: string, userRole: string) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+
+    const documents = await this.prisma.document.findMany({
+      where: { projectId },
+      orderBy: { uploadedAt: 'desc' },
+      include: {
+        uploadedByUser: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    return documents.map((document) => ({
+      id: document.id,
+      fileName: document.fileName,
+      fileUrl: document.fileUrl,
+      fileType: document.fileType,
+      fileSizeMb: document.fileSizeMb,
+      uploadedAt: document.uploadedAt,
+      uploadedBy: document.uploadedByUser,
+    }));
   }
 
   async getManagerWorkersCount(projectId: string, managerId: string, userId: string, userRole: string) {
