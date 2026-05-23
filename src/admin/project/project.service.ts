@@ -757,6 +757,62 @@ export class ProjectService {
     return managers.map((m) => ({ memberId: m.id, ...m.user }));
   }
 
+  async getWorkers(projectId: string, userId: string, userRole: string) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+
+    const workers = await this.prisma.projectMember.findMany({
+      where: { projectId, role: 'worker' },
+      include: { user: { select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true, status: true, department: true } } },
+    });
+
+    return workers.map((w) => ({ memberId: w.id, managerId: w.managerId, ...w.user }));
+  }
+
+  async getWorkerDetails(projectId: string, workerId: string, userId: string, userRole: string) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+    const member = await this.prisma.projectMember.findFirst({
+      where: { projectId, userId: workerId, role: 'worker' },
+      include: {
+        user: { select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true } },
+      },
+    });
+
+    if (!member) throw new NotFoundException('Worker not found in project');
+
+    // fetch tasks assigned to this user
+    const tasks = await this.prisma.task.findMany({
+      where: { projectId, assignee: { id: workerId } },
+      select: { id: true, title: true, status: true, dueDate: true, priority: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const stats = {
+      total: tasks.length,
+      completed: tasks.filter((t) => t.status === 'completed').length,
+      inProgress: tasks.filter((t) => t.status === 'in_progress').length,
+      notStarted: tasks.filter((t) => t.status === 'pending').length,
+    };
+
+    // load manager user info if managerId is present
+    let managerUser: { id: string; fullName: string; avatarUrl: string | null } | null = null;
+    if (member.managerId) {
+      managerUser = await this.prisma.user.findUnique({
+        where: { id: member.managerId },
+        select: { id: true, fullName: true, avatarUrl: true },
+      });
+    }
+
+    return {
+      memberId: member.id,
+      user: member.user,
+      managerId: member.managerId ?? null,
+      manager: managerUser,
+      joinedAt: member.createdAt,
+      tasks,
+      stats,
+    };
+  }
+
   async getManagerWorkersCount(projectId: string, managerId: string, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
 
@@ -764,7 +820,18 @@ export class ProjectService {
       where: { projectId, role: 'worker', managerId },
     });
 
-    return { projectId, managerId, workerCount: count };
+    return { projectId, managerId, count };
+  }
+
+  async getWorkersByManager(projectId: string, managerId: string, userId: string, userRole: string) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+
+    const workers = await this.prisma.projectMember.findMany({
+      where: { projectId, role: 'worker', managerId },
+      include: { user: { select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true, status: true, department: true } } },
+    });
+
+    return workers.map((w) => ({ memberId: w.id, managerId: w.managerId, ...w.user }));
   }
 
   async getAvailableByRole(adminId: string, role: 'manager' | 'worker', page = 1, limit = 10, search?: string, userRole?: string) {
@@ -815,7 +882,14 @@ export class ProjectService {
     });
     if (role === 'worker' && managerId) {
       const existingMap = await this.prisma.workerManagerMap.findFirst({ where: { workerId: userId, managerId } });
-      if (!existingMap) await this.prisma.workerManagerMap.create({ data: { managerId, workerId: userId } });
+      if (!existingMap) {
+        try {
+          await this.prisma.workerManagerMap.create({ data: { managerId, workerId: userId } });
+        } catch (e) {
+          // ignore duplicate mapping race (unique constraint) but rethrow other errors
+          if ((e as any)?.code !== 'P2002') throw e;
+        }
+      }
     }
     return { message: `${role} added successfully`, member: { memberId: member.id, ...member.user } };
   }
@@ -824,6 +898,15 @@ export class ProjectService {
     await this.verifyProjectAccess(projectId, adminId, userRole);
     const member = await this.prisma.projectMember.findFirst({ where: { projectId, userId } });
     if (!member) throw new NotFoundException('Member not found');
+
+    // Clean up any worker-manager mappings related to this member
+    if (member.role === 'manager') {
+      await this.prisma.workerManagerMap.deleteMany({ where: { managerId: userId } });
+    }
+    if (member.role === 'worker') {
+      await this.prisma.workerManagerMap.deleteMany({ where: { workerId: userId } });
+    }
+
     await this.prisma.projectMember.delete({ where: { id: member.id } });
     return { message: 'Member removed successfully' };
   }

@@ -52,6 +52,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
     };
 
+    const baseMessage = `[ERR] ${request.method} ${request.url} ${status} - ${message}`;
+    const details = errors ? JSON.stringify(errors) : undefined;
+
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      this.logger.error(baseMessage, details);
+    } else {
+      this.logger.warn(details ? `${baseMessage} | details=${details}` : baseMessage);
+    }
+
     response.status(status).json(errorResponse);
   }
 }

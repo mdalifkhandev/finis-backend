@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsEnum, IsUUID } from 'class-validator';
+import { ArrayNotEmpty, IsArray, IsString, IsOptional, IsNumber, IsEnum, IsUUID } from 'class-validator';
 import { TaskPriority, TaskStatus } from '../../../generated/prisma/client';
 
 export class CreateTaskDto {
@@ -48,8 +48,10 @@ export class UpdateTaskStatusDto {
 }
 
 export class AssignTaskDto {
-  @IsUUID()
-  userId!: string;
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsUUID('4', { each: true })
+  userIds!: string[];
 }
 
 export class ReviewTaskDto {

@@ -1,5 +1,6 @@
 import {
   Controller,
+  Post,
   Get,
   Patch,
   Param,
@@ -14,6 +15,7 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { UserRole } from '../../generated/prisma/client';
 import {
+  CreateExpenseDto,
   ExpenseQueryDto,
   ReviewExpenseDto,
   UpdateExpenseProjectDto,
@@ -24,6 +26,16 @@ import {
 @Roles(UserRole.super_admin, UserRole.admin)
 export class ExpenseManagementController {
   constructor(private expenseManagementService: ExpenseManagementService) {}
+
+  /** POST /super_admin/expense-management */
+  @Post()
+  createExpense(
+    @Body() dto: CreateExpenseDto,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.expenseManagementService.createExpense(dto, userId, userRole);
+  }
 
   // ─── IMAGE 1: Dashboard + List ────────────────────────────────────────────
 

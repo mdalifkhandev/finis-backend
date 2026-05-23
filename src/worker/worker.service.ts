@@ -23,6 +23,19 @@ import {
 export class WorkerService {
   constructor(private readonly prisma: PrismaService) { }
 
+  private isWorkerAssigned(task: { assignedTo?: string | null; taskAssignees?: { userId: string }[] }, workerId: string) {
+    return task.assignedTo === workerId || (task.taskAssignees?.some((assignment) => assignment.userId === workerId) ?? false);
+  }
+
+  private workerTaskWhere(workerId: string) {
+    return {
+      OR: [
+        { assignedTo: workerId },
+        { taskAssignees: { some: { userId: workerId } } },
+      ],
+    };
+  }
+
   // ─────────────────────────────────────────────
   // DASHBOARD
   // ─────────────────────────────────────────────
@@ -44,7 +57,7 @@ export class WorkerService {
       // today tasks (due today or in_progress)
       this.prisma.task.findMany({
         where: {
-          assignedTo: workerId,
+          ...this.workerTaskWhere(workerId),
           OR: [
             { dueDate: { gte: today, lte: todayEnd } },
             { status: 'in_progress' },
@@ -69,7 +82,7 @@ export class WorkerService {
       // today completed tasks
       this.prisma.task.count({
         where: {
-          assignedTo: workerId,
+          ...this.workerTaskWhere(workerId),
           status: 'completed',
           updatedAt: { gte: today, lte: todayEnd },
         },
@@ -210,7 +223,7 @@ export class WorkerService {
     });
 
     if (!task) throw new NotFoundException('Task not found');
-    if (task.assignedTo !== workerId)
+    if (!this.isWorkerAssigned(task, workerId))
       throw new ForbiddenException('This task is not assigned to you');
 
     return task;
@@ -220,7 +233,7 @@ export class WorkerService {
     const task = await this.prisma.task.findUnique({ where: { id: taskId } });
 
     if (!task) throw new NotFoundException('Task not found');
-    if (task.assignedTo !== workerId)
+    if (!this.isWorkerAssigned(task, workerId))
       throw new ForbiddenException('This task is not assigned to you');
     if (task.status !== 'pending')
       throw new BadRequestException(`Task is already ${task.status}`);
@@ -244,7 +257,7 @@ export class WorkerService {
     const task = await this.prisma.task.findUnique({ where: { id: taskId } });
 
     if (!task) throw new NotFoundException('Task not found');
-    if (task.assignedTo !== workerId)
+    if (!this.isWorkerAssigned(task, workerId))
       throw new ForbiddenException('This task is not assigned to you');
     if (task.status === 'completed')
       throw new BadRequestException('Task is already completed');
@@ -317,7 +330,7 @@ export class WorkerService {
       include: { project: { include: { company: true } } },
     });
     if (!task) throw new NotFoundException('Task not found');
-    if (task.assignedTo !== workerId)
+    if (!this.isWorkerAssigned(task, workerId))
       throw new ForbiddenException('This task is not assigned to you');
 
     return this.prisma.inventoryItem.findMany({

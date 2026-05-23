@@ -231,15 +231,38 @@ export class ProjectController {
     return this.projectService.getManagers(id, userId, userRole);
   }
 
+  /** GET /admin/projects/:id/team/workers */
+  @Get(':id/team/workers')
+  getWorkers(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.getWorkers(id, userId, userRole);
+  }
+
   /** GET /admin/projects/:id/team/managers/:managerId/workers-count */
   @Get(':id/team/managers/:managerId/workers-count')
   getManagerWorkersCount(
     @Param('id') id: string,
     @Param('managerId') managerId: string,
-    @CurrentUser('id') userId: string,
+    @CurrentUser('id') userId: string, 
     @CurrentUser('role') userRole: string,
   ) {
     return this.projectService.getManagerWorkersCount(id, managerId, userId, userRole);
+  }
+
+  /** GET /admin/projects/:id/team/managers/:managerId/workers
+   *  Returns: list of workers assigned to the given manager within the project
+   */
+  @Get(':id/team/managers/:managerId/workers')
+  getManagerWorkers(
+    @Param('id') id: string,
+    @Param('managerId') managerId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.getWorkersByManager(id, managerId, userId, userRole);
   }
 
   /** POST /admin/projects/:id/team/managers */

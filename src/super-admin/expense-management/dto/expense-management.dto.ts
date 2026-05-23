@@ -1,4 +1,5 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsEnum, IsNumber, IsOptional, IsString, IsUUID } from 'class-validator';
+import { ExpenseCategory } from '../../../generated/prisma/client';
 
 export class ExpenseQueryDto {
   @IsOptional()
@@ -40,4 +41,29 @@ export class UpdateExpenseProjectDto {
   @IsOptional()
   @IsString()
   taskId?: string;
+}
+
+export class CreateExpenseDto {
+  @IsUUID()
+  workerId!: string;
+
+  @IsOptional()
+  @IsUUID()
+  projectId?: string;
+
+  @IsString()
+  description!: string;
+
+  @IsEnum(ExpenseCategory)
+  category!: ExpenseCategory;
+
+  @IsNumber()
+  amount!: number;
+
+  @IsOptional()
+  @IsString()
+  receiptUrl?: string;
+
+  @IsDateString()
+  date!: string;
 }

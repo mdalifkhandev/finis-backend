@@ -18,6 +18,17 @@ import { UserRole } from '../../generated/prisma/client';
 export class TaskService {
   constructor(private prisma: PrismaService) { }
 
+  private toTaskResponse(task: any) {
+    const assignees = task.taskAssignees?.map((assignment: any) => assignment.user) ?? [];
+    const normalizedAssignees = assignees.length > 0 ? assignees : (task.assignee ? [task.assignee] : []);
+
+    return {
+      ...task,
+      assignees: normalizedAssignees,
+      available: normalizedAssignees.length === 0,
+    };
+  }
+
   // ── GET ALL TASKS ──────────────────────────────────────────────
   async getTasks(
     userId: string,
@@ -75,6 +86,13 @@ export class TaskService {
           assignee: {
             select: { id: true, fullName: true, avatarUrl: true, role: true },
           },
+          taskAssignees: {
+            include: {
+              user: {
+                select: { id: true, fullName: true, avatarUrl: true, role: true },
+              },
+            },
+          },
           _count: { select: { reports: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -84,8 +102,10 @@ export class TaskService {
       this.prisma.task.count({ where }),
     ]);
 
+    const mapped = data.map((t) => this.toTaskResponse(t));
+
     return {
-      data,
+      data: mapped,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -143,10 +163,15 @@ export class TaskService {
         floor: { select: { id: true, name: true } },
         room: { select: { id: true, name: true } },
         assignee: { select: { id: true, fullName: true, avatarUrl: true } },
+        taskAssignees: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true } },
+          },
+        },
       },
     });
 
-    return task;
+    return this.toTaskResponse(task);
   }
 
   // ── GET TASK DETAILS ───────────────────────────────────────────
@@ -171,6 +196,11 @@ export class TaskService {
           },
         },
         creator: { select: { id: true, fullName: true, avatarUrl: true } },
+        taskAssignees: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          },
+        },
         reports: {
           orderBy: { submittedAt: 'desc' },
           include: {
@@ -210,7 +240,7 @@ export class TaskService {
       },
     });
 
-    return { ...task, expenses };
+    return { ...this.toTaskResponse(task), expenses };
   }
 
   // ── UPDATE TASK ────────────────────────────────────────────────
@@ -264,39 +294,94 @@ export class TaskService {
       },
     });
 
-    let workers = members.map((m) => ({
-      ...m.user,
-      memberId: m.id,
-      isAvailable: m.user.status === 'active',
-    }));
+
+    const totalWorkers = members.length;
+
+    const assignedIds = new Set([
+      task.assignedTo,
+      ...(task.taskAssignees?.map((assignment) => assignment.userId) ?? []),
+    ].filter((value): value is string => Boolean(value)));
+
+    let workers = members.map((m) => {
+      const isAssigned = assignedIds.has(m.user.id);
+      return {
+        ...m.user,
+        memberId: m.id,
+        isAssigned,
+        // not available if assigned to this task or user is not active
+        isAvailable: !isAssigned && m.user.status === 'active',
+      };
+    });
 
     if (search) {
       const s = search.toLowerCase();
       workers = workers.filter((w) => w.fullName.toLowerCase().includes(s));
     }
 
-    return workers;
+    const availableCount = workers.filter((w) => w.isAvailable).length;
+
+    return {
+      data: workers,
+      meta: { totalWorkers, availableCount },
+    };
   }
 
   // ── ASSIGN WORKER ──────────────────────────────────────────────
   async assignWorker(taskId: string, dto: AssignTaskDto, userId: string, userRole: string) {
-  const task = await this.verifyTaskAccess(taskId, userId, userRole);
-  const member = await this.prisma.projectMember.findFirst({
-    where: { projectId: task.projectId, userId: dto.userId },
-  });
+    const task = await this.verifyTaskAccess(taskId, userId, userRole);
+    const userIds = [...new Set(dto.userIds)];
 
-  if (!member) throw new BadRequestException('User is not a member of this project');
+    if (userIds.length === 0) {
+      throw new BadRequestException('At least one worker is required');
+    }
 
-  const updated = await this.prisma.task.update({
-    where: { id: taskId },
-    data: { assignedTo: dto.userId },
-    include: {
-      assignee: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-    },
-  });
-  
-  return updated;
-}
+    const members = await this.prisma.projectMember.findMany({
+      where: { projectId: task.projectId, userId: { in: userIds } },
+      select: { userId: true },
+    });
+
+    if (members.length !== userIds.length) {
+      throw new BadRequestException('One or more users are not members of this project');
+    }
+
+    const existingAssignees = await this.prisma.taskAssignee.findMany({
+      where: { taskId, userId: { in: userIds } },
+      select: { userId: true },
+    });
+
+    const existingAssigneeIds = new Set(existingAssignees.map((assignment) => assignment.userId));
+    const newAssigneeIds = userIds.filter((workerId) => !existingAssigneeIds.has(workerId));
+
+    if (newAssigneeIds.length > 0) {
+      await this.prisma.taskAssignee.createMany({
+        data: newAssigneeIds.map((workerId) => ({ taskId, userId: workerId })),
+        skipDuplicates: true,
+      });
+    }
+
+    if (!task.assignedTo) {
+      await this.prisma.task.update({
+        where: { id: taskId },
+        data: { assignedTo: userIds[0] }, 
+      });
+    }
+
+    const updated = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        assignee: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        taskAssignees: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          },
+        },
+      },
+    });
+
+    if (!updated) throw new NotFoundException('Task not found');
+
+    return this.toTaskResponse(updated);
+  }
 
   // ── REVIEW TASK REPORT ─────────────────────────────────────────
   async reviewTaskReport(taskId: string, reportId: string, dto: ReviewTaskDto, userId: string, userRole: string) {
@@ -331,7 +416,10 @@ export class TaskService {
   private async verifyTaskAccess(taskId: string, userId: string, userRole?: string) {
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
-      include: { project: { include: { company: true } } },
+      include: {
+        project: { include: { company: true } },
+        taskAssignees: { select: { userId: true } },
+      },
     });
     if (!task) throw new NotFoundException('Task not found');
 

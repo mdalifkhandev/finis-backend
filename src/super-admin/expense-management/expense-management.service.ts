@@ -2,10 +2,11 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole } from '../../generated/prisma/client';
-import { ExpenseQueryDto, UpdateExpenseProjectDto } from './dto/expense-management.dto';
+import { CreateExpenseDto, ExpenseQueryDto, UpdateExpenseProjectDto } from './dto/expense-management.dto';
 
 @Injectable()
 export class ExpenseManagementService {
@@ -24,6 +25,99 @@ export class ExpenseManagementService {
         },
       },
     };
+  }
+
+  private async assertCreateAccess(dto: CreateExpenseDto, userId: string, userRole: string) {
+    if (userRole === UserRole.super_admin) {
+      return;
+    }
+
+    const worker = await this.prisma.user.findUnique({
+      where: { id: dto.workerId },
+      select: {
+        id: true,
+        companyMembers: {
+          select: {
+            company: {
+              select: { ownerId: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!worker) {
+      throw new NotFoundException('Worker not found');
+    }
+
+    const isInOwnCompany = worker.companyMembers.some((member) => member.company.ownerId === userId);
+    if (!isInOwnCompany) {
+      throw new ForbiddenException('You can only create expenses for your own company workers');
+    }
+
+    if (dto.projectId) {
+      const project = await this.prisma.project.findFirst({
+        where: {
+          id: dto.projectId,
+          company: { ownerId: userId },
+        },
+        select: { id: true },
+      });
+
+      if (!project) {
+        throw new ForbiddenException('Project not found or not owned by your company');
+      }
+    }
+  }
+
+  // ─── CREATE EXPENSE ───────────────────────────────────────────────────────
+  async createExpense(dto: CreateExpenseDto, userId: string, userRole: string) {
+    await this.assertCreateAccess(dto, userId, userRole);
+
+    const worker = await this.prisma.user.findUnique({
+      where: { id: dto.workerId },
+      select: {
+        id: true,
+        fullName: true,
+        avatarUrl: true,
+        role: true,
+      },
+    });
+
+    if (!worker) {
+      throw new NotFoundException('Worker not found');
+    }
+
+    const expense = await this.prisma.expense.create({
+      data: {
+        workerId: dto.workerId,
+        projectId: dto.projectId ?? null,
+        description: dto.description,
+        category: dto.category,
+        amount: dto.amount,
+        receiptUrl: dto.receiptUrl ?? null,
+        date: new Date(dto.date),
+        status: 'pending',
+      },
+      include: {
+        worker: {
+          select: {
+            id: true,
+            fullName: true,
+            avatarUrl: true,
+            role: true,
+          },
+        },
+        project: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    return expense;
   }
 
   // ─── IMAGE 1: Stats ───────────────────────────────────────────────────────

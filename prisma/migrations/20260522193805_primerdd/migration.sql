@@ -294,6 +294,8 @@ CREATE TABLE "projects" (
     "description" TEXT,
     "status" "ProjectStatus" NOT NULL DEFAULT 'planning',
     "priority" TEXT,
+    "is_whole_house" BOOLEAN NOT NULL DEFAULT false,
+    "house_sections" TEXT[] DEFAULT ARRAY[]::TEXT[],
     "num_floors" INTEGER,
     "rooms_per_floor" INTEGER,
     "progress" DOUBLE PRECISION DEFAULT 0,
@@ -359,6 +361,16 @@ CREATE TABLE "tasks" (
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "tasks_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "task_assignees" (
+    "id" UUID NOT NULL,
+    "task_id" UUID NOT NULL,
+    "user_id" UUID NOT NULL,
+    "assigned_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "task_assignees_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -499,6 +511,7 @@ CREATE TABLE "payrolls" (
     "employer_cost" DOUBLE PRECISION,
     "status" "PayrollStatus" NOT NULL DEFAULT 'draft',
     "processed_by" UUID,
+    "project_id" UUID,
     "processed_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -715,6 +728,9 @@ CREATE UNIQUE INDEX "company_members_company_id_user_id_key" ON "company_members
 CREATE UNIQUE INDEX "project_members_project_id_user_id_key" ON "project_members"("project_id", "user_id");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "task_assignees_task_id_user_id_key" ON "task_assignees"("task_id", "user_id");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "work_schedule_assignments_schedule_id_user_id_key" ON "work_schedule_assignments"("schedule_id", "user_id");
 
 -- CreateIndex
@@ -802,6 +818,12 @@ ALTER TABLE "tasks" ADD CONSTRAINT "tasks_project_id_fkey" FOREIGN KEY ("project
 ALTER TABLE "tasks" ADD CONSTRAINT "tasks_room_id_fkey" FOREIGN KEY ("room_id") REFERENCES "rooms"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "task_assignees" ADD CONSTRAINT "task_assignees_task_id_fkey" FOREIGN KEY ("task_id") REFERENCES "tasks"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "task_assignees" ADD CONSTRAINT "task_assignees_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "task_reports" ADD CONSTRAINT "task_reports_task_id_fkey" FOREIGN KEY ("task_id") REFERENCES "tasks"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -829,6 +851,9 @@ ALTER TABLE "payrolls" ADD CONSTRAINT "payrolls_company_id_fkey" FOREIGN KEY ("c
 ALTER TABLE "payrolls" ADD CONSTRAINT "payrolls_worker_id_fkey" FOREIGN KEY ("worker_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "payrolls" ADD CONSTRAINT "payrolls_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "projects"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "expenses" ADD CONSTRAINT "expenses_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "projects"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -845,6 +870,9 @@ ALTER TABLE "task_inventories" ADD CONSTRAINT "task_inventories_task_id_fkey" FO
 
 -- AddForeignKey
 ALTER TABLE "inventory_usage_logs" ADD CONSTRAINT "inventory_usage_logs_inventory_id_fkey" FOREIGN KEY ("inventory_id") REFERENCES "inventory_items"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "inventory_usage_logs" ADD CONSTRAINT "inventory_usage_logs_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "inventory_damages" ADD CONSTRAINT "inventory_damages_inventory_id_fkey" FOREIGN KEY ("inventory_id") REFERENCES "inventory_items"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

@@ -86,6 +86,7 @@ model User {
   taskReports             TaskReport[]
   assignedTasks           Task[]                   @relation("TaskAssignee")
   createdTasks            Task[]                   @relation("TaskCreator")
+  taskAssignees           TaskAssignee[]           @relation("TaskAssigneeUser")
   threadParticipants      ThreadParticipant[]
   timeAdjustments         TimeAdjustmentRequest[]
   certifications          UserCertification[]
@@ -333,6 +334,7 @@ model Task {
   updatedAt       DateTime        @updatedAt @map("updated_at")
   taskInventories TaskInventory[]
   reports         TaskReport[]
+  taskAssignees   TaskAssignee[]   @relation("TaskAssignees")
   assignee        User?           @relation("TaskAssignee", fields: [assignedTo], references: [id])
   creator         User            @relation("TaskCreator", fields: [createdBy], references: [id])
   floor           Floor?          @relation(fields: [floorId], references: [id])
@@ -340,6 +342,18 @@ model Task {
   room            Room?           @relation(fields: [roomId], references: [id])
 
   @@map("tasks")
+}
+
+model TaskAssignee {
+  id         String   @id @default(uuid()) @db.Uuid
+  taskId     String   @map("task_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  assignedAt DateTime @default(now()) @map("assigned_at")
+  task       Task     @relation("TaskAssignees", fields: [taskId], references: [id], onDelete: Cascade)
+  user       User     @relation("TaskAssigneeUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@map("task_assignees")
 }
 
 model TaskReport {
