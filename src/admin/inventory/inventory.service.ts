@@ -376,6 +376,7 @@ export class InventoryService {
         name:        dto.name,
         category:    dto.category,
         location:    dto.location,
+        currentQty:  dto.currentQty,
         minStockQty: dto.minStockQty,
         unit:        dto.unit,
       },

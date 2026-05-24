@@ -13,10 +13,11 @@ import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private authService: AuthService) { }
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
@@ -97,5 +98,16 @@ export class AuthController {
   @Delete('invitations/:id')
   cancelInvitation(@Param('id') id: string, @CurrentUser('id') userId: string) {
     return this.authService.cancelInvitation(id, userId);
+  }
+
+
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  changePassword(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(userId, dto);
   }
 }

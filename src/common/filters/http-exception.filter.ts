@@ -14,6 +14,38 @@ import { Request, Response } from 'express';
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
 
+  private formatValidationMessage(message: unknown): { message: string; errors: any } {
+    if (!Array.isArray(message) || message.length === 0) {
+      return { message: 'Validation failed', errors: null };
+    }
+
+    const formatted = message
+      .map((item: any) => {
+        if (typeof item === 'string') return item;
+
+        if (item && typeof item === 'object') {
+          const field = item.property ?? item.field ?? 'field';
+
+          if (item.constraints && typeof item.constraints === 'object') {
+            const constraintMessages = Object.values(item.constraints).map((constraint: any) => String(constraint));
+            return `${field}: ${constraintMessages.join(', ')}`;
+          }
+
+          if (Array.isArray(item.value)) {
+            return `${field}: invalid value`;
+          }
+        }
+
+        return String(item);
+      })
+      .filter(Boolean);
+
+    return {
+      message: formatted.join('\n'),
+      errors: message,
+    };
+  }
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -31,11 +63,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         message = exceptionResponse;
       } else if (typeof exceptionResponse === 'object') {
         const res = exceptionResponse as any;
-        
-        message = res.message ?? message;
+
         if (Array.isArray(res.message)) {
-          errors = res.message;
-          message = 'Validation failed';
+          const validation = this.formatValidationMessage(res.message);
+          message = validation.message;
+          errors = validation.errors;
+        } else {
+          message = res.message ?? message;
         }
       }
     } else if (exception instanceof Error) {

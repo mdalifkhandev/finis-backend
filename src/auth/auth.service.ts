@@ -18,6 +18,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { UserRole } from '../generated/prisma/client';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 const otpStore = new Map<string, { email: string; otp: string; expiresAt: Date }>();
 const resetTokenStore = new Map<string, { identifier: string; expiresAt: Date }>();
@@ -38,16 +39,16 @@ export class AuthService {
 
     let user:
       | {
-          id: string;
-          email: string;
-          phone: string | null;
-          fullName: string;
-          role: UserRole;
-          status: string;
-          tenantId: string | null;
-          avatarUrl: string | null;
-          passwordHash: string | null;
-        }
+        id: string;
+        email: string;
+        phone: string | null;
+        fullName: string;
+        role: UserRole;
+        status: string;
+        tenantId: string | null;
+        avatarUrl: string | null;
+        passwordHash: string | null;
+      }
       | null = null;
     try {
       if (emailPattern.test(identifier)) {
@@ -186,56 +187,56 @@ export class AuthService {
     });
     if (pending) throw new ConflictException('Pending invitation already exists');
 
-      // Auto-register user on invite with a random 6-digit password
-      const plainPassword = Math.floor(100000 + Math.random() * 900000).toString();
-      const passwordHash = await bcrypt.hash(plainPassword, 10);
+    // Auto-register user on invite with a random 6-digit password
+    const plainPassword = Math.floor(100000 + Math.random() * 900000).toString();
+    const passwordHash = await bcrypt.hash(plainPassword, 10);
 
-      const userEmail = dto.email ?? `phone_${dto.phone}@finis.internal`;
+    const userEmail = dto.email ?? `phone_${dto.phone}@finis.internal`;
 
-      const user = await this.prisma.user.create({
-        data: {
-          email: userEmail,
-          phone: dto.phone ?? null,
-          fullName: dto.email ? dto.email.split('@')[0] : 'Invited User',
-          passwordHash,
-          role: dto.role,
-          status: 'active',
-        },
-      });
+    const user = await this.prisma.user.create({
+      data: {
+        email: userEmail,
+        phone: dto.phone ?? null,
+        fullName: dto.email ? dto.email.split('@')[0] : 'Invited User',
+        passwordHash,
+        role: dto.role,
+        status: 'active',
+      },
+    });
 
-      // If role is worker and sender is manager, link them
-      if (dto.role === UserRole.worker) {
-        const sender = await this.prisma.user.findUnique({ where: { id: senderId }, select: { role: true } });
-        if (sender?.role === UserRole.manager) {
-          await this.prisma.workerManagerMap.create({ data: { managerId: senderId, workerId: user.id } });
-        }
+    // If role is worker and sender is manager, link them
+    if (dto.role === UserRole.worker) {
+      const sender = await this.prisma.user.findUnique({ where: { id: senderId }, select: { role: true } });
+      if (sender?.role === UserRole.manager) {
+        await this.prisma.workerManagerMap.create({ data: { managerId: senderId, workerId: user.id } });
       }
+    }
 
-      // Create invitation record but mark as accepted
-      const token = uuidv4();
-      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-      const invitation = await this.prisma.invitation.create({
-        data: {
-          senderId,
-          email: dto.email ?? null,
-          phone: dto.phone ?? null,
-          role: dto.role,
-          token,
-          expiresAt,
-          status: 'accepted',
-          receiverId: user.id,
-        },
-      });
+    // Create invitation record but mark as accepted
+    const token = uuidv4();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const invitation = await this.prisma.invitation.create({
+      data: {
+        senderId,
+        email: dto.email ?? null,
+        phone: dto.phone ?? null,
+        role: dto.role,
+        token,
+        expiresAt,
+        status: 'accepted',
+        receiverId: user.id,
+      },
+    });
 
-      // Send credentials by email when email provided
-      if (dto.email) {
-        await this.mailService.sendCredentialsEmail(dto.email, plainPassword, dto.role);
-      }
+    // Send credentials by email when email provided
+    if (dto.email) {
+      await this.mailService.sendCredentialsEmail(dto.email, plainPassword, dto.role);
+    }
 
-      // Also log credentials to console as requested
-      console.log('Invited user credentials ->', { email: user.email, password: plainPassword });
+    // Also log credentials to console as requested
+    console.log('Invited user credentials ->', { email: user.email, password: plainPassword });
 
-      return { message: 'User invited and registered', userId: user.id, invitationId: invitation.id };
+    return { message: 'User invited and registered', userId: user.id, invitationId: invitation.id };
   }
 
   // ── ACCEPT INVITE ─────────────────────────
@@ -592,5 +593,37 @@ export class AuthService {
     const signOptions: JwtSignOptions = expiresIn ? { expiresIn: expiresIn as JwtSignOptions['expiresIn'] } : {};
 
     return this.jwtService.sign({ sub: userId, email, role }, signOptions);
+  }
+
+
+
+  // ── CHANGE PASSWORD ───────────────────────
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    if (dto.newPassword !== dto.confirmPassword)
+      throw new BadRequestException('Passwords do not match');
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { passwordHash: true },
+    });
+
+    if (!user || !user.passwordHash)
+      throw new UnauthorizedException('Invalid credentials');
+
+    const isMatch = await bcrypt.compare(dto.oldPassword, user.passwordHash);
+    if (!isMatch)
+      throw new BadRequestException('Old password is incorrect');
+
+    if (dto.oldPassword === dto.newPassword)
+      throw new BadRequestException('New password must differ from old password');
+
+    const hash = await bcrypt.hash(dto.newPassword, 10);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: hash },
+    });
+
+    return { message: 'Password updated successfully' };
   }
 }

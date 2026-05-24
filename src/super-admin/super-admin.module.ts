@@ -4,6 +4,8 @@ import { SuperAdminDashboardController } from './dashboard/dashboard.controller'
 import { SuperAdminDashboardService } from './dashboard/dashboard.service';
 import { SuperAdminCompaniesController } from './company/companies.controller';
 import { SuperAdminCompaniesService } from './company/companies.service';
+import { SuperAdminUsersController } from './users/users.controller';
+import { SuperAdminUsersService } from './users/users.service';
 import { SuperAdminProjectController } from './projects/project.controller';
 import { SuperAdminProjectService } from './projects/project.service';
 import { TeamManagementController } from './team-management/team-management.controller';
@@ -26,10 +28,12 @@ import { SubscriptionModule } from './subscription/subscription.module';
     PayrollManagementController,
     ExpenseManagementController,
     ReportsController,
+    SuperAdminUsersController,
   ],
   providers: [
     SuperAdminDashboardService,
     SuperAdminCompaniesService,
+    SuperAdminUsersService,
     SuperAdminProjectService,
     TeamManagementService,
     PayrollManagementService,

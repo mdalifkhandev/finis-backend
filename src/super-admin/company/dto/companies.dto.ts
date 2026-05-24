@@ -1,6 +1,7 @@
 import {
   IsOptional,
   IsString,
+  IsNotEmpty,
   IsEmail,
   IsNumber,
   IsBoolean,
@@ -86,6 +87,7 @@ export class GetCompaniesQueryDto {
 // ─── CREATE COMPANY ───────────────────────────────────────────────────────────
 export class CreateCompanyDto {
   @IsString()
+  @IsNotEmpty()
   name!: string;
 
   @IsOptional()
@@ -113,6 +115,10 @@ export class CreateCompanyDto {
   address?: string;
 
   @IsOptional()
+  @IsString()
+  logoUrl?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   revenue?: number;
@@ -137,6 +143,7 @@ export class CreateCompanyDto {
 
   // Owner assignment (super admin assigns to a user)
   @IsString()
+  @IsNotEmpty()
   ownerId?: string;
 }
 
