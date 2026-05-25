@@ -17,9 +17,10 @@ import { ExpenseManagementService } from './expense-management/expense-managemen
 import { ReportsController } from './reports/reports.controller';
 import { ReportsService } from './reports/reports.service';
 import { SubscriptionModule } from './subscription/subscription.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [PrismaModule, SubscriptionModule],
+  imports: [PrismaModule, SubscriptionModule, AuthModule],
   controllers: [
     SuperAdminDashboardController,
     SuperAdminCompaniesController,

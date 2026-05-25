@@ -5,6 +5,7 @@ import {
   Put,
   Delete,
   Body,
+  BadRequestException,
   Param,
   UseGuards,
   UseInterceptors,
@@ -35,6 +36,19 @@ const logoStorage = diskStorage({
   filename: (_, file, cb) => cb(null, `${uuidv4()}${extname(file.originalname)}`),
 });
 
+const imageLogoFileFilter = (_: unknown, file: any, cb: (error: Error | null, acceptFile: boolean) => void) => {
+  const extension = extname(file.originalname).toLowerCase();
+  const isImageMimeType = typeof file.mimetype === 'string' && file.mimetype.startsWith('image/');
+  const isAllowedExtension = ['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(extension);
+
+  if (!isImageMimeType || !isAllowedExtension) {
+    cb(new BadRequestException('Company logo must be an image file'), false);
+    return;
+  }
+
+  cb(null, true);
+};
+
 const docStorage = diskStorage({
   destination: './uploads/documents',
   filename: (_, file, cb) => cb(null, `${uuidv4()}${extname(file.originalname)}`),
@@ -59,7 +73,7 @@ export class CompanyController {
 
   /** POST /admin/companies — create company */
   @Post()
-  @UseInterceptors(FileInterceptor('logo', { storage: logoStorage }))
+  @UseInterceptors(FileInterceptor('logo', { storage: logoStorage, fileFilter: imageLogoFileFilter }))
   createCompany(
     @Body() dto: CreateCompanyDto,
     @CurrentUser('id') adminId: string,
@@ -79,7 +93,7 @@ export class CompanyController {
 
   /** PUT /admin/companies/:id — update company */
   @Put(':id')
-  @UseInterceptors(FileInterceptor('logo', { storage: logoStorage }))
+  @UseInterceptors(FileInterceptor('logo', { storage: logoStorage, fileFilter: imageLogoFileFilter }))
   updateCompany(
     @Param('id') companyId: string,
     @Body() dto: UpdateCompanyDto,

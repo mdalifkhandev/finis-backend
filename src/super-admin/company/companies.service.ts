@@ -4,6 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { MailService } from '../../auth/mail.service';
 import {
   GetCompaniesQueryDto,
   CreateCompanyDto,
@@ -16,7 +17,10 @@ import {
 
 @Injectable()
 export class SuperAdminCompaniesService {
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mailService: MailService,
+  ) { }
 
   // ─── HELPER: build a { gte, lte } date range for a given period ───────────
   private buildDateRange(
@@ -700,15 +704,16 @@ export class SuperAdminCompaniesService {
       throw new BadRequestException('file is required');
     }
 
-    const fileSizeMb = file.size / (1024 * 1024);
+    const uploadedFile = file;
+    const fileSizeMb = uploadedFile.size / (1024 * 1024);
 
     return this.prisma.document.create({
       data: {
         companyId,
         uploadedBy: company.ownerId,
-        fileName: file.originalname,
-        fileUrl: `/uploads/documents/${file.filename}`,
-        fileType: file.mimetype,
+        fileName: uploadedFile.originalname,
+        fileUrl: `/uploads/documents/${uploadedFile.filename}`,
+        fileType: uploadedFile.mimetype,
         fileSizeMb: Math.round(fileSizeMb * 100) / 100,
       },
       select: {
@@ -722,6 +727,26 @@ export class SuperAdminCompaniesService {
         uploadedByUser: { select: { id: true, fullName: true } },
       },
     });
+  }
+
+  async contactCompany(companyId: string, dto: ContactCompanyDto) {
+    const company = await this.findOrFail(companyId);
+
+    if (!company.email) {
+      throw new BadRequestException('Company email is not available');
+    }
+
+    await this.mailService.sendCompanyContactEmail(
+      company.email,
+      company.name,
+      dto.subject,
+      dto.message,
+    );
+
+    return {
+      success: true,
+      message: 'Message sent successfully',
+    };
   }
 
   // ─── CREATE COMPANY ───────────────────────────────────────────────────────

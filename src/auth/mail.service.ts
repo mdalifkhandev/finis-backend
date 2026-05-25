@@ -19,13 +19,17 @@ export class MailService {
     });
   }
 
+  private getFromAddress() {
+    return this.config.get('MAIL_FROM') ?? this.config.get('MAIL_USER');
+  }
+
   async sendInviteEmail(email: string, token: string, role: string) {
     const appUrl = this.config.get('APP_URL');
     const inviteLink = `${appUrl}/auth/accept-invite?token=${token}`;
 
     try {
       await this.transporter.sendMail({
-        from: this.config.get('MAIL_FROM'),
+        from: this.getFromAddress(),
         to: email,
         subject: 'You are invited to Finis App',
         html: `
@@ -54,7 +58,7 @@ export class MailService {
 
     try {
       await this.transporter.sendMail({
-        from: this.config.get('MAIL_FROM'),
+        from: this.getFromAddress(),
         to: email,
         subject: 'Your account has been created - Finis',
         html: `
@@ -80,7 +84,7 @@ export class MailService {
   async sendOtpEmail(email: string, otp: string) {
     try {
       await this.transporter.sendMail({
-        from: this.config.get('MAIL_FROM'),
+        from: this.getFromAddress(),
         to: email,
         subject: 'Password Reset OTP - Finis',
         html: `
@@ -98,6 +102,29 @@ export class MailService {
       this.logger.log(`OTP email sent to ${email}`);
     } catch (error) {
       this.logger.error(`Failed to send OTP to ${email}`, error);
+    }
+  }
+
+  async sendCompanyContactEmail(to: string, companyName: string, subject: string, message: string) {
+    try {
+      await this.transporter.sendMail({
+        from: this.getFromAddress(),
+        to,
+        subject: `[FinisPro] ${subject}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #1f2937;">
+            <h2 style="color: #1a3c5e; margin-bottom: 16px;">Message from FinisPro Admin Dashboard</h2>
+            <p style="margin: 0 0 12px 0;"><strong>Company:</strong> ${companyName}</p>
+            <p style="margin: 0 0 12px 0;"><strong>Subject:</strong> ${subject}</p>
+            <div style="background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; white-space: pre-wrap; line-height: 1.6;">${message}</div>
+            <p style="margin-top: 20px; color: #6b7280; font-size: 12px;">Sent from FinisPro Admin Dashboard</p>
+          </div>
+        `,
+      });
+      this.logger.log(`Company contact email sent to ${to}`);
+    } catch (error) {
+      this.logger.error(`Failed to send company contact email to ${to}`, error);
+      throw error;
     }
   }
 }

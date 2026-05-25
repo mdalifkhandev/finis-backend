@@ -6,6 +6,7 @@
     Delete,
     Patch,
     Body,
+    BadRequestException,
     Param,
     Query,
     UseGuards,
@@ -36,6 +37,19 @@
     filename: (_, file, cb) =>
       cb(null, `${uuidv4()}${extname(file.originalname)}`),
   });
+
+  const imageLogoFileFilter = (_: unknown, file: any, cb: (error: Error | null, acceptFile: boolean) => void) => {
+    const extension = extname(file.originalname).toLowerCase();
+    const isImageMimeType = typeof file.mimetype === 'string' && file.mimetype.startsWith('image/');
+    const isAllowedExtension = ['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(extension);
+
+    if (!isImageMimeType || !isAllowedExtension) {
+      cb(new BadRequestException('Company logo must be an image file'), false);
+      return;
+    }
+
+    cb(null, true);
+  };
 
   const docStorage = diskStorage({
     destination: './uploads/documents',
@@ -73,7 +87,7 @@
     // FIX: pass @CurrentUser('id') as adminId so ownerId defaults to the admin
     //      when no explicit ownerId is provided in the body
     @Post()
-    @UseInterceptors(FileInterceptor('logo', { storage: logoStorage }))
+    @UseInterceptors(FileInterceptor('logo', { storage: logoStorage, fileFilter: imageLogoFileFilter }))
     createCompany(
       @Body() dto: CreateCompanyDto,
       @UploadedFile() file?: MulterFile,
@@ -81,6 +95,14 @@
       return this.companiesService.createCompany(dto, file?.filename);
     }
 
+
+    @Post(':id/contact')
+    sendCompanyContact(
+      @Param('id', ParseUUIDPipe) companyId: string,
+      @Body() dto: ContactCompanyDto,
+    ) {
+      return this.companiesService.contactCompany(companyId, dto);
+    }
     // ─── PROFILE ──────────────────────────────────────────────────────────────
     // image: Overview tab — About Company + stats + Direct Contact + chart + certifications
     @Get(':id')
@@ -91,7 +113,7 @@
     // ─── UPDATE ───────────────────────────────────────────────────────────────
     // image: EDIT COMPANY PROFILE modal
     @Put(':id')
-    @UseInterceptors(FileInterceptor('logo', { storage: logoStorage }))
+    @UseInterceptors(FileInterceptor('logo', { storage: logoStorage, fileFilter: imageLogoFileFilter }))
     updateCompany(
       @Param('id', ParseUUIDPipe) companyId: string,
       @Body() dto: UpdateCompanyDto,

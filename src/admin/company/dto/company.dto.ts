@@ -46,7 +46,18 @@ export class CreateCompanyDto {
   @IsOptional()
   @IsString()
   projectLevel?: string;
-}
+
+  @IsOptional()
+  @IsString()
+  primaryContact?: string;
+
+  @IsOptional()
+  @IsEmail()
+  contactEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  contactPhone?: string;}
 
 export class UpdateCompanyDto {
   @IsOptional()
@@ -86,6 +97,17 @@ export class UpdateCompanyDto {
   @IsString()
   projectLevel?: string;
 
+  @IsOptional()
+  @IsString()
+  primaryContact?: string;
+
+  @IsOptional()
+  @IsEmail()
+  contactEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  contactPhone?: string;
   // logo file upload এর পর service নিজেই set করে
   // কিন্তু কেউ body তে পাঠালেও ignore করার জন্য optional রাখা
   @IsOptional()
