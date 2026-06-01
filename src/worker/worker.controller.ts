@@ -11,9 +11,10 @@ import {
   UseGuards,
   UseInterceptors,
   UploadedFile,
+  UploadedFiles,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -31,11 +32,17 @@ import {
   ChangePasswordDto,
   CreateSupportRequestDto,
   UpdateLocationDto,
+  UpdateTaskInventoryDto,
 } from './dto/worker.dto';
 import type { File as MulterFile } from 'multer';
 
 const avatarStorage = diskStorage({
   destination: './uploads/avatars',
+  filename: (_, file, cb) => cb(null, `${uuidv4()}${extname(file.originalname)}`),
+});
+
+const taskReportStorage = diskStorage({
+  destination: './uploads/task-reports',
   filename: (_, file, cb) => cb(null, `${uuidv4()}${extname(file.originalname)}`),
 });
 
@@ -45,9 +52,7 @@ const avatarStorage = diskStorage({
 export class WorkerController {
   constructor(private readonly workerService: WorkerService) {}
 
-  // ─────────────────────────────────────────────
   // DASHBOARD
-  // ─────────────────────────────────────────────
 
   /**
    * GET /worker/dashboard
@@ -58,9 +63,7 @@ export class WorkerController {
     return this.workerService.getDashboard(workerId);
   }
 
-  // ─────────────────────────────────────────────
   // TASKS
-  // ─────────────────────────────────────────────
 
   /**
    * GET /worker/tasks?status=pending&search=wiring&page=1&limit=10
@@ -90,7 +93,7 @@ export class WorkerController {
 
   /**
    * POST /worker/tasks/:id/start
-   * Task start now → status: pending → in_progress
+   * Task start now -> status: pending -> in_progress
    */
   @Post('tasks/:id/start')
   startTask(
@@ -103,20 +106,49 @@ export class WorkerController {
   /**
    * POST /worker/tasks/:id/report
    * Task report submit (before/after photo, inventory used, notes, receipt)
-   * → status: in_progress → review
+   * -> status: in_progress -> review
    */
   @Post('tasks/:id/report')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'beforePhoto', maxCount: 1 },
+        { name: 'afterPhoto', maxCount: 1 },
+        { name: 'receipt', maxCount: 1 },
+      ],
+      { storage: taskReportStorage },
+    ),
+  )
   submitTaskReport(
     @Param('id', ParseUUIDPipe) taskId: string,
     @CurrentUser('id') workerId: string,
     @Body() dto: SubmitTaskReportDto,
+    @UploadedFiles()
+    files?: {
+      beforePhoto?: MulterFile[];
+      afterPhoto?: MulterFile[];
+      receipt?: MulterFile[];
+    },
   ) {
-    return this.workerService.submitTaskReport(taskId, workerId, dto);
+    return this.workerService.submitTaskReport(taskId, workerId, dto, files);
+  }
+
+  /**
+   * PUT /worker/tasks/:id/report
+   * Task report update (no DTO validation)
+   */
+  @Put('tasks/:id/report')
+  updateTaskReport(
+    @Param('id', ParseUUIDPipe) taskId: string,
+    @CurrentUser('id') workerId: string,
+    @Body() body: any,
+  ) {
+    return this.workerService.updateTaskReport(taskId, workerId, body);
   }
 
   /**
    * GET /worker/tasks/:id/inventory
-   * Task  available inventory items (project  company )
+   * Task available inventory items (project company)
    */
   @Get('tasks/:id/inventory')
   getTaskInventoryItems(
@@ -126,9 +158,26 @@ export class WorkerController {
     return this.workerService.getTaskInventoryItems(taskId, workerId);
   }
 
-  // ─────────────────────────────────────────────
+  /**
+   * PATCH /worker/tasks/:id/inventory/:inventoryId
+   * Update a task inventory usage entry and sync stock quantity
+   */
+  @Patch('tasks/:id/inventory/:inventoryId')
+  updateTaskInventoryItem(
+    @Param('id', ParseUUIDPipe) taskId: string,
+    @Param('inventoryId', ParseUUIDPipe) inventoryId: string,
+    @CurrentUser('id') workerId: string,
+    @Body() dto: UpdateTaskInventoryDto,
+  ) {
+    return this.workerService.updateTaskInventoryItem(
+      taskId,
+      inventoryId,
+      workerId,
+      dto,
+    );
+  }
+
   // ATTENDANCE
-  // ─────────────────────────────────────────────
 
   /**
    * GET /worker/attendance/today
@@ -144,22 +193,16 @@ export class WorkerController {
    * Check in (optional: lat/lng for location)
    */
   @Post('attendance/check-in')
-  checkIn(
-    @CurrentUser('id') workerId: string,
-    @Body() dto: CheckInDto,
-  ) {
+  checkIn(@CurrentUser('id') workerId: string, @Body() dto: CheckInDto) {
     return this.workerService.checkIn(workerId, dto);
   }
 
   /**
    * POST /worker/attendance/check-out
-   * Check out → hours worked auto calculate
+   * Check out -> hours worked auto calculate
    */
   @Post('attendance/check-out')
-  checkOut(
-    @CurrentUser('id') workerId: string,
-    @Body() dto: CheckOutDto,
-  ) {
+  checkOut(@CurrentUser('id') workerId: string, @Body() dto: CheckOutDto) {
     return this.workerService.checkOut(workerId, dto);
   }
 
@@ -176,9 +219,7 @@ export class WorkerController {
     return this.workerService.getAttendanceHistory(workerId, +page, +limit);
   }
 
-  // ─────────────────────────────────────────────
   // LEAVE REQUESTS
-  // ─────────────────────────────────────────────
 
   /**
    * GET /worker/leave-requests
@@ -191,7 +232,7 @@ export class WorkerController {
 
   /**
    * POST /worker/leave-requests
-   * Leave request 
+   * Leave request
    */
   @Post('leave-requests')
   createLeaveRequest(
@@ -203,7 +244,7 @@ export class WorkerController {
 
   /**
    * DELETE /worker/leave-requests/:id
-   * Leave request cancel  (only pending)
+   * Leave request cancel (only pending)
    */
   @Delete('leave-requests/:id')
   cancelLeaveRequest(
@@ -213,9 +254,7 @@ export class WorkerController {
     return this.workerService.cancelLeaveRequest(leaveId, workerId);
   }
 
-  // ─────────────────────────────────────────────
   // PROFILE
-  // ─────────────────────────────────────────────
 
   /**
    * GET /worker/profile
@@ -242,7 +281,7 @@ export class WorkerController {
 
   /**
    * POST /worker/profile/change-password
-   * Password change (current password verify )
+   * Password change (current password verify)
    */
   @Post('profile/change-password')
   changePassword(
@@ -252,13 +291,11 @@ export class WorkerController {
     return this.workerService.changePassword(workerId, dto);
   }
 
-  // ─────────────────────────────────────────────
   // SUPPORT REQUEST
-  // ─────────────────────────────────────────────
 
   /**
    * POST /worker/support
-   * Admin or Manager  support request send
+   * Admin or Manager support request send
    */
   @Post('support')
   createSupportRequest(
@@ -268,9 +305,7 @@ export class WorkerController {
     return this.workerService.createSupportRequest(workerId, dto);
   }
 
-  // ─────────────────────────────────────────────
   // LOCATION
-  // ─────────────────────────────────────────────
 
   /**
    * POST /worker/location
@@ -284,13 +319,11 @@ export class WorkerController {
     return this.workerService.updateLocation(workerId, dto);
   }
 
-  // ─────────────────────────────────────────────
   // NOTIFICATIONS
-  // ─────────────────────────────────────────────
 
   /**
    * GET /worker/notifications?page=1&limit=20
-   * আমার সব notifications (unread count সহ)
+   * All notifications (with unread count)
    */
   @Get('notifications')
   getMyNotifications(
@@ -303,7 +336,7 @@ export class WorkerController {
 
   /**
    * POST /worker/notifications/read-all
-   *  notifications read mark do
+   * Mark notifications as read
    */
   @Post('notifications/read-all')
   markNotificationsRead(@CurrentUser('id') workerId: string) {

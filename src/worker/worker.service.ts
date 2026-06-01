@@ -17,6 +17,7 @@ import {
   ChangePasswordDto,
   CreateSupportRequestDto,
   UpdateLocationDto,
+  UpdateTaskInventoryDto,
 } from './dto/worker.dto';
 
 @Injectable()
@@ -62,6 +63,7 @@ export class WorkerService {
             { dueDate: { gte: today, lte: todayEnd } },
             { status: 'in_progress' },
             { status: 'pending' },
+            { status: 'review' },
           ],
         },
         select: {
@@ -149,15 +151,26 @@ export class WorkerService {
   ) {
     const skip = (page - 1) * limit;
 
-    const where: any = {
-      assignedTo: workerId,
-      ...(status && { status: status as any }),
-      ...(search && {
+    const andConditions: any[] = [];
+
+    if (status) {
+      andConditions.push({
+        OR: [{ status: status as any }, { status: 'review' }],
+      });
+    }
+
+    if (search) {
+      andConditions.push({
         OR: [
           { title: { contains: search, mode: 'insensitive' } },
           { description: { contains: search, mode: 'insensitive' } },
         ],
-      }),
+      });
+    }
+
+    const where: any = {
+      assignedTo: workerId,
+      ...(andConditions.length > 0 && { AND: andConditions }),
     };
 
     const [data, total] = await Promise.all([
@@ -235,6 +248,16 @@ export class WorkerService {
     if (!task) throw new NotFoundException('Task not found');
     if (!this.isWorkerAssigned(task, workerId))
       throw new ForbiddenException('This task is not assigned to you');
+    if (task.status === 'in_progress') {
+      return this.prisma.task.findUnique({
+        where: { id: taskId },
+        include: {
+          project: { select: { id: true, name: true } },
+          floor: { select: { id: true, name: true } },
+          room: { select: { id: true, name: true } },
+        },
+      });
+    }
     if (task.status !== 'pending')
       throw new BadRequestException(`Task is already ${task.status}`);
 
@@ -253,6 +276,11 @@ export class WorkerService {
     taskId: string,
     workerId: string,
     dto: SubmitTaskReportDto,
+    files?: {
+      beforePhoto?: MulterFile[];
+      afterPhoto?: MulterFile[];
+      receipt?: MulterFile[];
+    },
   ) {
     const task = await this.prisma.task.findUnique({ where: { id: taskId } });
 
@@ -304,22 +332,63 @@ export class WorkerService {
         taskId,
         workerId,
         notes: dto.notes ?? null,
-        beforePhotoUrl: dto.beforePhotoUrl ?? null,
-        afterPhotoUrl: dto.afterPhotoUrl ?? null,
-        receiptUrl: dto.receiptUrl ?? null,
+        beforePhotoUrl: files?.beforePhoto?.[0]?.filename
+          ? `/uploads/task-reports/${files.beforePhoto[0].filename}`
+          : dto.beforePhotoUrl ?? null,
+        afterPhotoUrl: files?.afterPhoto?.[0]?.filename
+          ? `/uploads/task-reports/${files.afterPhoto[0].filename}`
+          : dto.afterPhotoUrl ?? null,
+        receiptUrl: files?.receipt?.[0]?.filename
+          ? `/uploads/task-reports/${files.receipt[0].filename}`
+          : dto.receiptUrl ?? null,
         reviewDecision: 'pending',
       },
     });
 
-    // Task status → review এ পাঠাও
+    // Task status → in_progress এ রাখো
     await this.prisma.task.update({
       where: { id: taskId },
-      data: { status: 'review' },
+      data: { status: 'in_progress' },
     });
 
     return {
-      message: 'Task report submitted successfully. Waiting for review.',
+      message: 'Task report submitted successfully. Task is still in progress.',
       report,
+    };
+  }
+
+  async updateTaskReport(taskId: string, workerId: string, body: any) {
+    const task = await this.prisma.task.findUnique({ where: { id: taskId } });
+
+    if (!task) throw new NotFoundException('Task not found');
+    if (!this.isWorkerAssigned(task, workerId))
+      throw new ForbiddenException('This task is not assigned to you');
+
+    const report = await this.prisma.taskReport.findFirst({
+      where: { taskId, workerId },
+      orderBy: { submittedAt: 'desc' },
+    });
+
+    if (!report) throw new NotFoundException('Task report not found');
+
+    const updatedReport = await this.prisma.taskReport.update({
+      where: { id: report.id },
+      data: {
+        notes: body?.notes ?? report.notes,
+        beforePhotoUrl: body?.beforePhotoUrl ?? report.beforePhotoUrl,
+        afterPhotoUrl: body?.afterPhotoUrl ?? report.afterPhotoUrl,
+        receiptUrl: body?.receiptUrl ?? report.receiptUrl,
+      },
+    });
+
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: { status: 'completed' },
+    });
+
+    return {
+      message: 'Task report updated successfully. Task completed.',
+      report: updatedReport,
     };
   }
 
@@ -353,6 +422,110 @@ export class WorkerService {
   // ─────────────────────────────────────────────
   // ATTENDANCE
   // ─────────────────────────────────────────────
+
+  async updateTaskInventoryItem(
+    taskId: string,
+    inventoryId: string,
+    workerId: string,
+    dto: UpdateTaskInventoryDto,
+  ) {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: { project: { select: { id: true, name: true } } },
+    });
+
+    if (!task) throw new NotFoundException('Task not found');
+    if (!this.isWorkerAssigned(task, workerId)) {
+      throw new ForbiddenException('This task is not assigned to you');
+    }
+
+    if (task.status === 'completed') {
+      throw new BadRequestException('Completed task inventory cannot be updated');
+    }
+
+    const inventory = await this.prisma.inventoryItem.findFirst({
+      where: {
+        id: inventoryId,
+        projectId: task.projectId,
+      },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException('Inventory item not found');
+    }
+
+    const existingTaskInventory = await this.prisma.taskInventory.findFirst({
+      where: {
+        taskId,
+        inventoryId,
+      },
+    });
+
+    const previousQty = existingTaskInventory?.qtyUsed ?? 0;
+    const nextQty = dto.qtyUsed;
+    const stockDelta = nextQty - previousQty;
+
+    if (stockDelta > 0 && inventory.currentQty < stockDelta) {
+      throw new BadRequestException(
+        `Not enough stock for: ${inventory.name}. Available: ${inventory.currentQty}, requested additional: ${stockDelta}`,
+      );
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updatedInventory = await tx.inventoryItem.update({
+        where: { id: inventoryId },
+        data: {
+          currentQty:
+            stockDelta > 0
+              ? { decrement: stockDelta }
+              : { increment: Math.abs(stockDelta) },
+        },
+      });
+
+      await tx.inventoryUsageLog.create({
+        data: {
+          inventoryId,
+          userId: workerId,
+          projectId: task.projectId,
+          qtyChange: -stockDelta,
+          reason: dto.reason ?? `Updated task inventory for ${task.title}`,
+        },
+      });
+
+      const taskInventory = existingTaskInventory
+        ? await tx.taskInventory.update({
+            where: { id: existingTaskInventory.id },
+            data: { qtyUsed: nextQty },
+          })
+        : await tx.taskInventory.create({
+            data: {
+              taskId,
+              inventoryId,
+              qtyUsed: nextQty,
+            },
+          });
+
+      return { taskInventory, updatedInventory };
+    });
+
+    return {
+      message: 'Task inventory updated successfully',
+      data: {
+        id: result.taskInventory.id,
+        taskId: result.taskInventory.taskId,
+        inventoryId: result.taskInventory.inventoryId,
+        qtyUsed: result.taskInventory.qtyUsed,
+        inventory: {
+          id: result.updatedInventory.id,
+          name: result.updatedInventory.name,
+          category: result.updatedInventory.category,
+          currentQty: result.updatedInventory.currentQty,
+          unit: result.updatedInventory.unit,
+          location: result.updatedInventory.location,
+        },
+      },
+    };
+  }
 
   async checkIn(workerId: string, dto: CheckInDto) {
     const today = new Date();

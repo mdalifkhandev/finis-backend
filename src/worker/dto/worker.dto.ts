@@ -2,6 +2,8 @@ import {
   IsString,
   IsOptional,
   IsNumber,
+  IsInt,
+  Min,
   IsArray,
   IsEnum,
   IsDateString,
@@ -30,6 +32,16 @@ export class SubmitTaskReportDto {
   @IsOptional()
   @IsArray()
   inventoryUsed?: { inventoryId: string; qtyUsed: number }[];
+}
+
+export class UpdateTaskInventoryDto {
+  @IsInt()
+  @Min(1)
+  qtyUsed!: number;
+
+  @IsOptional()
+  @IsString()
+  reason?: string;
 }
 
 // ── ATTENDANCE ────────────────────────────────────────────────────────────────
