@@ -127,35 +127,4 @@ export class MailService {
       throw error;
     }
   }
-
-  async sendPendingInviteNotification(
-  to: string,
-  inviteeIdentifier: string,
-  role: string,
-  invitationId: string,
-) {
-  const appUrl = this.config.get('APP_URL');
-  try {
-    await this.transporter.sendMail({
-      from: this.getFromAddress(),
-      to,
-      subject: 'New invitation pending your approval - Finis',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #1a3c5e;">Invitation pending approval</h2>
-          <p>An admin has requested to invite <strong>${inviteeIdentifier}</strong> as <strong>${role}</strong>.</p>
-          <p>Invitation ID: <code>${invitationId}</code></p>
-          <p>Please log in to approve or reject this invitation.</p>
-          <a href="${appUrl}/dashboard/invitations" 
-             style="background:#1a3c5e;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;margin:16px 0;">
-            Review invitations
-          </a>
-        </div>
-      `,
-    });
-    this.logger.log(`Pending invite notification sent to ${to}`);
-  } catch (error) {
-    this.logger.error(`Failed to send pending invite notification to ${to}`, error);
-  }
-}
 }

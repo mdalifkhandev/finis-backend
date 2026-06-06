@@ -13,15 +13,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from './mail.service';
 import { LoginDto } from './dto/login.dto';
 import { InviteDto } from './dto/invite.dto';
-import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { UserRole } from '../generated/prisma/client';
 import { ChangePasswordDto } from './dto/change-password.dto';
-
-const otpStore = new Map<string, { email: string; otp: string; expiresAt: Date }>();
-const resetTokenStore = new Map<string, { identifier: string; expiresAt: Date }>();
 
 @Injectable()
 export class AuthService {
@@ -30,26 +26,25 @@ export class AuthService {
     private jwtService: JwtService,
     private config: ConfigService,
     private mailService: MailService,
-  ) { }
+  ) {}
 
   // ── LOGIN ──────────────────────────────────
   async login(dto: LoginDto) {
     const identifier = dto.identifier.trim();
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-    let user:
-      | {
-        id: string;
-        email: string;
-        phone: string | null;
-        fullName: string;
-        role: UserRole;
-        status: string;
-        tenantId: string | null;
-        avatarUrl: string | null;
-        passwordHash: string | null;
-      }
-      | null = null;
+    let user: {
+      id: string;
+      email: string;
+      phone: string | null;
+      fullName: string;
+      role: UserRole;
+      status: string;
+      tenantId: string | null;
+      avatarUrl: string | null;
+      passwordHash: string | null;
+    } | null = null;
+
     try {
       if (emailPattern.test(identifier)) {
         user = await this.prisma.user.findUnique({
@@ -89,13 +84,27 @@ export class AuthService {
     if (!user) throw new UnauthorizedException('Invalid credentials');
     if (user.status === 'suspended') throw new UnauthorizedException('Account suspended');
     if (user.status === 'inactive') throw new UnauthorizedException('Account inactive');
-    if (user.status === 'pending') throw new UnauthorizedException('Account pending activation');
+    // pending block নেই — pending user login করতে পারবে
 
-    // FIX: passwordHash could be null in DB, guard it
     if (!user.passwordHash) throw new UnauthorizedException('Invalid credentials');
 
     const passwordMatch = await bcrypt.compare(dto.password, user.passwordHash);
     if (!passwordMatch) throw new UnauthorizedException('Invalid credentials');
+
+    // pending হলে login এ active করো
+    if (user.status === 'pending') {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { status: 'active' },
+      });
+
+      await this.prisma.invitation.updateMany({
+        where: { receiverId: user.id, status: 'pending' },
+        data: { status: 'accepted' },
+      });
+
+      user.status = 'active';
+    }
 
     await this.prisma.user.update({
       where: { id: user.id },
@@ -123,14 +132,10 @@ export class AuthService {
     };
   }
 
+  // ── LOGOUT ────────────────────────────────
   async logout(userId: string) {
-    if (!userId) {
-      throw new BadRequestException('User id is required');
-    }
-
-    return {
-      message: 'Logged out successfully',
-    };
+    if (!userId) throw new BadRequestException('User id is required');
+    return { message: 'Logged out successfully' };
   }
 
   // ── SEED SUPER ADMIN ──────────────────────
@@ -165,18 +170,10 @@ export class AuthService {
     if (!dto.email && !dto.phone) {
       throw new BadRequestException('Email or phone required');
     }
+
     if (!dto.role) {
       throw new BadRequestException('Role is required');
     }
-
-    const sender = await this.prisma.user.findUnique({
-      where: { id: senderId },
-      select: { role: true },
-    });
-    if (!sender) throw new NotFoundException('Sender not found');
-
-    // Only super_admin can invite directly; admin invites go pending
-    const isSuperAdmin = sender.role === UserRole.super_admin;
 
     if (dto.email) {
       const exists = await this.prisma.user.findUnique({ where: { email: dto.email } });
@@ -194,137 +191,135 @@ export class AuthService {
     });
     if (pending) throw new ConflictException('Pending invitation already exists');
 
-    const token = uuidv4();
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-    if (isSuperAdmin) {
-      // Direct creation
-      const plainPassword = Math.floor(100000 + Math.random() * 900000).toString();
-      const passwordHash = await bcrypt.hash(plainPassword, 10);
-      const userEmail = dto.email ?? `phone_${dto.phone}@finis.internal`;
-
-      const user = await this.prisma.user.create({
-        data: {
-          email: userEmail,
-          phone: dto.phone ?? null,
-          fullName: dto.email ? dto.email.split('@')[0] : 'Invited User',
-          passwordHash,
-          role: dto.role,
-          status: 'active',
-        },
-      });
-
-      if (dto.role === UserRole.worker) {
-        if (sender.role === UserRole.manager) {
-          await this.prisma.workerManagerMap.create({ data: { managerId: senderId, workerId: user.id } });
-        }
-      }
-
-      await this.prisma.invitation.create({
-        data: {
-          senderId,
-          email: dto.email ?? null,
-          phone: dto.phone ?? null,
-          role: dto.role,
-          token,
-          expiresAt,
-          status: 'accepted',
-          receiverId: user.id,
-        },
-      });
-
-      if (dto.email) {
-        await this.mailService.sendCredentialsEmail(dto.email, plainPassword, dto.role);
-      }
-
-      console.log('Invited user credentials ->', { email: user.email, password: plainPassword });
-
-      return { message: 'User invited and registered', userId: user.id };
-    } else {
-      // Admin: create pending invitation for super_admin to approve
-      const invitation = await this.prisma.invitation.create({
-        data: {
-          senderId,
-          email: dto.email ?? null,
-          phone: dto.phone ?? null,
-          role: dto.role,
-          token,
-          expiresAt,
-          status: 'pending',
-        },
-      });
-
-      // Notify super_admin(s)
-      const superAdmins = await this.prisma.user.findMany({
-        where: { role: UserRole.super_admin },
-        select: { email: true },
-      });
-      for (const sa of superAdmins) {
-        await this.mailService.sendPendingInviteNotification(
-          sa.email,
-          dto.email ?? dto.phone ?? 'unknown',
-          dto.role,
-          invitation.id,
-        );
-      }
-
-      return { message: 'Invitation submitted for super_admin approval', invitationId: invitation.id };
-    }
-  }
-
-  // Approve admin
-
-  async approveInvitation(invitationId: string, approverId: string) {
-    const invitation = await this.prisma.invitation.findUnique({
-      where: { id: invitationId },
-    });
-
-    if (!invitation) throw new NotFoundException('Invitation not found');
-    if (invitation.status !== 'pending') throw new BadRequestException('Invitation is not pending');
-
+    // Random 6-digit password generate
     const plainPassword = Math.floor(100000 + Math.random() * 900000).toString();
     const passwordHash = await bcrypt.hash(plainPassword, 10);
-    const userEmail = invitation.email ?? `phone_${invitation.phone}@finis.internal`;
+
+    const userEmail = dto.email ?? `phone_${dto.phone}@finis.internal`;
 
     const user = await this.prisma.user.create({
       data: {
         email: userEmail,
-        phone: invitation.phone ?? null,
-        fullName: invitation.email ? invitation.email.split('@')[0] : 'Invited User',
+        phone: dto.phone ?? null,
+        fullName: dto.email ? dto.email.split('@')[0] : 'Invited User',
         passwordHash,
-        role: invitation.role,
-        status: 'active',
+        role: dto.role,
+        status: 'pending',
       },
     });
 
-    await this.prisma.invitation.update({
-      where: { id: invitationId },
-      data: { status: 'accepted', receiverId: user.id },
-    });
-
-    if (invitation.email) {
-      await this.mailService.sendCredentialsEmail(invitation.email, plainPassword, invitation.role);
+    if (dto.role === UserRole.worker) {
+      const sender = await this.prisma.user.findUnique({
+        where: { id: senderId },
+        select: { role: true },
+      });
+      if (sender?.role === UserRole.manager) {
+        await this.prisma.workerManagerMap.create({
+          data: { managerId: senderId, workerId: user.id },
+        });
+      }
     }
 
-    return { message: 'Invitation approved, user created', userId: user.id };
+    const token = uuidv4();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    const invitation = await this.prisma.invitation.create({
+      data: {
+        senderId,
+        email: dto.email ?? null,
+        phone: dto.phone ?? null,
+        role: dto.role,
+        token,
+        expiresAt,
+        status: 'pending',
+        receiverId: user.id,
+      },
+    });
+
+    // Email এ credentials পাঠাও
+    if (dto.email) {
+      await this.mailService.sendCredentialsEmail(dto.email, plainPassword, dto.role);
+    }
+
+    console.log('Invited user credentials ->', { email: user.email, password: plainPassword });
+
+    return {
+      message: 'User invited successfully',
+      userId: user.id,
+      invitationId: invitation.id,
+    };
   }
 
-  async rejectInvitation(invitationId: string, approverId: string) {
-    const invitation = await this.prisma.invitation.findUnique({
-      where: { id: invitationId },
+  // ── RESEND INVITATION (নতুন credentials generate করে পাঠাবে) ──
+  async resendInvitation(invitationId: string, senderId: string) {
+    const invitation = await this.prisma.invitation.findFirst({
+      where: { id: invitationId, senderId },
+      include: { receiver: { select: { id: true, email: true } } },
     });
 
     if (!invitation) throw new NotFoundException('Invitation not found');
-    if (invitation.status !== 'pending') throw new BadRequestException('Invitation is not pending');
+    if (invitation.status !== 'pending')
+      throw new BadRequestException('Cannot resend non-pending invitation');
+
+    // নতুন password generate করো
+    const plainPassword = Math.floor(100000 + Math.random() * 900000).toString();
+    const passwordHash = await bcrypt.hash(plainPassword, 10);
+
+    // Expiry আপডেট করো
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    await this.prisma.invitation.update({
+      where: { id: invitationId },
+      data: { expiresAt },
+    });
+
+    // User এর password আপডেট করো
+    if (invitation.receiverId) {
+      await this.prisma.user.update({
+        where: { id: invitation.receiverId },
+        data: { passwordHash },
+      });
+    }
+
+    // নতুন credentials email পাঠাও
+    if (invitation.email) {
+      await this.mailService.sendCredentialsEmail(
+        invitation.email,
+        plainPassword,
+        invitation.role,
+      );
+    }
+
+    console.log('Resent credentials ->', { email: invitation.email, password: plainPassword });
+
+    return { message: 'Credentials resent successfully' };
+  }
+
+  // ── CANCEL INVITATION ─────────────────────
+  async cancelInvitation(invitationId: string, senderId: string) {
+    const invitation = await this.prisma.invitation.findFirst({
+      where: { id: invitationId, senderId },
+    });
+
+    if (!invitation) throw new NotFoundException('Invitation not found');
+    if (invitation.status !== 'pending')
+      throw new BadRequestException('Cannot cancel non-pending invitation');
 
     await this.prisma.invitation.update({
       where: { id: invitationId },
       data: { status: 'cancelled' },
     });
 
-    return { message: 'Invitation rejected' };
-  }
+    // User ও inactive করো
+    if (invitation.receiverId) {
+      await this.prisma.user.update({
+        where: { id: invitation.receiverId },
+        data: { status: 'inactive' },
+      });
+    }
 
+    return { message: 'Invitation cancelled' };
+  }
 
   // ── FORGOT PASSWORD ───────────────────────
   async forgotPassword(dto: ForgotPasswordDto) {
@@ -335,9 +330,9 @@ export class AuthService {
     if (!user) throw new NotFoundException('User not found');
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const forgotToken = uuidv4(); // ← token generate
+    const forgotToken = uuidv4();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    // Store OTP and a short-lived token on the user record (DB-backed).
+
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
@@ -359,50 +354,51 @@ export class AuthService {
 
   // ── VERIFY OTP ────────────────────────────
   async verifyOtp(dto: VerifyOtpDto) {
-    // Lookup the user by the short-lived reset token stored on the user.
     const user = await this.prisma.user.findFirst({ where: { resetToken: dto.forgotToken } });
     if (!user) throw new BadRequestException('Invalid or expired token');
     if (!user.otp || !user.otpExpiresAt) throw new BadRequestException('OTP not found');
     if (new Date() > user.otpExpiresAt) {
-      // Clear otp fields
-      await this.prisma.user.update({ where: { id: user.id }, data: { otp: null, otpExpiresAt: null, resetToken: null, resetExpiresAt: null } });
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { otp: null, otpExpiresAt: null, resetToken: null, resetExpiresAt: null },
+      });
       throw new BadRequestException('OTP expired');
     }
     if (user.otp !== dto.otp) throw new BadRequestException('Invalid OTP');
 
-    // OTP is valid — generate a new reset token for password reset step
     const resetToken = uuidv4();
     const resetExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
     await this.prisma.user.update({
       where: { id: user.id },
-      data: {
-        otp: null,
-        otpExpiresAt: null,
-        resetToken,
-        resetExpiresAt,
-      },
+      data: { otp: null, otpExpiresAt: null, resetToken, resetExpiresAt },
     });
 
     return { message: 'OTP verified', resetToken };
   }
+
   // ── RESET PASSWORD ────────────────────────
   async resetPassword(dto: ResetPasswordDto) {
     if (!dto.resetToken) throw new BadRequestException('Reset token is required');
     if (!dto.newPassword) throw new BadRequestException('New password is required');
 
-    // Find the user by resetToken stored on the user record
     const user = await this.prisma.user.findFirst({ where: { resetToken: dto.resetToken } });
     if (!user) throw new BadRequestException('Invalid or expired reset token');
     if (!user.resetExpiresAt || new Date() > user.resetExpiresAt) {
-      // Clear any stale token
-      if (user.id) await this.prisma.user.update({ where: { id: user.id }, data: { resetToken: null, resetExpiresAt: null } });
+      if (user.id)
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { resetToken: null, resetExpiresAt: null },
+        });
       throw new BadRequestException('Reset token expired');
     }
 
     const hash = await bcrypt.hash(dto.newPassword, 10);
 
-    await this.prisma.user.update({ where: { id: user.id }, data: { passwordHash: hash, resetToken: null, resetExpiresAt: null } });
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: hash, resetToken: null, resetExpiresAt: null },
+    });
 
     return { message: 'Password updated successfully' };
   }
@@ -418,39 +414,31 @@ export class AuthService {
     const validRoles = ['admin', 'manager', 'worker'];
     const validStatuses = ['pending', 'accepted', 'expired', 'cancelled'];
 
-    const where: any = (userRole === UserRole.super_admin || userRole === UserRole.admin) ? {} : { senderId };
+    const where: any =
+      userRole === UserRole.super_admin || userRole === UserRole.admin
+        ? {}
+        : { senderId };
 
-    // Filter by role if provided
     if (filterRole && validRoles.includes(filterRole)) {
       where.role = filterRole;
-
-      // If search is provided with role filter, search within role
       if (search) {
-        const searchLower = search.toLowerCase();
         where.OR = [
-          { email: { contains: searchLower, mode: 'insensitive' } },
-          { phone: { contains: searchLower, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+          { phone: { contains: search, mode: 'insensitive' } },
         ];
       }
-    }
-    // Filter by status if provided
-    else if (filterStatus && validStatuses.includes(filterStatus)) {
+    } else if (filterStatus && validStatuses.includes(filterStatus)) {
       where.status = filterStatus;
-
-      // If search is provided with status filter, search within status
       if (search) {
-        const searchLower = search.toLowerCase();
         where.OR = [
-          { email: { contains: searchLower, mode: 'insensitive' } },
-          { phone: { contains: searchLower, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+          { phone: { contains: search, mode: 'insensitive' } },
         ];
       }
-    }
-    // If no filters, search across all
-    else if (search) {
+    } else if (search) {
       const searchLower = search.toLowerCase();
-      const matchingRoles = validRoles.filter(r => r.includes(searchLower));
-      const matchingStatuses = validStatuses.filter(s => s.includes(searchLower));
+      const matchingRoles = validRoles.filter((r) => r.includes(searchLower));
+      const matchingStatuses = validStatuses.filter((s) => s.includes(searchLower));
 
       where.OR = [
         ...(matchingRoles.length > 0 ? [{ role: { in: matchingRoles } }] : []),
@@ -462,10 +450,7 @@ export class AuthService {
 
     if (filterRole === 'worker') {
       const workerMembers = await this.prisma.projectMember.findMany({
-        where: {
-          role: 'worker',
-          managerId: { not: null },
-        },
+        where: { role: 'worker', managerId: { not: null } },
         include: {
           user: {
             select: {
@@ -481,49 +466,37 @@ export class AuthService {
         },
       });
 
-      // managerId গুলো collect করো
-      const managerIds = [...new Set(workerMembers.map((m) => m.managerId).filter(Boolean))] as string[];
+      const managerIds = [
+        ...new Set(workerMembers.map((m) => m.managerId).filter(Boolean)),
+      ] as string[];
 
-      // manager details এক সাথে আনো
       const managers = await this.prisma.user.findMany({
         where: { id: { in: managerIds } },
-        select: {
-          id: true,
-          fullName: true,
-          email: true,
-          role: true,
-          avatarUrl: true,
-        },
+        select: { id: true, fullName: true, email: true, role: true, avatarUrl: true },
       });
 
       const managerMap = Object.fromEntries(managers.map((m) => [m.id, m]));
 
-      const workers = workerMembers.map((member) => ({
-        id: member.user.id,
-        fullName: member.user.fullName,
-        email: member.user.email,
-        role: member.user.role,
-        avatarUrl: member.user.avatarUrl,
-        status: member.user.status,
-        phone: member.user.phone,
-        managerId: member.managerId,
-        manager: member.managerId ? managerMap[member.managerId] ?? null : null,
-      }));
-
-      return { workers };
+      return {
+        workers: workerMembers.map((member) => ({
+          id: member.user.id,
+          fullName: member.user.fullName,
+          email: member.user.email,
+          role: member.user.role,
+          avatarUrl: member.user.avatarUrl,
+          status: member.user.status,
+          phone: member.user.phone,
+          managerId: member.managerId,
+          manager: member.managerId ? (managerMap[member.managerId] ?? null) : null,
+        })),
+      };
     }
 
     const invitations = await this.prisma.invitation.findMany({
       where,
       include: {
         sender: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            role: true,
-            avatarUrl: true,
-          },
+          select: { id: true, fullName: true, email: true, role: true, avatarUrl: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -533,46 +506,6 @@ export class AuthService {
       ...invitation,
       manager: invitation.role === UserRole.worker ? invitation.sender : null,
     }));
-  }
-
-  // ── RESEND INVITATION ─────────────────────
-  async resendInvitation(invitationId: string, senderId: string) {
-    const invitation = await this.prisma.invitation.findFirst({
-      where: { id: invitationId, senderId },
-    });
-
-    if (!invitation) throw new NotFoundException('Invitation not found');
-    if (invitation.status !== 'pending') throw new BadRequestException('Cannot resend non-pending invitation');
-
-    const newToken = uuidv4();
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-    await this.prisma.invitation.update({
-      where: { id: invitationId },
-      data: { token: newToken, expiresAt },
-    });
-
-    if (invitation.email) {
-      await this.mailService.sendInviteEmail(invitation.email, newToken, invitation.role);
-    }
-
-    return { message: 'Invitation resent' };
-  }
-
-  // ── CANCEL INVITATION ─────────────────────
-  async cancelInvitation(invitationId: string, senderId: string) {
-    const invitation = await this.prisma.invitation.findFirst({
-      where: { id: invitationId, senderId },
-    });
-
-    if (!invitation) throw new NotFoundException('Invitation not found');
-
-    await this.prisma.invitation.update({
-      where: { id: invitationId },
-      data: { status: 'cancelled' },
-    });
-
-    return { message: 'Invitation cancelled' };
   }
 
   // ── ME ────────────────────────────────────
@@ -601,12 +534,11 @@ export class AuthService {
 
   // ── HELPER ────────────────────────────────
   private generateToken(userId: string, email: string, role: string, expiresIn?: string) {
-    const signOptions: JwtSignOptions = expiresIn ? { expiresIn: expiresIn as JwtSignOptions['expiresIn'] } : {};
-
+    const signOptions: JwtSignOptions = expiresIn
+      ? { expiresIn: expiresIn as JwtSignOptions['expiresIn'] }
+      : {};
     return this.jwtService.sign({ sub: userId, email, role }, signOptions);
   }
-
-
 
   // ── CHANGE PASSWORD ───────────────────────
   async changePassword(userId: string, dto: ChangePasswordDto) {
@@ -622,8 +554,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
 
     const isMatch = await bcrypt.compare(dto.oldPassword, user.passwordHash);
-    if (!isMatch)
-      throw new BadRequestException('Old password is incorrect');
+    if (!isMatch) throw new BadRequestException('Old password is incorrect');
 
     if (dto.oldPassword === dto.newPassword)
       throw new BadRequestException('New password must differ from old password');

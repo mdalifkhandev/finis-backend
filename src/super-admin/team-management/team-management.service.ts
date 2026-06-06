@@ -1,66 +1,164 @@
 import {
   Injectable,
+  BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole, UserStatus } from '../../generated/prisma/client';
-
-
 
 @Injectable()
 export class TeamManagementService {
   constructor(private prisma: PrismaService) {}
 
-  // ── IMAGE 1: Admin Stats ─────────────────────────────────────────────
-  async getAdminStats(userId: string, userRole: string) {
-    const isSuperAdmin = userRole === UserRole.super_admin;
+  // ── Admin Stats ──────────────────────────────────────────────────────
+async getAdminStats(userId: string, userRole: string) {
+  const totalAdmins = await this.prisma.user.count({
+    where: { role: UserRole.admin },
+  });
 
-    // Total Admins
-    const totalAdmins = await this.prisma.user.count({
-      where: { role: UserRole.admin },
-    });
+  const activeAdmins = await this.prisma.user.count({
+    where: { role: UserRole.admin, status: UserStatus.active },
+  });
 
-    // Active admins
-    const activeAdmins = await this.prisma.user.count({
-      where: { role: UserRole.admin, status: UserStatus.active },
-    });
+  const pendingInvitations = await this.prisma.invitation.count({
+    where: { status: 'pending', role: UserRole.admin },
+  });
 
-
-    const pendingApproval = await this.prisma.user.count({
-      where: { role: UserRole.admin, status: UserStatus.pending },
-    });
-
-    // Pending Invitations — admin role এ invitation পাঠানো হয়েছে কিন্তু accept হয়নি
-    const pendingInvitations = await this.prisma.invitation.count({
+  return {
+    totalAdmins,
+    active: activeAdmins,
+    pendingInvitations,
+  };
+}
+  // ── Admin List (super_admin বাদ) ─────────────────────────────────────
+  async getAdminList(search?: string, status?: string) {
+    return this.prisma.user.findMany({
       where: {
-        role: UserRole.admin,
-        status: 'pending',
-        ...(isSuperAdmin ? {} : { senderId: userId }),
+        role: UserRole.admin, // শুধু admin, super_admin বাদ
+        ...(status && status !== 'all' ? { status: status as any } : {}),
+        ...(search
+          ? {
+              OR: [
+                { fullName: { contains: search, mode: 'insensitive' } },
+                { email: { contains: search, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true,
+        avatarUrl: true,
+        lastLoginAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  // User Details by ID
+  async getUserDetailsById(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        tenantId: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true,
+        employeeId: true,
+        department: true,
+        dateOfBirth: true,
+        address: true,
+        bio: true,
+        hourlyRate: true,
+        joinDate: true,
+        avatarUrl: true,
+        lastLoginAt: true,
+        createdAt: true,
+        updatedAt: true,
+        projectMemberships: {
+          select: {
+            id: true,
+            role: true,
+            managerId: true,
+            createdAt: true,
+            project: {
+              select: {
+                id: true,
+                name: true,
+                status: true,
+                startDate: true,
+                endDate: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        certifications: {
+          select: {
+            id: true,
+            name: true,
+            issuedBy: true,
+            issuedAt: true,
+            expiresAt: true,
+            status: true,
+            documentUrl: true,
+          },
+        },
+        userSettings: {
+          select: {
+            language: true,
+            timezone: true,
+            dateFormat: true,
+            currency: true,
+          },
+        },
       },
     });
 
-    return {
-      totalAdmins,
-      active: activeAdmins,
-      pendingApproval,
-      pendingInvitations,
-    };
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return user;
   }
 
-  // ── IMAGE 2: Manager Stats ───────────────────────────────────────────
-  async getManagerStats(userId: string, userRole: string) {
-    const isSuperAdmin = userRole === UserRole.super_admin;
+  // ── Update User Status ───────────────────────────────────────────────
+  async updateUserStatus(userId: string, status: string) {
+    const validStatuses = ['active', 'inactive', 'suspended'];
+    if (!validStatuses.includes(status)) {
+      throw new BadRequestException('Invalid status');
+    }
 
-    // Total Managers
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { status: status as any },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        role: true,
+        status: true,
+      },
+    });
+  }
+
+  // ── Manager Stats ────────────────────────────────────────────────────
+  async getManagerStats(userId: string, userRole: string) {
     const totalManagers = await this.prisma.user.count({
       where: { role: UserRole.manager },
     });
 
-    // Active Managers
     const activeManagers = await this.prisma.user.count({
       where: { role: UserRole.manager, status: UserStatus.active },
     });
 
-    // Total Projects Managed — ProjectMember তে role=manager এ unique projectId count
     const managedProjects = await this.prisma.projectMember.findMany({
       where: { role: 'manager' },
       select: { projectId: true },
@@ -74,7 +172,7 @@ export class TeamManagementService {
     };
   }
 
-  // ── IMAGE 3: Workforce Stats ─────────────────────────────────────────
+  // ── Workforce Stats ──────────────────────────────────────────────────
   async getWorkforceStats(userId: string, userRole: string) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -85,12 +183,10 @@ export class TeamManagementService {
     lastMonth.setMonth(lastMonth.getMonth() - 1);
     lastMonth.setHours(0, 0, 0, 0);
 
-    // Total Workforce — role=worker সব active user
     const totalWorkforce = await this.prisma.user.count({
       where: { role: UserRole.worker, status: UserStatus.active },
     });
 
-    // Last month workforce (trend এর জন্য)
     const lastMonthWorkforce = await this.prisma.user.count({
       where: {
         role: UserRole.worker,
@@ -98,9 +194,8 @@ export class TeamManagementService {
         createdAt: { lt: lastMonth },
       },
     });
-    const workforceTrend = totalWorkforce - lastMonthWorkforce; // +12 এর মতো
+    const workforceTrend = totalWorkforce - lastMonthWorkforce;
 
-    // Active Today — আজকে attendance আছে এমন worker
     const activeToday = await this.prisma.attendance.count({
       where: {
         date: { gte: today, lte: todayEnd },
@@ -111,7 +206,6 @@ export class TeamManagementService {
     const activeTodayPercent =
       totalWorkforce > 0 ? Math.round((activeToday / totalWorkforce) * 100) : 0;
 
-    // On Leave — আজকে approved leave আছে এমন worker
     const onLeave = await this.prisma.leaveRequest.count({
       where: {
         status: 'approved',
@@ -120,7 +214,6 @@ export class TeamManagementService {
       },
     });
 
-    // Last week on leave (trend এর জন্য)
     const lastWeek = new Date();
     lastWeek.setDate(lastWeek.getDate() - 7);
     const onLeaveLastWeek = await this.prisma.leaveRequest.count({
@@ -130,9 +223,8 @@ export class TeamManagementService {
         endDate: { gte: lastWeek },
       },
     });
-    const leaveTrend = onLeave - onLeaveLastWeek; // -2 এর মতো
+    const leaveTrend = onLeave - onLeaveLastWeek;
 
-    // Avg Attendance — last 30 দিনের attendance rate
     const last30Days = new Date();
     last30Days.setDate(last30Days.getDate() - 30);
 
@@ -149,7 +241,6 @@ export class TeamManagementService {
         ? Math.round((totalAttendances / totalExpectedAttendances) * 1000) / 10
         : 0;
 
-    // Last month avg attendance (trend এর জন্য)
     const prevMonthAttendances = await this.prisma.attendance.count({
       where: {
         date: { gte: lastMonth, lt: last30Days },
@@ -160,7 +251,7 @@ export class TeamManagementService {
       totalExpectedAttendances > 0
         ? Math.round((prevMonthAttendances / totalExpectedAttendances) * 1000) / 10
         : 0;
-    const attendanceTrend = Math.round((avgAttendance - prevAvgAttendance) * 10) / 10; // +1.2 এর মতো
+    const attendanceTrend = Math.round((avgAttendance - prevAvgAttendance) * 10) / 10;
 
     return {
       totalWorkforce,
@@ -173,4 +264,55 @@ export class TeamManagementService {
       attendanceTrend: attendanceTrend >= 0 ? `+${attendanceTrend}%` : `${attendanceTrend}%`,
     };
   }
+
+  // ── Pending Invitations List ─────────────────────────────────────────
+async getPendingInvitations(
+  userId: string,
+  userRole: string,
+  search?: string,
+  role?: string,
+) {
+  // শুধু super_admin সব দেখবে
+  if (userRole !== UserRole.super_admin) {
+    return [];
+  }
+
+  const invitations = await this.prisma.invitation.findMany({
+    where: {
+      status: 'pending',
+      ...(role ? { role: role as UserRole } : {}),
+      ...(search
+        ? {
+            OR: [
+              { email: { contains: search, mode: 'insensitive' } },
+              { phone: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    },
+    include: {
+      sender: {
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          role: true,
+          avatarUrl: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  return invitations.map((inv) => ({
+    id: inv.id,
+    email: inv.email,
+    phone: inv.phone,
+    role: inv.role,
+    status: inv.status,
+    expiresAt: inv.expiresAt,
+    createdAt: inv.createdAt,
+    requestedBy: inv.sender,
+  }));
+}
 }
