@@ -1,5 +1,5 @@
 import {
-  Controller, Post, Get, Delete, Body, Param, Query,
+  Controller, Post, Get, Delete, Patch, Body, Param, Query,
   UseGuards, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
@@ -9,7 +9,6 @@ import { Roles } from './decorators/roles.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
 import { InviteDto } from './dto/invite.dto';
-import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -17,7 +16,7 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) { }
+  constructor(private authService: AuthService) {}
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
@@ -35,11 +34,6 @@ export class AuthController {
   @Post('seed-super-admin')
   seedSuperAdmin() {
     return this.authService.seedSuperAdmin();
-  }
-
-  @Post('accept-invite')
-  acceptInvite(@Body() dto: AcceptInviteDto) {
-    return this.authService.acceptInvite(dto);
   }
 
   @Post('forgot-password')
@@ -66,6 +60,19 @@ export class AuthController {
     return this.authService.getMe(userId);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  changePassword(
+    @CurrentUser('id') userId: string,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(userId, dto);
+  }
+
+  // ── INVITE ────────────────────────────────────────────────────────────────
+  // admin → creates pending invitation (super_admin must approve)
+  // super_admin → creates user directly
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('super_admin', 'admin')
   @Post('invite')
@@ -100,14 +107,18 @@ export class AuthController {
     return this.authService.cancelInvitation(id, userId);
   }
 
+  // ── APPROVE / REJECT (super_admin only) ───────────────────────────────────
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Patch('invitations/:id/approve')
+  approveInvitation(@Param('id') id: string, @CurrentUser('id') userId: string) {
+    return this.authService.approveInvitation(id, userId);
+  }
 
-  @UseGuards(JwtAuthGuard)
-  @Post('change-password')
-  @HttpCode(HttpStatus.OK)
-  changePassword(
-    @CurrentUser('id') userId: string,
-    @Body() dto: ChangePasswordDto,
-  ) {
-    return this.authService.changePassword(userId, dto);
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('super_admin')
+  @Patch('invitations/:id/reject')
+  rejectInvitation(@Param('id') id: string, @CurrentUser('id') userId: string) {
+    return this.authService.rejectInvitation(id, userId);
   }
 }
