@@ -82,4 +82,13 @@ export class TeamManagementController {
   ) {
     return this.teamService.updateUserStatus(id, status);
   }
+
+  /** GET /super_admin/team/managers?search=&status= */
+  @Get('managers')
+  getManagerList(
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.teamService.getManagerList(search, status);
+  }
 }

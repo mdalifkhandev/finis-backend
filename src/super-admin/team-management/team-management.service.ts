@@ -8,28 +8,28 @@ import { UserRole, UserStatus } from '../../generated/prisma/client';
 
 @Injectable()
 export class TeamManagementService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   // ── Admin Stats ──────────────────────────────────────────────────────
-async getAdminStats(userId: string, userRole: string) {
-  const totalAdmins = await this.prisma.user.count({
-    where: { role: UserRole.admin },
-  });
+  async getAdminStats(userId: string, userRole: string) {
+    const totalAdmins = await this.prisma.user.count({
+      where: { role: UserRole.admin },
+    });
 
-  const activeAdmins = await this.prisma.user.count({
-    where: { role: UserRole.admin, status: UserStatus.active },
-  });
+    const activeAdmins = await this.prisma.user.count({
+      where: { role: UserRole.admin, status: UserStatus.active },
+    });
 
-  const pendingInvitations = await this.prisma.invitation.count({
-    where: { status: 'pending', role: UserRole.admin },
-  });
+    const pendingInvitations = await this.prisma.invitation.count({
+      where: { status: 'pending', role: UserRole.admin },
+    });
 
-  return {
-    totalAdmins,
-    active: activeAdmins,
-    pendingInvitations,
-  };
-}
+    return {
+      totalAdmins,
+      active: activeAdmins,
+      pendingInvitations,
+    };
+  }
   // ── Admin List (super_admin বাদ) ─────────────────────────────────────
   async getAdminList(search?: string, status?: string) {
     return this.prisma.user.findMany({
@@ -38,11 +38,11 @@ async getAdminStats(userId: string, userRole: string) {
         ...(status && status !== 'all' ? { status: status as any } : {}),
         ...(search
           ? {
-              OR: [
-                { fullName: { contains: search, mode: 'insensitive' } },
-                { email: { contains: search, mode: 'insensitive' } },
-              ],
-            }
+            OR: [
+              { fullName: { contains: search, mode: 'insensitive' } },
+              { email: { contains: search, mode: 'insensitive' } },
+            ],
+          }
           : {}),
       },
       select: {
@@ -59,6 +59,7 @@ async getAdminStats(userId: string, userRole: string) {
     });
   }
 
+  // User Details by ID
   // User Details by ID
   async getUserDetailsById(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -82,35 +83,6 @@ async getAdminStats(userId: string, userRole: string) {
         lastLoginAt: true,
         createdAt: true,
         updatedAt: true,
-        projectMemberships: {
-          select: {
-            id: true,
-            role: true,
-            managerId: true,
-            createdAt: true,
-            project: {
-              select: {
-                id: true,
-                name: true,
-                status: true,
-                startDate: true,
-                endDate: true,
-              },
-            },
-          },
-          orderBy: { createdAt: 'desc' },
-        },
-        certifications: {
-          select: {
-            id: true,
-            name: true,
-            issuedBy: true,
-            issuedAt: true,
-            expiresAt: true,
-            status: true,
-            documentUrl: true,
-          },
-        },
         userSettings: {
           select: {
             language: true,
@@ -126,7 +98,61 @@ async getAdminStats(userId: string, userRole: string) {
       throw new NotFoundException('User not found');
     }
 
-    return user;
+    // Admin → assigned companies (CompanyMember)
+    if (user.role === UserRole.admin) {
+      const ownedCompanies = await this.prisma.company.findMany({
+        where: { ownerId: userId },
+        select: {
+          id: true,
+          name: true,
+          industry: true,
+          isActive: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const companies = ownedCompanies.map(c => ({
+        id: c.id,
+        role: 'owner',
+        joinedAt: c.createdAt,
+        company: {
+          id: c.id,
+          name: c.name,
+          industry: c.industry,
+          isActive: c.isActive,
+        },
+      }));
+
+      return { ...user, companies, projects: [] };
+    }
+
+    // Manager → assigned projects (ProjectMember)
+    if (user.role === UserRole.manager) {
+      const projects = await this.prisma.projectMember.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          role: true,
+          createdAt: true,
+          project: {
+            select: {
+              id: true,
+              name: true,
+              status: true,
+              startDate: true,
+              endDate: true,
+              progress: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      return { ...user, projects, companies: [] };
+    }
+
+    return { ...user, companies: [], projects: [] };
   }
 
   // ── Update User Status ───────────────────────────────────────────────
@@ -266,53 +292,92 @@ async getAdminStats(userId: string, userRole: string) {
   }
 
   // ── Pending Invitations List ─────────────────────────────────────────
-async getPendingInvitations(
-  userId: string,
-  userRole: string,
-  search?: string,
-  role?: string,
-) {
-  // শুধু super_admin সব দেখবে
-  if (userRole !== UserRole.super_admin) {
-    return [];
-  }
+  async getPendingInvitations(
+    userId: string,
+    userRole: string,
+    search?: string,
+    role?: string,
+  ) {
+    // শুধু super_admin সব দেখবে
+    if (userRole !== UserRole.super_admin) {
+      return [];
+    }
 
-  const invitations = await this.prisma.invitation.findMany({
-    where: {
-      status: 'pending',
-      ...(role ? { role: role as UserRole } : {}),
-      ...(search
-        ? {
+    const invitations = await this.prisma.invitation.findMany({
+      where: {
+        status: 'pending',
+        ...(role ? { role: role as UserRole } : {}),
+        ...(search
+          ? {
             OR: [
               { email: { contains: search, mode: 'insensitive' } },
               { phone: { contains: search, mode: 'insensitive' } },
             ],
           }
-        : {}),
-    },
-    include: {
-      sender: {
-        select: {
-          id: true,
-          fullName: true,
-          email: true,
-          role: true,
-          avatarUrl: true,
+          : {}),
+      },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            role: true,
+            avatarUrl: true,
+          },
         },
       },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+      orderBy: { createdAt: 'desc' },
+    });
 
-  return invitations.map((inv) => ({
-    id: inv.id,
-    email: inv.email,
-    phone: inv.phone,
-    role: inv.role,
-    status: inv.status,
-    expiresAt: inv.expiresAt,
-    createdAt: inv.createdAt,
-    requestedBy: inv.sender,
-  }));
-}
+    return invitations.map((inv) => ({
+      id: inv.id,
+      email: inv.email,
+      phone: inv.phone,
+      role: inv.role,
+      status: inv.status,
+      expiresAt: inv.expiresAt,
+      createdAt: inv.createdAt,
+      requestedBy: inv.sender,
+    }));
+  }
+
+
+  // ── Manager List ─────────────────────────────────────────────────────────
+  async getManagerList(search?: string, status?: string) {
+    return this.prisma.user.findMany({
+      where: {
+        role: UserRole.manager,
+        ...(status && status !== 'all' ? { status: status as any } : {}),
+        ...(search
+          ? {
+            OR: [
+              { fullName: { contains: search, mode: 'insensitive' } },
+              { email: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+          : {}),
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true,
+        avatarUrl: true,
+        lastLoginAt: true,
+        projectMemberships: {
+          select: {
+            projectId: true,
+            project: {
+              select: { id: true, name: true },
+            },
+          },
+          where: { role: 'manager' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
 }
