@@ -31,7 +31,7 @@ import {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
 export class ProjectController {
-  constructor(private projectService: ProjectService) {}
+  constructor(private projectService: ProjectService) { }
 
   // ─── PROJECTS ──────────────────────────────────────────────────────────────
 
@@ -44,6 +44,16 @@ export class ProjectController {
     @Query('search') search?: string,
   ) {
     return this.projectService.getMyProjects(userId, userRole, status, search);
+  }
+
+
+  /** GET /admin/projects/names */
+  @Get('names')
+  getMyProjectNames(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.getMyProjectNames(userId, userRole);
   }
 
   /** POST /admin/projects */
@@ -98,7 +108,7 @@ export class ProjectController {
 
   /** DELETE /admin/projects/:id */
   @Delete(':id')
-  @Roles(UserRole.admin, UserRole.super_admin)
+  @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
   deleteProject(
     @Param('id') id: string,
     @CurrentUser('id') adminId: string,
@@ -258,7 +268,7 @@ export class ProjectController {
   getManagerWorkersCount(
     @Param('id') id: string,
     @Param('managerId') managerId: string,
-    @CurrentUser('id') userId: string, 
+    @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
   ) {
     return this.projectService.getManagerWorkersCount(id, managerId, userId, userRole);
@@ -289,17 +299,17 @@ export class ProjectController {
     return this.projectService.addMemberByRole(id, dto.userId, adminId, 'manager', undefined, userRole);
   }
 
-/** POST /admin/projects/:id/team/workers */
-@Post(':id/team/workers')
-@Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
-addWorker(
-  @Param('id') id: string,
-  @Body() dto: AddProjectMemberDto,
-  @CurrentUser('id') adminId: string,
-  @CurrentUser('role') userRole: string, // ← যোগ করো
-) {
-  return this.projectService.addMemberByRole(id, dto.userId, adminId, 'worker', dto.managerId, userRole);
-}
+  /** POST /admin/projects/:id/team/workers */
+  @Post(':id/team/workers')
+  @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
+  addWorker(
+    @Param('id') id: string,
+    @Body() dto: AddProjectMemberDto,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string, // ← যোগ করো
+  ) {
+    return this.projectService.addMemberByRole(id, dto.userId, adminId, 'worker', dto.managerId, userRole);
+  }
 
   /** DELETE /admin/projects/:id/team/:userId */
   @Delete(':id/team/:userId')
@@ -349,13 +359,13 @@ addWorker(
   }
 
   @Patch(':id/geofences/violations/:violationId/resolve')
-resolveViolation(
-  @Param('violationId') violationId: string,
-  @CurrentUser('id') userId: string,
-  @CurrentUser('role') userRole: string,
-) {
-  return this.projectService.resolveViolation(violationId, userId, userRole);
-}
+  resolveViolation(
+    @Param('violationId') violationId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.resolveViolation(violationId, userId, userRole);
+  }
 
   /** DELETE /admin/projects/:id/geofences/:geoId */
   @Delete(':id/geofences/:geoId')
@@ -370,38 +380,38 @@ resolveViolation(
 
 
   /** GET /admin/projects/:id/geofences/location-logs */
-@Get(':id/geofences/location-logs')
-getLocationLogs(
-  @Param('id') id: string,
-  @CurrentUser('id') userId: string,
-  @CurrentUser('role') userRole: string,
-  @Query('page') page?: string,
-  @Query('limit') limit?: string,
-) {
-  return this.projectService.getLocationLogs(
-    id,
-    userId,
-    userRole,
-    page ? parseInt(page) : 1,
-    limit ? parseInt(limit) : 20,
-  );
-}
+  @Get(':id/geofences/location-logs')
+  getLocationLogs(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.projectService.getLocationLogs(
+      id,
+      userId,
+      userRole,
+      page ? parseInt(page) : 1,
+      limit ? parseInt(limit) : 20,
+    );
+  }
 
-/** GET /admin/projects/:id/geofences/violations */
-@Get(':id/geofences/violations')
-getViolations(
-  @Param('id') id: string,
-  @CurrentUser('id') userId: string,
-  @CurrentUser('role') userRole: string,
-  @Query('page') page?: string,
-  @Query('limit') limit?: string,
-) {
-  return this.projectService.getViolations(
-    id,
-    userId,
-    userRole,
-    page ? parseInt(page) : 1,
-    limit ? parseInt(limit) : 20,
-  );
-}
+  /** GET /admin/projects/:id/geofences/violations */
+  @Get(':id/geofences/violations')
+  getViolations(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.projectService.getViolations(
+      id,
+      userId,
+      userRole,
+      page ? parseInt(page) : 1,
+      limit ? parseInt(limit) : 20,
+    );
+  }
 }

@@ -5,18 +5,11 @@ import {
   IsEnum,
   IsArray,
   IsNotEmpty,
-  IsBoolean,
 } from 'class-validator';
-import { PartialType } from '@nestjs/mapped-types';
-
-// ─────────────────────────────────────────────
-// ENUMS
-// ─────────────────────────────────────────────
 
 export enum ThreadType {
   DIRECT = 'direct',
   GROUP = 'group',
-  PROJECT = 'project',
 }
 
 export enum MediaType {
@@ -32,31 +25,13 @@ export enum MediaType {
 
 export class CreateDirectThreadDto {
   @IsUUID()
-  targetUserId!: string; // The person to chat with
+  targetUserId!: string;
 }
 
-export class CreateGroupThreadDto {
-  @IsString()
-  @IsNotEmpty()
-  name!: string;
-
+export class AddParticipantDto {
   @IsArray()
   @IsUUID('all', { each: true })
-  participantIds!: string[];
-
-  @IsOptional()
-  @IsUUID()
-  projectId?: string;
-}
-
-export class UpdateThreadDto {
-  @IsOptional()
-  @IsString()
-  name?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
+  userIds!: string[];
 }
 
 // ─────────────────────────────────────────────
@@ -80,7 +55,6 @@ export class SendMessageDto {
   mediaType?: MediaType;
 }
 
-// Socket.io payload (used in Gateway)
 export class SocketMessageDto {
   threadId!: string;
   content?: string;
@@ -94,12 +68,8 @@ export class SocketMessageDto {
 
 export class ThreadQueryDto {
   @IsOptional()
-  @IsEnum(ThreadType)
-  type?: ThreadType; // filter by direct / group / project
-
-  @IsOptional()
   @IsString()
-  search?: string; // search by participant name or thread name
+  search?: string;
 
   @IsOptional()
   page?: number = 1;
@@ -117,16 +87,28 @@ export class MessageQueryDto {
 }
 
 // ─────────────────────────────────────────────
-// PARTICIPANT DTOs
+// SUPPORT DTOs
 // ─────────────────────────────────────────────
 
-export class AddParticipantDto {
-  @IsArray()
-  @IsUUID('all', { each: true })
-  userIds!: string[];
+export class StartSupportThreadDto {
+  @IsOptional()
+  @IsUUID()
+  targetUserId?: string;
 }
 
-export class RemoveParticipantDto {
+export class AdminSendMessageDto {
   @IsUUID()
-  userId!: string;
+  threadId!: string;
+
+  @IsOptional()
+  @IsString()
+  content?: string;
+
+  @IsOptional()
+  @IsString()
+  mediaUrl?: string;
+
+  @IsOptional()
+  @IsEnum(MediaType)
+  mediaType?: MediaType;
 }

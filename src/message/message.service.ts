@@ -7,11 +7,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateDirectThreadDto,
-  CreateGroupThreadDto,
   SendMessageDto,
   ThreadQueryDto,
   MessageQueryDto,
   AddParticipantDto,
+  AdminSendMessageDto,
 } from './dto/message.dto';
 
 @Injectable()
@@ -19,21 +19,65 @@ export class MessageService {
   constructor(private readonly prisma: PrismaService) {}
 
   // ─────────────────────────────────────────────
-  // THREADS
+  // CONTACTS
   // ─────────────────────────────────────────────
 
-  /** Get all threads for current user with last message & unread count */
-  async getMyThreads(userId: string, query: ThreadQueryDto) {
-    const { type, search, page = 1, limit = 20 } = query;
+  async getChatContacts(userId: string, userRole: string, search?: string) {
+    const roleFilter: Record<string, any> = {
+      admin:   { notIn: ['super_admin'] },
+      manager: { in: ['admin', 'worker'] },
+      worker:  { equals: 'manager' },
+    };
+
+    return this.prisma.user.findMany({
+      where: {
+        id:     { not: userId },
+        status: 'active',
+        role:   roleFilter[userRole] ?? { notIn: ['super_admin'] },
+        ...(search && {
+          OR: [
+            { fullName: { contains: search, mode: 'insensitive' } },
+            { email:    { contains: search, mode: 'insensitive' } },
+          ],
+        }),
+      },
+      select: { id: true, fullName: true, avatarUrl: true, role: true, status: true },
+      orderBy: { fullName: 'asc' },
+    });
+  }
+
+  async searchUsersForSupport(search?: string) {
+    return this.prisma.user.findMany({
+      where: {
+        role:   { not: 'super_admin' },
+        status: 'active',
+        ...(search && {
+          OR: [
+            { fullName: { contains: search, mode: 'insensitive' } },
+            { email:    { contains: search, mode: 'insensitive' } },
+            { id:       { equals:   search } },
+          ],
+        }),
+      },
+      select: { id: true, fullName: true, avatarUrl: true, role: true, status: true },
+      orderBy: { fullName: 'asc' },
+      take: 20,
+    });
+  }
+
+  // ─────────────────────────────────────────────
+  // USER — CHAT THREADS (user-to-user, no super_admin)
+  // ─────────────────────────────────────────────
+
+  async getUserChatThreads(userId: string, query: ThreadQueryDto) {
+    const { search, page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
 
     const threads = await this.prisma.messageThread.findMany({
       where: {
         isActive: true,
-        participants: {
-          some: { userId },
-        },
-        ...(type && { type }),
+        type:     'direct',
+        participants: { some: { userId } },
       },
       orderBy: { createdAt: 'desc' },
       skip,
@@ -41,111 +85,207 @@ export class MessageService {
       include: {
         participants: {
           include: {
-            user: {
-              select: {
-                id: true,
-                fullName: true,
-                avatarUrl: true,
-                role: true,
-              },
-            },
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
           },
         },
         messages: {
           orderBy: { sentAt: 'desc' },
           take: 1,
-          select: {
-            content: true,
-            sentAt: true,
-            senderId: true,
-            isRead: true,
-          },
+          select: { content: true, sentAt: true, senderId: true, isRead: true },
         },
       },
     });
 
-    // Attach unread count & filter by search
-    const threadsWithMeta = threads
+    const filtered = threads
+      .filter((thread) => {
+        // শুধু user-to-user thread — কোনো super_admin নেই
+        const others = thread.participants.filter((p) => p.userId !== userId);
+        return others.every((p) => p.user.role !== 'super_admin');
+      })
+      .filter((thread) => {
+        if (!search) return true;
+        const others = thread.participants.filter((p) => p.userId !== userId);
+        const name = others[0]?.user?.fullName ?? '';
+        return name.toLowerCase().includes(search.toLowerCase());
+      })
       .map((thread) => {
-        const otherParticipants = thread.participants.filter((p) => p.userId !== userId);
-        const displayName =
-          thread.type === 'direct'
-            ? otherParticipants[0]?.user?.fullName ?? 'Unknown'
-            : thread.name ?? 'Group';
-
+        const others = thread.participants.filter((p) => p.userId !== userId);
         const unreadCount = thread.messages.filter(
           (m) => !m.isRead && m.senderId !== userId,
         ).length;
-
         return {
-          id: thread.id,
-          type: thread.type,
-          name: displayName,
-          projectId: thread.projectId,
-          isActive: thread.isActive,
-          lastMessage: thread.messages[0] ?? null,
+          id:           thread.id,
+          type:         thread.type,
+          name:         others[0]?.user?.fullName ?? 'Unknown',
+          isActive:     thread.isActive,
+          lastMessage:  thread.messages[0] ?? null,
           unreadCount,
-          participants: otherParticipants.map((p) => p.user),
+          participants: others.map((p) => p.user),
+          isReadOnly:   false,
         };
-      })
-      .filter((t) => {
-        if (!search) return true;
-        return t.name.toLowerCase().includes(search.toLowerCase());
       });
 
     return {
-      data: threadsWithMeta,
-      meta: { page, limit, total: threadsWithMeta.length },
+      data: filtered,
+      meta: { page, limit, total: filtered.length },
     };
   }
 
-  /** Get single thread detail */
-  async getThreadById(threadId: string, userId: string) {
+  // ─────────────────────────────────────────────
+  // USER — SUPPORT THREAD (user ↔ super_admin)
+  // ─────────────────────────────────────────────
+
+  async getUserSupportThread(userId: string) {
+    const superAdmin = await this.prisma.user.findFirst({
+      where: { role: 'super_admin', status: 'active' },
+      select: { id: true },
+    });
+    if (!superAdmin) throw new NotFoundException('Support not available');
+
     const thread = await this.prisma.messageThread.findFirst({
       where: {
-        id: threadId,
-        participants: { some: { userId } },
+        type:     'direct',
+        isActive: true,
+        AND: [
+          { participants: { some: { userId } } },
+          { participants: { some: { userId: superAdmin.id } } },
+        ],
       },
       include: {
         participants: {
           include: {
-            user: {
-              select: {
-                id: true,
-                fullName: true,
-                avatarUrl: true,
-                role: true,
-                status: true,
-              },
-            },
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
           },
         },
+        messages: { orderBy: { sentAt: 'desc' }, take: 1 },
       },
     });
 
-    if (!thread) throw new NotFoundException('Thread not found');
-    return thread;
+    // Thread না থাকলে null return করব, frontend create করবে
+    if (!thread) return { data: null };
+
+    const others = thread.participants.filter((p) => p.userId !== userId);
+    return {
+      data: {
+        id:           thread.id,
+        type:         thread.type,
+        name:         others[0]?.user?.fullName ?? 'Support',
+        isActive:     thread.isActive,
+        lastMessage:  thread.messages[0] ?? null,
+        unreadCount:  0,
+        participants: others.map((p) => p.user),
+        isReadOnly:   false,
+      },
+    };
   }
 
-  /** Create a direct (1-to-1) thread */
+  // ─────────────────────────────────────────────
+  // USER — CREATE / GET SUPPORT THREAD
+  // ─────────────────────────────────────────────
+
+  async getOrCreateSupportThread(requesterId: string, targetUserId?: string) {
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { role: true },
+    });
+
+    let userSideId: string;
+    let superAdminId: string;
+
+    if (requester?.role === 'super_admin') {
+      if (!targetUserId) throw new BadRequestException('targetUserId is required for super_admin');
+      const target = await this.prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: { role: true },
+      });
+      if (target?.role === 'super_admin') {
+        throw new BadRequestException('Cannot create support thread with another super_admin');
+      }
+      userSideId   = targetUserId;
+      superAdminId = requesterId;
+    } else {
+      const superAdmin = await this.prisma.user.findFirst({
+        where: { role: 'super_admin', status: 'active' },
+        select: { id: true },
+      });
+      if (!superAdmin) throw new NotFoundException('Support not available');
+      userSideId   = requesterId;
+      superAdminId = superAdmin.id;
+    }
+
+    const existing = await this.prisma.messageThread.findFirst({
+      where: {
+        type:     'direct',
+        isActive: true,
+        AND: [
+          { participants: { some: { userId: userSideId } } },
+          { participants: { some: { userId: superAdminId } } },
+        ],
+      },
+      include: {
+        participants: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          },
+        },
+        messages: { orderBy: { sentAt: 'desc' }, take: 1 },
+      },
+    });
+    if (existing) return existing;
+
+    return this.prisma.messageThread.create({
+      data: {
+        type: 'direct',
+        participants: {
+          create: [{ userId: userSideId }, { userId: superAdminId }],
+        },
+      },
+      include: {
+        participants: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          },
+        },
+        messages: { orderBy: { sentAt: 'desc' }, take: 1 },
+      },
+    });
+  }
+
+  // ─────────────────────────────────────────────
+  // USER — CREATE DIRECT CHAT THREAD
+  // ─────────────────────────────────────────────
+
   async createDirectThread(userId: string, dto: CreateDirectThreadDto) {
     if (userId === dto.targetUserId) {
       throw new BadRequestException('Cannot create a thread with yourself');
     }
 
-    // Check if direct thread already exists between these two users
+    const targetUser = await this.prisma.user.findUnique({
+      where: { id: dto.targetUserId },
+      select: { role: true },
+    });
+
+    if (targetUser?.role === 'super_admin') {
+      throw new ForbiddenException('Use the Support tab to contact the administrator');
+    }
+
     const existing = await this.prisma.messageThread.findFirst({
       where: {
         type: 'direct',
-        participants: { some: { userId } },
+        AND: [
+          { participants: { some: { userId } } },
+          { participants: { some: { userId: dto.targetUserId } } },
+        ],
       },
-      include: { participants: true },
+      include: {
+        participants: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          },
+        },
+      },
     });
-
-    if (existing) {
-      const isExisting = existing.participants.some((p) => p.userId === dto.targetUserId);
-      if (isExisting) return existing;
-    }
+    if (existing) return existing;
 
     return this.prisma.messageThread.create({
       data: {
@@ -164,83 +304,166 @@ export class MessageService {
     });
   }
 
-  /** Create a group or project thread */
-  async createGroupThread(userId: string, dto: CreateGroupThreadDto) {
-    const allParticipantIds = [...new Set([userId, ...dto.participantIds])];
+  // ─────────────────────────────────────────────
+  // SUPER ADMIN — SUPPORT THREADS
+  // ─────────────────────────────────────────────
 
-    return this.prisma.messageThread.create({
-      data: {
-        type: dto.projectId ? 'project' : 'group',
-        name: dto.name,
-        projectId: dto.projectId ?? null,
+  async getAdminSupportThreads(adminId: string, query: ThreadQueryDto) {
+    const { search, page = 1, limit = 20 } = query;
+    const skip = (page - 1) * limit;
+
+    const threads = await this.prisma.messageThread.findMany({
+      where: {
+        type: 'direct',
         participants: {
-          create: allParticipantIds.map((id) => ({
-            userId: id,
-            role: id === userId ? 'admin' : 'member',
-          })),
+          some: { userId: adminId },
         },
       },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
       include: {
         participants: {
           include: {
             user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
           },
         },
+        messages: {
+          orderBy: { sentAt: 'desc' },
+          take: 1,
+          select: { content: true, sentAt: true, senderId: true, isRead: true },
+        },
       },
     });
+
+    const filtered = threads
+      .filter((thread) => {
+        // Support thread = super_admin + non-super_admin participant আছে
+        const roles = thread.participants.map((p) => p.user.role);
+        return roles.includes('super_admin') && roles.some((r) => r !== 'super_admin');
+      })
+      .filter((thread) => {
+        if (!search) return true;
+        const names = thread.participants.map((p) => p.user.fullName).join(' ');
+        return names.toLowerCase().includes(search.toLowerCase());
+      })
+      .map((thread) => {
+        const others = thread.participants.filter((p) => p.userId !== adminId);
+        const unreadCount = thread.messages.filter(
+          (m) => !m.isRead && m.senderId !== adminId,
+        ).length;
+        return {
+          id:           thread.id,
+          type:         thread.type,
+          name:         others[0]?.user?.fullName ?? 'Unknown',
+          isActive:     thread.isActive,
+          lastMessage:  thread.messages[0] ?? null,
+          unreadCount,
+          participants: others.map((p) => p.user),
+          isReadOnly:   false,
+        };
+      });
+
+    return {
+      data: filtered,
+      meta: { page, limit, total: filtered.length },
+    };
   }
 
-  /** Close/deactivate a thread (Super Admin only) */
-  async closeThread(threadId: string) {
-    const thread = await this.prisma.messageThread.findUnique({ where: { id: threadId } });
-    if (!thread) throw new NotFoundException('Thread not found');
+  // ─────────────────────────────────────────────
+  // SUPER ADMIN — CHAT THREADS (read only)
+  // ─────────────────────────────────────────────
 
-    return this.prisma.messageThread.update({
-      where: { id: threadId },
-      data: { isActive: false },
+  async getAdminChatThreads(query: ThreadQueryDto) {
+    const { search, page = 1, limit = 20 } = query;
+    const skip = (page - 1) * limit;
+
+    const threads = await this.prisma.messageThread.findMany({
+      where: { type: 'direct' },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+      include: {
+        participants: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          },
+        },
+        messages: {
+          orderBy: { sentAt: 'desc' },
+          take: 1,
+          select: { content: true, sentAt: true, senderId: true, isRead: true },
+        },
+      },
     });
+
+    const filtered = threads
+      .filter((thread) => {
+        // Chat thread = super_admin নেই
+        const roles = thread.participants.map((p) => p.user.role);
+        return !roles.includes('super_admin');
+      })
+      .filter((thread) => {
+        if (!search) return true;
+        const names = thread.participants.map((p) => p.user.fullName).join(' ');
+        return names.toLowerCase().includes(search.toLowerCase());
+      })
+      .map((thread) => {
+        const participants = thread.participants.map((p) => p.user);
+        return {
+          id:           thread.id,
+          type:         thread.type,
+          name:         participants.map((p) => p.fullName).join(', '),
+          isActive:     thread.isActive,
+          lastMessage:  thread.messages[0] ?? null,
+          unreadCount:  0,
+          participants,
+          isReadOnly:   true, // super_admin chat thread এ শুধু read করতে পারবে
+        };
+      });
+
+    return {
+      data: filtered,
+      meta: { page, limit, total: filtered.length },
+    };
   }
 
-  /** Add participants to a group thread */
-  async addParticipants(threadId: string, userId: string, dto: AddParticipantDto) {
+  // ─────────────────────────────────────────────
+  // THREAD DETAIL
+  // ─────────────────────────────────────────────
+
+  async getThreadById(threadId: string, userId: string) {
     const thread = await this.prisma.messageThread.findFirst({
-      where: { id: threadId, participants: { some: { userId, role: 'admin' } } },
+      where: {
+        id: threadId,
+        participants: { some: { userId } },
+      },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: { id: true, fullName: true, avatarUrl: true, role: true, status: true },
+            },
+          },
+        },
+        messages: {
+          orderBy: { sentAt: 'desc' },
+          take: 1,
+          select: { content: true, sentAt: true, senderId: true, isRead: true },
+        },
+      },
     });
-    if (!thread) throw new ForbiddenException('Only group admins can add participants');
-
-    await this.prisma.threadParticipant.createMany({
-      data: dto.userIds.map((id) => ({ threadId, userId: id, role: 'member' })),
-      skipDuplicates: true,
-    });
-
-    return { message: 'Participants added successfully' };
-  }
-
-  /** Remove a participant from group thread */
-  async removeParticipant(threadId: string, requesterId: string, targetUserId: string) {
-    const isAdmin = await this.prisma.threadParticipant.findFirst({
-      where: { threadId, userId: requesterId, role: 'admin' },
-    });
-    if (!isAdmin && requesterId !== targetUserId) {
-      throw new ForbiddenException('Only admins can remove participants');
-    }
-
-    await this.prisma.threadParticipant.deleteMany({
-      where: { threadId, userId: targetUserId },
-    });
-
-    return { message: 'Participant removed' };
+    if (!thread) throw new NotFoundException('Thread not found');
+    return thread;
   }
 
   // ─────────────────────────────────────────────
   // MESSAGES
   // ─────────────────────────────────────────────
 
-  /** Get paginated messages in a thread */
   async getMessages(threadId: string, userId: string, query: MessageQueryDto) {
     const { page = 1, limit = 30 } = query;
 
-    // Verify user is participant
     const isParticipant = await this.prisma.threadParticipant.findUnique({
       where: { threadId_userId: { threadId, userId } },
     });
@@ -255,9 +478,7 @@ export class MessageService {
         include: {
           sender: {
             include: {
-              user: {
-                select: { id: true, fullName: true, avatarUrl: true, role: true },
-              },
+              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
             },
           },
         },
@@ -265,7 +486,7 @@ export class MessageService {
       this.prisma.message.count({ where: { threadId } }),
     ]);
 
-    // Mark as read
+    // Read mark করা
     await this.prisma.message.updateMany({
       where: { threadId, senderId: { not: userId }, isRead: false },
       data: { isRead: true },
@@ -277,7 +498,10 @@ export class MessageService {
     };
   }
 
-  /** Send a message (used by REST & Socket) */
+  // ─────────────────────────────────────────────
+  // SEND MESSAGE — USER
+  // ─────────────────────────────────────────────
+
   async sendMessage(senderId: string, dto: SendMessageDto) {
     const { threadId, content, mediaUrl, mediaType } = dto;
 
@@ -285,115 +509,165 @@ export class MessageService {
       throw new BadRequestException('Message must have content or media');
     }
 
-    // Verify sender is participant
     const isParticipant = await this.prisma.threadParticipant.findUnique({
       where: { threadId_userId: { threadId, userId: senderId } },
     });
     if (!isParticipant) throw new ForbiddenException('You are not a participant of this thread');
 
-    // Ensure MessageParticipant record exists
+    const sender = await this.prisma.user.findUnique({
+      where: { id: senderId },
+      select: { role: true },
+    });
+
+    // super_admin শুধু support thread এ message পাঠাতে পারবে
+    if (sender?.role === 'super_admin') {
+      const thread = await this.prisma.messageThread.findUnique({
+        where: { id: threadId },
+        include: {
+          participants: {
+            include: { user: { select: { id: true, role: true } } },
+          },
+        },
+      });
+      const otherParticipants = thread?.participants.filter((p) => p.userId !== senderId);
+      const allOthersAreSuperAdmin = otherParticipants?.every(
+        (p) => p.user.role === 'super_admin',
+      );
+      if (allOthersAreSuperAdmin) {
+        throw new ForbiddenException('Super admin can only send messages in Support threads');
+      }
+    }
+
     await this.prisma.messageParticipant.upsert({
-      where: { userId: senderId },
+      where:  { userId: senderId },
       update: {},
       create: { userId: senderId },
     });
 
-    const message = await this.prisma.message.create({
+    return this.prisma.message.create({
       data: {
         threadId,
         senderId,
-        content: content ?? null,
-        mediaUrl: mediaUrl ?? null,
+        content:   content   ?? null,
+        mediaUrl:  mediaUrl  ?? null,
         mediaType: mediaType ?? null,
         isRead: false,
       },
       include: {
         sender: {
           include: {
-            user: {
-              select: { id: true, fullName: true, avatarUrl: true, role: true },
-            },
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
           },
         },
       },
     });
-
-    return message;
   }
 
-  /** Delete a message (sender only) */
-  async deleteMessage(messageId: string, userId: string) {
-    const message = await this.prisma.message.findUnique({ where: { id: messageId } });
-    if (!message) throw new NotFoundException('Message not found');
-    if (message.senderId !== userId) throw new ForbiddenException('Cannot delete others messages');
+  // ─────────────────────────────────────────────
+  // SEND MESSAGE — SUPER ADMIN (support only)
+  // ─────────────────────────────────────────────
 
-    await this.prisma.message.delete({ where: { id: messageId } });
-    return { message: 'Message deleted' };
+  async sendAdminSupportMessage(adminId: string, dto: AdminSendMessageDto) {
+    const { threadId, content, mediaUrl, mediaType } = dto;
+
+    if (!content && !mediaUrl) {
+      throw new BadRequestException('Message must have content or media');
+    }
+
+    // Thread verify — super_admin participant কিনা
+    const isParticipant = await this.prisma.threadParticipant.findUnique({
+      where: { threadId_userId: { threadId, userId: adminId } },
+    });
+    if (!isParticipant) throw new ForbiddenException('You are not a participant of this thread');
+
+    // Thread টা support thread কিনা verify
+    const thread = await this.prisma.messageThread.findUnique({
+      where: { id: threadId },
+      include: {
+        participants: {
+          include: { user: { select: { id: true, role: true } } },
+        },
+      },
+    });
+
+    const otherParticipants = thread?.participants.filter((p) => p.userId !== adminId);
+    const isSupportThread = otherParticipants?.some((p) => p.user.role !== 'super_admin');
+
+    if (!isSupportThread) {
+      throw new ForbiddenException('Super admin can only send messages in Support threads');
+    }
+
+    await this.prisma.messageParticipant.upsert({
+      where:  { userId: adminId },
+      update: {},
+      create: { userId: adminId },
+    });
+
+    return this.prisma.message.create({
+      data: {
+        threadId,
+        senderId:  adminId,
+        content:   content   ?? null,
+        mediaUrl:  mediaUrl  ?? null,
+        mediaType: mediaType ?? null,
+        isRead: false,
+      },
+      include: {
+        sender: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          },
+        },
+      },
+    });
   }
 
-  /** Export thread messages as plain array (Super Admin) */
+  // ─────────────────────────────────────────────
+  // CLOSE THREAD
+  // ─────────────────────────────────────────────
+
+  async closeThread(threadId: string) {
+    const thread = await this.prisma.messageThread.findUnique({ where: { id: threadId } });
+    if (!thread) throw new NotFoundException('Thread not found');
+    return this.prisma.messageThread.update({
+      where: { id: threadId },
+      data: { isActive: false },
+    });
+  }
+
+  // ─────────────────────────────────────────────
+  // EXPORT THREAD
+  // ─────────────────────────────────────────────
+
   async exportThread(threadId: string) {
     const messages = await this.prisma.message.findMany({
       where: { threadId },
       orderBy: { sentAt: 'asc' },
       include: {
         sender: {
-          include: {
-            user: { select: { fullName: true, role: true } },
-          },
+          include: { user: { select: { fullName: true, role: true } } },
         },
       },
     });
 
     return messages.map((m) => ({
-      sender: m.sender?.user?.fullName ?? 'Unknown',
-      role: m.sender?.user?.role ?? '',
-      content: m.content,
+      sender:   m.sender?.user?.fullName ?? 'Unknown',
+      role:     m.sender?.user?.role ?? '',
+      content:  m.content,
       mediaUrl: m.mediaUrl,
-      sentAt: m.sentAt,
+      sentAt:   m.sentAt,
     }));
   }
 
   // ─────────────────────────────────────────────
-  // SUPER ADMIN — All threads
+  // DELETE MESSAGE
   // ─────────────────────────────────────────────
 
-  /** Super admin: get ALL threads across system */
-  async getAllThreads(query: ThreadQueryDto) {
-    const { type, search, page = 1, limit = 20 } = query;
-
-    const threads = await this.prisma.messageThread.findMany({
-      where: {
-        ...(type && { type }),
-      },
-      orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * limit,
-      take: limit,
-      include: {
-        participants: {
-          include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-          },
-        },
-        messages: {
-          orderBy: { sentAt: 'desc' },
-          take: 1,
-        },
-      },
-    });
-
-    const filtered = threads.filter((t) => {
-      if (!search) return true;
-      const names = t.participants.map((p) => p.user.fullName).join(' ');
-      return (
-        names.toLowerCase().includes(search.toLowerCase()) ||
-        (t.name ?? '').toLowerCase().includes(search.toLowerCase())
-      );
-    });
-
-    return {
-      data: filtered,
-      meta: { page, limit, total: filtered.length },
-    };
+  async deleteMessage(messageId: string, userId: string) {
+    const message = await this.prisma.message.findUnique({ where: { id: messageId } });
+    if (!message) throw new NotFoundException('Message not found');
+    if (message.senderId !== userId) throw new ForbiddenException('Cannot delete others messages');
+    await this.prisma.message.delete({ where: { id: messageId } });
+    return { message: 'Message deleted' };
   }
 }

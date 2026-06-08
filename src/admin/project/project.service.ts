@@ -262,6 +262,33 @@ export class ProjectService {
     });
   }
 
+
+
+  async getMyProjectNames(userId: string, userRole: string) {
+    const select = { id: true, name: true };
+
+    if (this.isSuperAdmin(userRole)) {
+      return this.prisma.project.findMany({
+        orderBy: { createdAt: 'desc' },
+        select,
+      });
+    }
+
+    if (userRole === UserRole.manager) {
+      return this.prisma.project.findMany({
+        where: { teamMembers: { some: { userId, role: 'manager' } } },
+        orderBy: { createdAt: 'desc' },
+        select,
+      });
+    }
+
+    return this.prisma.project.findMany({
+      where: { managerId: userId },
+      orderBy: { createdAt: 'desc' },
+      select,
+    });
+  }
+
   // ─── CREATE PROJECT ────────────────────────────────────────────────────────
   async createProject(dto: CreateProjectDto, adminId: string, userRole?: string) {
     await this.verifyCompanyAccess(dto.companyId, adminId, userRole);
@@ -505,7 +532,7 @@ export class ProjectService {
     }
 
     // Return full profile like createProject
-    return this.getProjectProfile(updatedProject.id, adminId, 'admin');
+    return this.getProjectProfile(updatedProject.id, adminId, userRole);
   }
 
   // ─── DELETE PROJECT ────────────────────────────────────────────────────────
@@ -743,7 +770,7 @@ export class ProjectService {
     const rooms = await this.prisma.room.findMany({
       where: { floorId },
       orderBy: { name: 'asc' },
-      select: { id: true, name: true , status: true, progress: true, type: true},
+      select: { id: true, name: true, status: true, progress: true, type: true },
     });
 
     return rooms.map((room) => {

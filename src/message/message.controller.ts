@@ -14,11 +14,12 @@ import {
 import { MessageService } from './message.service';
 import {
   CreateDirectThreadDto,
-  CreateGroupThreadDto,
   SendMessageDto,
   ThreadQueryDto,
   MessageQueryDto,
   AddParticipantDto,
+  StartSupportThreadDto,
+  AdminSendMessageDto,
 } from './dto/message.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -29,95 +30,97 @@ import { Roles } from '../auth/decorators/roles.decorator';
 export class MessageController {
   constructor(private readonly messageService: MessageService) {}
 
-  // ─────────────────────────────────────────────
-  // THREADS — Admin / Manager / Worker
-  // ─────────────────────────────────────────────
+  // ═════════════════════════════════════════════
+  // CONTACTS
+  // ═════════════════════════════════════════════
 
   /**
-   * GET /messages/threads
-   * Get all threads for the current user
-   * Tabs: All / 1-to-1 (direct) / Groups / Projects
+   * GET /messages/contacts?search=
+   * Chat tab এর জন্য user search — super_admin বাদে
    */
-  @Get('threads')
-  @Roles('super_admin', 'admin', 'manager', 'worker', 'viewer')
-  getMyThreads(@Request() req: any, @Query() query: ThreadQueryDto) {
-    return this.messageService.getMyThreads(req.user.id, query);
+  @Get('contacts')
+  @Roles('admin', 'manager', 'worker')
+  getChatContacts(
+    @Request() req: any,
+    @Query('search') search?: string,
+  ) {
+    return this.messageService.getChatContacts(req.user.id, req.user.role, search);
   }
 
   /**
-   * GET /messages/threads/:threadId
-   * Get single thread detail (participants etc.)
+   * GET /messages/support/contacts?search=
+   * Support tab এর জন্য super_admin user search করবে
    */
-  @Get('threads/:threadId')
-  @Roles('super_admin', 'admin', 'manager', 'worker', 'viewer')
-  getThreadById(
-    @Param('threadId', ParseUUIDPipe) threadId: string,
+  @Get('support/contacts')
+  @Roles('super_admin')
+  searchUsersForSupport(@Query('search') search?: string) {
+    return this.messageService.searchUsersForSupport(search);
+  }
+
+  // ═════════════════════════════════════════════
+  // USER — CHAT THREADS
+  // ═════════════════════════════════════════════
+
+  /**
+   * GET /messages/threads/chat
+   * User এর নিজের user-to-user chat threads
+   */
+  @Get('threads/chat')
+  @Roles('admin', 'manager', 'worker')
+  getUserChatThreads(
     @Request() req: any,
+    @Query() query: ThreadQueryDto,
   ) {
-    return this.messageService.getThreadById(threadId, req.user.id);
+    return this.messageService.getUserChatThreads(req.user.id, query);
   }
 
   /**
    * POST /messages/threads/direct
-   * Start a direct (1-to-1) chat
-   * Used when clicking on a user from the chat list
+   * নতুন user-to-user chat thread তৈরি করা
    */
   @Post('threads/direct')
-  @Roles('super_admin', 'admin', 'manager', 'worker')
-  createDirectThread(@Request() req: any, @Body() dto: CreateDirectThreadDto) {
+  @Roles('admin', 'manager', 'worker')
+  createDirectThread(
+    @Request() req: any,
+    @Body() dto: CreateDirectThreadDto,
+  ) {
     return this.messageService.createDirectThread(req.user.id, dto);
   }
 
+  // ═════════════════════════════════════════════
+  // USER — SUPPORT THREAD
+  // ═════════════════════════════════════════════
+
   /**
-   * POST /messages/threads/group
-   * Create a group or project thread
-   * Admin / Manager can create groups
+   * GET /messages/threads/support
+   * User এর super_admin এর সাথে support thread
    */
-  @Post('threads/group')
-  @Roles('super_admin', 'admin', 'manager')
-  createGroupThread(@Request() req: any, @Body() dto: CreateGroupThreadDto) {
-    return this.messageService.createGroupThread(req.user.id, dto);
+  @Get('threads/support')
+  @Roles('admin', 'manager', 'worker')
+  getUserSupportThread(@Request() req: any) {
+    return this.messageService.getUserSupportThread(req.user.id);
   }
 
   /**
-   * PATCH /messages/threads/:threadId/participants
-   * Add participants to a group thread
+   * POST /messages/support/thread
+   * Support thread তৈরি বা খোঁজা (user support tab open করলে call করবে)
    */
-  @Patch('threads/:threadId/participants')
-  @Roles('super_admin', 'admin', 'manager')
-  addParticipants(
-    @Param('threadId', ParseUUIDPipe) threadId: string,
-    @Request() req: any,
-    @Body() dto: AddParticipantDto,
-  ) {
-    return this.messageService.addParticipants(threadId, req.user.id, dto);
+  @Post('support/thread')
+  @Roles('admin', 'manager', 'worker')
+  getOrCreateSupportThread(@Request() req: any) {
+    return this.messageService.getOrCreateSupportThread(req.user.id);
   }
 
-  /**
-   * DELETE /messages/threads/:threadId/participants/:userId
-   * Remove a participant from group thread
-   */
-  @Delete('threads/:threadId/participants/:userId')
-  @Roles('super_admin', 'admin', 'manager')
-  removeParticipant(
-    @Param('threadId', ParseUUIDPipe) threadId: string,
-    @Param('userId', ParseUUIDPipe) userId: string,
-    @Request() req: any,
-  ) {
-    return this.messageService.removeParticipant(threadId, req.user.id, userId);
-  }
-
-  // ─────────────────────────────────────────────
-  // MESSAGES
-  // ─────────────────────────────────────────────
+  // ═════════════════════════════════════════════
+  // USER — MESSAGES
+  // ═════════════════════════════════════════════
 
   /**
    * GET /messages/threads/:threadId/messages
-   * Get paginated messages in a thread
-   * Also marks messages as read
+   * Thread এর messages পাওয়া
    */
   @Get('threads/:threadId/messages')
-  @Roles('super_admin', 'admin', 'manager', 'worker', 'viewer')
+  @Roles('admin', 'manager', 'worker')
   getMessages(
     @Param('threadId', ParseUUIDPipe) threadId: string,
     @Request() req: any,
@@ -128,21 +131,23 @@ export class MessageController {
 
   /**
    * POST /messages/send
-   * Send a message via REST (fallback if socket unavailable)
-   * Supports text + media (Photo / Camera / Location)
+   * Message পাঠানো (REST fallback — socket না থাকলে)
    */
   @Post('send')
-  @Roles('super_admin', 'admin', 'manager', 'worker')
-  sendMessage(@Request() req: any, @Body() dto: SendMessageDto) {
+  @Roles('admin', 'manager', 'worker')
+  sendMessage(
+    @Request() req: any,
+    @Body() dto: SendMessageDto,
+  ) {
     return this.messageService.sendMessage(req.user.id, dto);
   }
 
   /**
    * DELETE /messages/:messageId
-   * Delete own message
+   * নিজের message delete করা
    */
   @Delete(':messageId')
-  @Roles('super_admin', 'admin', 'manager', 'worker')
+  @Roles('admin', 'manager', 'worker')
   deleteMessage(
     @Param('messageId', ParseUUIDPipe) messageId: string,
     @Request() req: any,
@@ -150,38 +155,108 @@ export class MessageController {
     return this.messageService.deleteMessage(messageId, req.user.id);
   }
 
-  // ─────────────────────────────────────────────
-  // SUPER ADMIN ONLY
-  // ─────────────────────────────────────────────
+  // ═════════════════════════════════════════════
+  // SUPER ADMIN — SUPPORT THREADS
+  // ═════════════════════════════════════════════
 
   /**
-   * GET /messages/admin/threads
-   * Super admin: view ALL threads across the system
-   * Shows All / 1-to-1 / Groups / Projects tabs
+   * GET /messages/admin/support/threads
+   * সব support threads দেখা (super_admin ↔ user)
    */
-  @Get('admin/threads')
+  @Get('admin/support/threads')
   @Roles('super_admin')
-  getAllThreads(@Query() query: ThreadQueryDto) {
-    return this.messageService.getAllThreads(query);
+  getAdminSupportThreads(
+    @Request() req: any,
+    @Query() query: ThreadQueryDto,
+  ) {
+    return this.messageService.getAdminSupportThreads(req.user.id, query);
   }
 
   /**
-   * PATCH /messages/admin/threads/:threadId/close
-   * Super admin: close/deactivate a thread
+   * GET /messages/admin/support/threads/:threadId/messages
+   * Support thread এর messages দেখা
    */
-  @Patch('admin/threads/:threadId/close')
+  @Get('admin/support/threads/:threadId/messages')
+  @Roles('super_admin')
+  getAdminSupportThreadMessages(
+    @Param('threadId', ParseUUIDPipe) threadId: string,
+    @Request() req: any,
+    @Query() query: MessageQueryDto,
+  ) {
+    return this.messageService.getMessages(threadId, req.user.id, query);
+  }
+
+  /**
+   * POST /messages/admin/support/thread
+   * super_admin কোনো user এর সাথে support thread শুরু করবে
+   */
+  @Post('admin/support/thread')
+  @Roles('super_admin')
+  adminStartSupportThread(
+    @Request() req: any,
+    @Body() dto: StartSupportThreadDto,
+  ) {
+    return this.messageService.getOrCreateSupportThread(req.user.id, dto.targetUserId);
+  }
+
+  /**
+   * POST /messages/admin/support/send
+   * super_admin support thread এ message পাঠাবে
+   */
+  @Post('admin/support/send')
+  @Roles('super_admin')
+  adminSendSupportMessage(
+    @Request() req: any,
+    @Body() dto: AdminSendMessageDto,
+  ) {
+    return this.messageService.sendAdminSupportMessage(req.user.id, dto);
+  }
+
+  /**
+   * PATCH /messages/admin/support/threads/:threadId/close
+   * Support thread বন্ধ করা
+   */
+  @Patch('admin/support/threads/:threadId/close')
   @Roles('super_admin')
   closeThread(@Param('threadId', ParseUUIDPipe) threadId: string) {
     return this.messageService.closeThread(threadId);
   }
 
   /**
-   * GET /messages/admin/threads/:threadId/export
-   * Super admin: export full thread conversation
+   * GET /messages/admin/support/threads/:threadId/export
+   * Support thread export করা
    */
-  @Get('admin/threads/:threadId/export')
+  @Get('admin/support/threads/:threadId/export')
   @Roles('super_admin')
   exportThread(@Param('threadId', ParseUUIDPipe) threadId: string) {
     return this.messageService.exportThread(threadId);
+  }
+
+  // ═════════════════════════════════════════════
+  // SUPER ADMIN — CHAT THREADS (READ ONLY)
+  // ═════════════════════════════════════════════
+
+  /**
+   * GET /messages/admin/chat/threads
+   * সব user-to-user chat threads দেখা (read only)
+   */
+  @Get('admin/chat/threads')
+  @Roles('super_admin')
+  getAdminChatThreads(@Query() query: ThreadQueryDto) {
+    return this.messageService.getAdminChatThreads(query);
+  }
+
+  /**
+   * GET /messages/admin/chat/threads/:threadId/messages
+   * Chat thread এর messages দেখা (read only)
+   */
+  @Get('admin/chat/threads/:threadId/messages')
+  @Roles('super_admin')
+  getAdminChatThreadMessages(
+    @Param('threadId', ParseUUIDPipe) threadId: string,
+    @Request() req: any,
+    @Query() query: MessageQueryDto,
+  ) {
+    return this.messageService.getMessages(threadId, req.user.id, query);
   }
 }

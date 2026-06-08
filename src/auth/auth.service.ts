@@ -26,7 +26,7 @@ export class AuthService {
     private jwtService: JwtService,
     private config: ConfigService,
     private mailService: MailService,
-  ) {}
+  ) { }
 
   // ── LOGIN ──────────────────────────────────
   async login(dto: LoginDto) {
@@ -91,20 +91,20 @@ export class AuthService {
     const passwordMatch = await bcrypt.compare(dto.password, user.passwordHash);
     if (!passwordMatch) throw new UnauthorizedException('Invalid credentials');
 
-    // pending হলে login এ active করো
+
+    // pending user → active করো
     if (user.status === 'pending') {
       await this.prisma.user.update({
         where: { id: user.id },
         data: { status: 'active' },
       });
-
-      await this.prisma.invitation.updateMany({
-        where: { receiverId: user.id, status: 'pending' },
-        data: { status: 'accepted' },
-      });
-
       user.status = 'active';
     }
+
+    await this.prisma.invitation.updateMany({
+      where: { receiverId: user.id, status: 'pending' },
+      data: { status: 'accepted' },
+    });
 
     await this.prisma.user.update({
       where: { id: user.id },
