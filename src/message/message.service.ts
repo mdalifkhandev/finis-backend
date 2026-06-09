@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { onlineUsers } from './message-presence.store';
 import {
   CreateDirectThreadDto,
   SendMessageDto,
@@ -16,7 +17,14 @@ import {
 
 @Injectable()
 export class MessageService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
+
+  private getPresence(userId: string, lastActiveAt?: Date | null) {
+    return {
+      isOnline: onlineUsers.has(userId),
+      lastActiveAt: lastActiveAt ?? null,
+    };
+  }
 
   // ─────────────────────────────────────────────
   // CONTACTS
@@ -24,45 +32,67 @@ export class MessageService {
 
   async getChatContacts(userId: string, userRole: string, search?: string) {
     const roleFilter: Record<string, any> = {
-      admin:   { notIn: ['super_admin'] },
+      admin: { notIn: ['super_admin'] },
       manager: { in: ['admin', 'worker'] },
-      worker:  { equals: 'manager' },
+      worker: { equals: 'manager' },
     };
 
-    return this.prisma.user.findMany({
+    const contacts = await this.prisma.user.findMany({
       where: {
-        id:     { not: userId },
+        id: { not: userId },
         status: 'active',
-        role:   roleFilter[userRole] ?? { notIn: ['super_admin'] },
+        role: roleFilter[userRole] ?? { notIn: ['super_admin'] },
         ...(search && {
           OR: [
             { fullName: { contains: search, mode: 'insensitive' } },
-            { email:    { contains: search, mode: 'insensitive' } },
+            { email: { contains: search, mode: 'insensitive' } },
           ],
         }),
       },
-      select: { id: true, fullName: true, avatarUrl: true, role: true, status: true },
+      select: {
+        id: true,
+        fullName: true,
+        avatarUrl: true,
+        role: true,
+        status: true,
+        lastActiveAt: true,
+      },
       orderBy: { fullName: 'asc' },
     });
+
+    return contacts.map((user) => ({
+      ...user,
+      ...this.getPresence(user.id, null),
+    }));
   }
 
   async searchUsersForSupport(search?: string) {
-    return this.prisma.user.findMany({
+    const term = search?.trim();
+    const contacts = await this.prisma.user.findMany({
       where: {
-        role:   { not: 'super_admin' },
-        status: 'active',
-        ...(search && {
+        role: { not: 'super_admin' },
+        ...(term && {
           OR: [
-            { fullName: { contains: search, mode: 'insensitive' } },
-            { email:    { contains: search, mode: 'insensitive' } },
-            { id:       { equals:   search } },
+            { fullName: { contains: term, mode: 'insensitive' } },
+            { email: { contains: term, mode: 'insensitive' } },
           ],
         }),
       },
-      select: { id: true, fullName: true, avatarUrl: true, role: true, status: true },
+      select: {
+        id: true,
+        fullName: true,
+        avatarUrl: true,
+        role: true,
+        status: true,
+      },
       orderBy: { fullName: 'asc' },
-      take: 20,
+      take: 100,
     });
+
+    return contacts.map((user) => ({
+      ...user,
+      ...this.getPresence(user.id, null),
+    }));
   }
 
   // ─────────────────────────────────────────────
@@ -76,7 +106,7 @@ export class MessageService {
     const threads = await this.prisma.messageThread.findMany({
       where: {
         isActive: true,
-        type:     'direct',
+        type: 'direct',
         participants: { some: { userId } },
       },
       orderBy: { createdAt: 'desc' },
@@ -85,7 +115,9 @@ export class MessageService {
       include: {
         participants: {
           include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            user: {
+              select: { id: true, fullName: true, avatarUrl: true, role: true },
+            },
           },
         },
         messages: {
@@ -114,14 +146,17 @@ export class MessageService {
           (m) => !m.isRead && m.senderId !== userId,
         ).length;
         return {
-          id:           thread.id,
-          type:         thread.type,
-          name:         others[0]?.user?.fullName ?? 'Unknown',
-          isActive:     thread.isActive,
-          lastMessage:  thread.messages[0] ?? null,
+          id: thread.id,
+          type: thread.type,
+          name: others[0]?.user?.fullName ?? 'Unknown',
+          isActive: thread.isActive,
+          lastMessage: thread.messages[0] ?? null,
           unreadCount,
-          participants: others.map((p) => p.user),
-          isReadOnly:   false,
+          participants: others.map((p) => ({
+            ...p.user,
+            ...this.getPresence(p.user.id, null),
+          })),
+          isReadOnly: false,
         };
       });
 
@@ -144,7 +179,7 @@ export class MessageService {
 
     const thread = await this.prisma.messageThread.findFirst({
       where: {
-        type:     'direct',
+        type: 'direct',
         isActive: true,
         AND: [
           { participants: { some: { userId } } },
@@ -154,7 +189,9 @@ export class MessageService {
       include: {
         participants: {
           include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            user: {
+              select: { id: true, fullName: true, avatarUrl: true, role: true },
+            },
           },
         },
         messages: { orderBy: { sentAt: 'desc' }, take: 1 },
@@ -167,14 +204,17 @@ export class MessageService {
     const others = thread.participants.filter((p) => p.userId !== userId);
     return {
       data: {
-        id:           thread.id,
-        type:         thread.type,
-        name:         others[0]?.user?.fullName ?? 'Support',
-        isActive:     thread.isActive,
-        lastMessage:  thread.messages[0] ?? null,
-        unreadCount:  0,
-        participants: others.map((p) => p.user),
-        isReadOnly:   false,
+        id: thread.id,
+        type: thread.type,
+        name: others[0]?.user?.fullName ?? 'Support',
+        isActive: thread.isActive,
+        lastMessage: thread.messages[0] ?? null,
+        unreadCount: 0,
+        participants: others.map((p) => ({
+          ...p.user,
+          ...this.getPresence(p.user.id, null),
+        })),
+        isReadOnly: false,
       },
     };
   }
@@ -201,7 +241,7 @@ export class MessageService {
       if (target?.role === 'super_admin') {
         throw new BadRequestException('Cannot create support thread with another super_admin');
       }
-      userSideId   = targetUserId;
+      userSideId = targetUserId;
       superAdminId = requesterId;
     } else {
       const superAdmin = await this.prisma.user.findFirst({
@@ -209,13 +249,13 @@ export class MessageService {
         select: { id: true },
       });
       if (!superAdmin) throw new NotFoundException('Support not available');
-      userSideId   = requesterId;
+      userSideId = requesterId;
       superAdminId = superAdmin.id;
     }
 
     const existing = await this.prisma.messageThread.findFirst({
       where: {
-        type:     'direct',
+        type: 'direct',
         isActive: true,
         AND: [
           { participants: { some: { userId: userSideId } } },
@@ -225,7 +265,9 @@ export class MessageService {
       include: {
         participants: {
           include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            user: {
+              select: { id: true, fullName: true, avatarUrl: true, role: true },
+            },
           },
         },
         messages: { orderBy: { sentAt: 'desc' }, take: 1 },
@@ -243,7 +285,9 @@ export class MessageService {
       include: {
         participants: {
           include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            user: {
+              select: { id: true, fullName: true, avatarUrl: true, role: true },
+            },
           },
         },
         messages: { orderBy: { sentAt: 'desc' }, take: 1 },
@@ -280,7 +324,9 @@ export class MessageService {
       include: {
         participants: {
           include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            user: {
+              select: { id: true, fullName: true, avatarUrl: true, role: true },
+            },
           },
         },
       },
@@ -297,7 +343,9 @@ export class MessageService {
       include: {
         participants: {
           include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            user: {
+              select: { id: true, fullName: true, avatarUrl: true, role: true },
+            },
           },
         },
       },
@@ -325,7 +373,9 @@ export class MessageService {
       include: {
         participants: {
           include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            user: {
+              select: { id: true, fullName: true, avatarUrl: true, role: true },
+            },
           },
         },
         messages: {
@@ -353,14 +403,17 @@ export class MessageService {
           (m) => !m.isRead && m.senderId !== adminId,
         ).length;
         return {
-          id:           thread.id,
-          type:         thread.type,
-          name:         others[0]?.user?.fullName ?? 'Unknown',
-          isActive:     thread.isActive,
-          lastMessage:  thread.messages[0] ?? null,
+          id: thread.id,
+          type: thread.type,
+          name: others[0]?.user?.fullName ?? 'Unknown',
+          isActive: thread.isActive,
+          lastMessage: thread.messages[0] ?? null,
           unreadCount,
-          participants: others.map((p) => p.user),
-          isReadOnly:   false,
+        participants: others.map((p) => ({
+          ...p.user,
+          ...this.getPresence(p.user.id, null),
+        })),
+          isReadOnly: false,
         };
       });
 
@@ -386,7 +439,9 @@ export class MessageService {
       include: {
         participants: {
           include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            user: {
+              select: { id: true, fullName: true, avatarUrl: true, role: true },
+            },
           },
         },
         messages: {
@@ -409,22 +464,84 @@ export class MessageService {
         return names.toLowerCase().includes(search.toLowerCase());
       })
       .map((thread) => {
-        const participants = thread.participants.map((p) => p.user);
+        const participants = thread.participants.map((p) => ({
+          ...p.user,
+          ...this.getPresence(p.user.id, null),
+        }));
         return {
-          id:           thread.id,
-          type:         thread.type,
-          name:         participants.map((p) => p.fullName).join(', '),
-          isActive:     thread.isActive,
-          lastMessage:  thread.messages[0] ?? null,
-          unreadCount:  0,
+          id: thread.id,
+          type: thread.type,
+          name: participants.map((p) => p.fullName).join(', '),
+          isActive: thread.isActive,
+          lastMessage: thread.messages[0] ?? null,
+          unreadCount: 0,
           participants,
-          isReadOnly:   true, // super_admin chat thread এ শুধু read করতে পারবে
+          isReadOnly: true, // super_admin chat thread এ শুধু read করতে পারবে
         };
       });
 
     return {
       data: filtered,
       meta: { page, limit, total: filtered.length },
+    };
+  }
+
+  async getAdminChatThreadMessages(threadId: string, query: MessageQueryDto) {
+    const { page = 1, limit = 30 } = query;
+
+    const thread = await this.prisma.messageThread.findFirst({
+      where: {
+        id: threadId,
+        type: 'direct',
+      },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                fullName: true,
+                avatarUrl: true,
+                role: true,
+                status: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!thread) throw new NotFoundException('Thread not found');
+
+    const roles = thread.participants.map((p) => p.user.role);
+    const isChatThread = !roles.includes('super_admin');
+    if (!isChatThread) {
+      throw new ForbiddenException('This endpoint is only for read-only chat threads');
+    }
+
+    const [messages, total] = await Promise.all([
+      this.prisma.message.findMany({
+        where: { threadId },
+        orderBy: { sentAt: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: {
+            sender: {
+              select: {
+                id: true,
+                fullName: true,
+                avatarUrl: true,
+                role: true,
+              },
+            },
+        },
+      }),
+      this.prisma.message.count({ where: { threadId } }),
+    ]);
+
+    return {
+      data: messages,
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
 
@@ -442,7 +559,13 @@ export class MessageService {
         participants: {
           include: {
             user: {
-              select: { id: true, fullName: true, avatarUrl: true, role: true, status: true },
+              select: {
+                id: true,
+                fullName: true,
+                avatarUrl: true,
+                role: true,
+                status: true,
+              },
             },
           },
         },
@@ -477,9 +600,7 @@ export class MessageService {
         take: limit,
         include: {
           sender: {
-            include: {
-              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-            },
+            select: { id: true, fullName: true, avatarUrl: true, role: true },
           },
         },
       }),
@@ -538,26 +659,20 @@ export class MessageService {
       }
     }
 
-    await this.prisma.messageParticipant.upsert({
-      where:  { userId: senderId },
-      update: {},
-      create: { userId: senderId },
-    });
 
     return this.prisma.message.create({
       data: {
         threadId,
         senderId,
-        content:   content   ?? null,
-        mediaUrl:  mediaUrl  ?? null,
+        content: content ?? null,
+        mediaUrl: mediaUrl ?? null,
         mediaType: mediaType ?? null,
         isRead: false,
       },
+
       include: {
         sender: {
-          include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-          },
+          select: { id: true, fullName: true, avatarUrl: true, role: true },
         },
       },
     });
@@ -597,26 +712,19 @@ export class MessageService {
       throw new ForbiddenException('Super admin can only send messages in Support threads');
     }
 
-    await this.prisma.messageParticipant.upsert({
-      where:  { userId: adminId },
-      update: {},
-      create: { userId: adminId },
-    });
 
     return this.prisma.message.create({
       data: {
         threadId,
-        senderId:  adminId,
-        content:   content   ?? null,
-        mediaUrl:  mediaUrl  ?? null,
+        senderId: adminId,
+        content: content ?? null,
+        mediaUrl: mediaUrl ?? null,
         mediaType: mediaType ?? null,
         isRead: false,
       },
       include: {
         sender: {
-          include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-          },
+          select: { id: true, fullName: true, avatarUrl: true, role: true },
         },
       },
     });
@@ -645,17 +753,17 @@ export class MessageService {
       orderBy: { sentAt: 'asc' },
       include: {
         sender: {
-          include: { user: { select: { fullName: true, role: true } } },
+          select: { fullName: true, role: true },
         },
       },
     });
 
     return messages.map((m) => ({
-      sender:   m.sender?.user?.fullName ?? 'Unknown',
-      role:     m.sender?.user?.role ?? '',
-      content:  m.content,
+      sender: m.sender?.fullName ?? 'Unknown',
+      role: m.sender?.role ?? '',
+      content: m.content,
       mediaUrl: m.mediaUrl,
-      sentAt:   m.sentAt,
+      sentAt: m.sentAt,
     }));
   }
 

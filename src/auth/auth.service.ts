@@ -94,22 +94,27 @@ export class AuthService {
 
     // pending user → active করো
     if (user.status === 'pending') {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { status: 'active' },
-      });
+      await this.prisma.$executeRaw`
+        UPDATE users
+        SET status = 'active'
+        WHERE id = ${user.id}
+      `;
       user.status = 'active';
     }
 
-    await this.prisma.invitation.updateMany({
-      where: { receiverId: user.id, status: 'pending' },
-      data: { status: 'accepted' },
-    });
+    await this.prisma.$executeRaw`
+      UPDATE invitations
+      SET status = 'accepted'
+      WHERE receiver_id = ${user.id}
+        AND status = 'pending'
+    `;
 
+    // Some deployments may not yet have the login timestamp column.
+    // Don't fail authentication if that write is unavailable.
     await this.prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
-    });
+    }).catch(() => undefined);
 
     const token = this.generateToken(
       user.id,

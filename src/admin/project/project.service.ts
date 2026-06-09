@@ -463,8 +463,14 @@ export class ProjectService {
       ...(dto.companyId && { companyId: dto.companyId }),
       ...(dto.type && { type: dto.type }),
       ...(dto.priority !== undefined && { priority: dto.priority }),
+
+      ...(dto.progress !== undefined && {
+        progress: dto.progress,
+      }),
+
       isWholeHouse: houseSetup.isWholeHouse,
       houseSections: houseSetup.houseSections,
+
       ...(dto.status && { status: dto.status }),
       ...(dto.startDate && { startDate: new Date(dto.startDate) }),
       ...(dto.endDate && { endDate: new Date(dto.endDate) }),
@@ -474,6 +480,7 @@ export class ProjectService {
       ...(dto.spent !== undefined && { spent: dto.spent }),
       ...(dto.location && { location: dto.location }),
       ...(dto.description !== undefined && { description: dto.description }),
+
       remaining,
     };
 
@@ -1028,6 +1035,14 @@ export class ProjectService {
   async createGeofence(projectId: string, dto: CreateGeofenceDto, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
 
+    const existing = await this.prisma.geofence.findFirst({
+      where: { projectId },
+    });
+    if (existing) {
+      throw new BadRequestException(
+        'A geofence already exists for this project. Please update the existing one.',
+      );
+    }
     // ✅ Geofencing plan check — super_admin এর জন্য skip
     if (!this.isSuperAdmin(userRole)) {
       await this.checkGeofencingAccess(userId);
@@ -1131,5 +1146,64 @@ export class ProjectService {
       })),
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
+  }
+
+  async getTimeSummary(
+    projectId: string,
+    userId: string,
+    userRole: string,
+    date?: string,
+  ) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+
+    const targetDate = date ? new Date(date) : new Date();
+    targetDate.setHours(0, 0, 0, 0);
+
+    const nextDay = new Date(targetDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    const workers = await this.prisma.projectMember.findMany({
+      where: { projectId, role: 'worker' },
+      include: {
+        user: {
+          select: { id: true, fullName: true, avatarUrl: true },
+        },
+      },
+    });
+
+    const result = await Promise.all(
+      workers.map(async (member) => {
+        const attendance = await this.prisma.attendance.findFirst({
+          where: {
+            userId: member.userId,
+            date: { gte: targetDate, lt: nextDay },
+          },
+          include: { sessions: true },
+        });
+
+        const totalZoneSeconds =
+          attendance?.sessions.reduce((sum, s) => sum + (s.zoneSeconds ?? 0), 0) ?? 0;
+        const totalOutsideSeconds =
+          attendance?.sessions.reduce((sum, s) => sum + (s.outsideSeconds ?? 0), 0) ?? 0;
+
+        return {
+          workerId: member.userId,
+          workerName: member.user.fullName,
+          avatarUrl: member.user.avatarUrl,
+          date: targetDate,
+          totalZoneHours: Math.round((totalZoneSeconds / 3600) * 100) / 100,
+          totalOutsideHours: Math.round((totalOutsideSeconds / 3600) * 100) / 100,
+          sessions: attendance?.sessions.map((s) => ({
+            sessionId: s.id,
+            checkIn: s.checkInTime,
+            checkOut: s.checkOutTime,
+            zoneHours: Math.round(((s.zoneSeconds ?? 0) / 3600) * 100) / 100,
+            outsideHours: Math.round(((s.outsideSeconds ?? 0) / 3600) * 100) / 100,
+          })) ?? [],
+        };
+      }),
+    );
+
+    return { projectId, date: targetDate, workers: result };
   }
 }

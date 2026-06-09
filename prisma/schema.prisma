@@ -57,6 +57,7 @@ model User {
   avatarUrl               String?                  @map("avatar_url")
   role                    UserRole                 @default(worker)
   status                  UserStatus               @default(active)
+  lastActiveAt            DateTime?                @map("last_active_at")
   employeeId              String?                  @unique @map("employee_id")
   department              String?
   dateOfBirth             DateTime?                @map("date_of_birth") @db.Date
@@ -82,7 +83,7 @@ model User {
   invitationsReceived     Invitation[]             @relation("InvitationReceiver")
   invitationsSent         Invitation[]             @relation("InvitationSender")
   locationLogs            LocationLog[]
-  sentMessages  Message[]  @relation("MessageSender")
+  sentMessages            Message[]                @relation("MessageSender")
   notifications           Notification[]
   payrolls                Payroll[]
   inventoryUsageLogs      InventoryUsageLog[]
@@ -338,7 +339,7 @@ model Task {
   updatedAt       DateTime        @updatedAt @map("updated_at")
   taskInventories TaskInventory[]
   reports         TaskReport[]
-  taskAssignees   TaskAssignee[]   @relation("TaskAssignees")
+  taskAssignees   TaskAssignee[]  @relation("TaskAssignees")
   assignee        User?           @relation("TaskAssignee", fields: [assignedTo], references: [id])
   creator         User            @relation("TaskCreator", fields: [createdBy], references: [id])
   floor           Floor?          @relation(fields: [floorId], references: [id])
@@ -420,17 +421,19 @@ model Attendance {
 }
 
 model AttendanceSession {
-  id           String     @id @default(uuid()) @db.Uuid
-  attendanceId String     @map("attendance_id") @db.Uuid
-  checkInTime  DateTime   @map("check_in_time")
-  checkOutTime DateTime?  @map("check_out_time")
-  hoursWorked  Float?     @map("hours_worked")
-  inLat        Float?     @map("in_lat")
-  inLng        Float?     @map("in_lng")
-  outLat       Float?     @map("out_lat")
-  outLng       Float?     @map("out_lng")
-  createdAt    DateTime   @default(now()) @map("created_at")
-  attendance   Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  id             String     @id @default(uuid()) @db.Uuid
+  attendanceId   String     @map("attendance_id") @db.Uuid
+  checkInTime    DateTime   @map("check_in_time")
+  checkOutTime   DateTime?  @map("check_out_time")
+  hoursWorked    Float?     @map("hours_worked")
+  inLat          Float?     @map("in_lat")
+  inLng          Float?     @map("in_lng")
+  outLat         Float?     @map("out_lat")
+  outLng         Float?     @map("out_lng")
+  zoneSeconds    Int?       @default(0) @map("zone_seconds")
+  outsideSeconds Int?       @default(0) @map("outside_seconds")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  attendance     Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
 
   @@map("attendance_sessions")
 }
@@ -500,12 +503,12 @@ model Payroll {
   employerCost   Float?        @map("employer_cost")
   status         PayrollStatus @default(draft)
   processedBy    String?       @map("processed_by") @db.Uuid
-   projectId      String?         @map("project_id") @db.Uuid
+  projectId      String?       @map("project_id") @db.Uuid
   processedAt    DateTime?     @map("processed_at")
   createdAt      DateTime      @default(now()) @map("created_at")
   company        Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   worker         User          @relation(fields: [workerId], references: [id])
-  project        Project?        @relation(fields: [projectId], references: [id])
+  project        Project?      @relation(fields: [projectId], references: [id])
 
   @@map("payrolls")
 }
@@ -608,15 +611,16 @@ model Geofence {
 }
 
 model LocationLog {
-  id         String            @id @default(uuid()) @db.Uuid
-  userId     String            @map("user_id") @db.Uuid
-  geofenceId String?           @map("geofence_id") @db.Uuid
-  lat        Float
-  lng        Float
-  eventType  LocationEventType @map("event_type")
-  loggedAt   DateTime          @default(now()) @map("logged_at")
-  geofence   Geofence?         @relation(fields: [geofenceId], references: [id])
-  user       User              @relation(fields: [userId], references: [id])
+  id           String            @id @default(uuid()) @db.Uuid
+  userId       String            @map("user_id") @db.Uuid
+  geofenceId   String?           @map("geofence_id") @db.Uuid
+  lat          Float
+  lng          Float
+  eventType    LocationEventType @map("event_type")
+  loggedAt     DateTime          @default(now()) @map("logged_at")
+  isInsideZone Boolean?          @default(false) @map("is_inside_zone")
+  geofence     Geofence?         @relation(fields: [geofenceId], references: [id])
+  user         User              @relation(fields: [userId], references: [id])
 
   @@map("location_logs")
 }
@@ -658,7 +662,7 @@ model MessageThread {
   projectId    String?             @map("project_id") @db.Uuid
   isActive     Boolean             @default(true) @map("is_active")
   createdAt    DateTime            @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt  @map("updated_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
   messages     Message[]
   participants ThreadParticipant[]
 
@@ -670,30 +674,28 @@ model ThreadParticipant {
   threadId String        @map("thread_id") @db.Uuid
   userId   String        @map("user_id") @db.Uuid
   role     String?
-  joinedAt  DateTime  @default(now())  @map("joined_at")
+  joinedAt DateTime      @default(now()) @map("joined_at")
   thread   MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
 
   @@unique([threadId, userId])
   @@map("thread_participants")
 }
 
 model Message {
-  id        String             @id @default(uuid()) @db.Uuid
-  threadId  String             @map("thread_id") @db.Uuid
-  senderId  String             @map("sender_id") @db.Uuid
+  id        String        @id @default(uuid()) @db.Uuid
+  threadId  String        @map("thread_id") @db.Uuid
+  senderId  String        @map("sender_id") @db.Uuid
   content   String?
-  mediaUrl  String?            @map("media_url")
-  mediaType MediaType?         @map("media_type")
-  isRead    Boolean            @default(false) @map("is_read")
-  sentAt    DateTime           @default(now()) @map("sent_at")
-  sender  User  @relation("MessageSender", fields: [senderId], references: [id])
-  thread    MessageThread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  mediaUrl  String?       @map("media_url")
+  mediaType MediaType?    @map("media_type")
+  isRead    Boolean       @default(false) @map("is_read")
+  sentAt    DateTime      @default(now()) @map("sent_at")
+  sender    User          @relation("MessageSender", fields: [senderId], references: [id])
+  thread    MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
   @@map("messages")
 }
-
 
 model Notification {
   id        String           @id @default(uuid()) @db.Uuid

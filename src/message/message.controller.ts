@@ -253,9 +253,8 @@ export class MessageController {
   @Roles('super_admin')
   getAdminChatThreadMessages(
     @Param('threadId', ParseUUIDPipe) threadId: string,
-    @Request() req: any,
     @Query() query: MessageQueryDto,
   ) {
-    return this.messageService.getMessages(threadId, req.user.id, query);
+    return this.messageService.getAdminChatThreadMessages(threadId, query);
   }
 }

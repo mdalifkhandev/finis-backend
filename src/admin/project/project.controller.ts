@@ -413,4 +413,15 @@ export class ProjectController {
       limit ? parseInt(limit) : 20,
     );
   }
+
+  /** GET /admin/projects/:id/geofences/time-summary?date=2025-01-15 */
+  @Get(':id/geofences/time-summary')
+  getTimeSummary(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+    @Query('date') date?: string,
+  ) {
+    return this.projectService.getTimeSummary(id, userId, userRole, date);
+  }
 }

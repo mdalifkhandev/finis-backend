@@ -68,7 +68,7 @@ CREATE TYPE "ExpenseStatus" AS ENUM ('pending', 'approved', 'rejected');
 CREATE TYPE "InventoryDamageStatus" AS ENUM ('unresolved', 'in_repair', 'resolved', 'written_off');
 
 -- CreateEnum
-CREATE TYPE "MessageThreadType" AS ENUM ('direct', 'group', 'project');
+CREATE TYPE "MessageThreadType" AS ENUM ('direct', 'group', 'support');
 
 -- CreateEnum
 CREATE TYPE "CertificationStatus" AS ENUM ('active', 'expired', 'revoked');
@@ -442,6 +442,8 @@ CREATE TABLE "attendance_sessions" (
     "in_lng" DOUBLE PRECISION,
     "out_lat" DOUBLE PRECISION,
     "out_lng" DOUBLE PRECISION,
+    "zone_seconds" INTEGER DEFAULT 0,
+    "outside_seconds" INTEGER DEFAULT 0,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "attendance_sessions_pkey" PRIMARY KEY ("id")
@@ -617,6 +619,7 @@ CREATE TABLE "location_logs" (
     "lng" DOUBLE PRECISION NOT NULL,
     "event_type" "LocationEventType" NOT NULL,
     "logged_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "is_inside_zone" BOOLEAN DEFAULT false,
 
     CONSTRAINT "location_logs_pkey" PRIMARY KEY ("id")
 );
@@ -657,6 +660,7 @@ CREATE TABLE "message_threads" (
     "project_id" UUID,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "message_threads_pkey" PRIMARY KEY ("id")
 );
@@ -667,6 +671,7 @@ CREATE TABLE "thread_participants" (
     "thread_id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
     "role" TEXT,
+    "joined_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "thread_participants_pkey" PRIMARY KEY ("id")
 );
@@ -683,13 +688,6 @@ CREATE TABLE "messages" (
     "sent_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "messages_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "message_participants" (
-    "userId" UUID NOT NULL,
-
-    CONSTRAINT "message_participants_pkey" PRIMARY KEY ("userId")
 );
 
 -- CreateTable
@@ -909,13 +907,10 @@ ALTER TABLE "thread_participants" ADD CONSTRAINT "thread_participants_thread_id_
 ALTER TABLE "thread_participants" ADD CONSTRAINT "thread_participants_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "messages" ADD CONSTRAINT "messages_sender_id_fkey" FOREIGN KEY ("sender_id") REFERENCES "message_participants"("userId") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "messages" ADD CONSTRAINT "messages_sender_id_fkey" FOREIGN KEY ("sender_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "messages" ADD CONSTRAINT "messages_thread_id_fkey" FOREIGN KEY ("thread_id") REFERENCES "message_threads"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "message_participants" ADD CONSTRAINT "message_participants_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;

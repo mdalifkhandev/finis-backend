@@ -10,12 +10,12 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma/prisma.service';
 import { MessageService } from './message.service';
 import { SocketMessageDto } from './dto/message.dto';
+import { onlineUsers } from './message-presence.store';
 
 // userId → socketId map
-const onlineUsers = new Map<string, string>();
-
 @WebSocketGateway({
   namespace: '/chat',
   cors: { origin: '*' },
@@ -27,6 +27,7 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
   constructor(
     private readonly messageService: MessageService,
     private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
   ) {}
 
   // ═════════════════════════════════════════════
@@ -49,33 +50,40 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
       client.data.role   = payload.role;
 
       onlineUsers.set(client.data.userId, client.id);
+      await this.prisma.user.update({
+        where: { id: client.data.userId },
+        data: { lastActiveAt: new Date() },
+      }).catch(() => undefined);
 
-      if (client.data.role === 'super_admin') {
-        // super_admin শুধু support threads এ join করবে
-        const supportThreads = await this.messageService.getAdminSupportThreads(
-          client.data.userId,
-          {},
-        );
-        for (const thread of supportThreads.data) {
-          client.join(`thread:${thread.id}`);
-        }
-      } else {
-        // Regular user — নিজের সব threads এ join করবে (chat + support)
-        const chatThreads = await this.messageService.getUserChatThreads(
-          client.data.userId,
-          {},
-        );
-        for (const thread of chatThreads.data) {
-          client.join(`thread:${thread.id}`);
-        }
+      // Thread preload should never kill the socket connection.
+      // If a legacy DB is missing timestamp columns, we still keep the socket alive.
+      try {
+        if (client.data.role === 'super_admin') {
+          const supportThreads = await this.messageService.getAdminSupportThreads(
+            client.data.userId,
+            {},
+          );
+          for (const thread of supportThreads.data) {
+            client.join(`thread:${thread.id}`);
+          }
+        } else {
+          const chatThreads = await this.messageService.getUserChatThreads(
+            client.data.userId,
+            {},
+          );
+          for (const thread of chatThreads.data) {
+            client.join(`thread:${thread.id}`);
+          }
 
-        // Support thread এও join
-        const supportThread = await this.messageService.getUserSupportThread(
-          client.data.userId,
-        );
-        if (supportThread.data) {
-          client.join(`thread:${supportThread.data.id}`);
+          const supportThread = await this.messageService.getUserSupportThread(
+            client.data.userId,
+          );
+          if (supportThread.data) {
+            client.join(`thread:${supportThread.data.id}`);
+          }
         }
+      } catch {
+        // Keep the socket connected; the UI can join rooms on demand.
       }
 
       this.server.emit('user:online', { userId: client.data.userId });
@@ -92,6 +100,10 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
   handleDisconnect(client: Socket) {
     if (client.data.userId) {
       onlineUsers.delete(client.data.userId);
+      this.prisma.user.update({
+        where: { id: client.data.userId },
+        data: { lastActiveAt: new Date() },
+      }).catch(() => undefined);
       this.server.emit('user:offline', { userId: client.data.userId });
       console.log(`❌ Disconnected: ${client.data.userId}`);
     }
@@ -288,6 +300,24 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
       statuses[id] = onlineUsers.has(id);
     }
     return { event: 'user:status', statuses };
+  }
+
+  @SubscribeMessage('user:presence')
+  async handleUserPresence(@MessageBody() data: { userIds: string[] }) {
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: data.userIds } },
+      select: { id: true, lastActiveAt: true },
+    });
+
+    const onlineStatuses: Record<string, boolean> = {};
+    const lastActiveAt: Record<string, Date | null> = {};
+
+    for (const user of users) {
+      onlineStatuses[user.id] = onlineUsers.has(user.id);
+      lastActiveAt[user.id] = user.lastActiveAt;
+    }
+
+    return { event: 'user:presence', onlineStatuses, lastActiveAt };
   }
 
   // ═════════════════════════════════════════════

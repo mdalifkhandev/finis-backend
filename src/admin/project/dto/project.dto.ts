@@ -27,11 +27,11 @@ export class CreateRoomDto {
   @IsNumber()
   @Type(() => Number)
   sizeSqft?: number;
-  
+
   @IsOptional()
   @IsEnum(RoomStatus)
   status?: RoomStatus;
-  
+
   @IsOptional()
   @IsNumber()
   progress?: number;
@@ -68,6 +68,7 @@ export class UpdateRoomDto {
   @Min(0)
   @Type(() => Number)
   progress?: number;
+
 }
 
 // ─── FLOOR DTOs ────────────────────────────────────────────────────────────
@@ -157,11 +158,11 @@ export class CreateProjectDto {
   @IsNumber()
   @Type(() => Number)
   budget?: number;
-  
+
   @IsOptional()
   @IsEnum(ProjectStatus)
   status?: ProjectStatus;
-  
+
   @IsOptional()
   @IsNumber()
   progress?: number;
@@ -185,8 +186,8 @@ export class CreateProjectDto {
   @Min(0)
   @Type(() => Number)
   roomsPerFloor?: number;
-  
-  
+
+
 
   @IsOptional()
   @IsBoolean()
@@ -283,6 +284,10 @@ export class UpdateProjectDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsNumber()
+  progress?: number;
 }
 
 // ─── TEAM DTOs ─────────────────────────────────────────────────────────────
