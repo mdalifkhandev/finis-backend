@@ -82,7 +82,7 @@ model User {
   invitationsReceived     Invitation[]             @relation("InvitationReceiver")
   invitationsSent         Invitation[]             @relation("InvitationSender")
   locationLogs            LocationLog[]
-  messageSent             MessageParticipant?      @relation("MessageSender")
+  sentMessages  Message[]  @relation("MessageSender")
   notifications           Notification[]
   payrolls                Payroll[]
   inventoryUsageLogs      InventoryUsageLog[]
@@ -658,6 +658,7 @@ model MessageThread {
   projectId    String?             @map("project_id") @db.Uuid
   isActive     Boolean             @default(true) @map("is_active")
   createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt  @map("updated_at")
   messages     Message[]
   participants ThreadParticipant[]
 
@@ -669,8 +670,10 @@ model ThreadParticipant {
   threadId String        @map("thread_id") @db.Uuid
   userId   String        @map("user_id") @db.Uuid
   role     String?
+  joinedAt  DateTime  @default(now())  @map("joined_at")
   thread   MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
 
   @@unique([threadId, userId])
   @@map("thread_participants")
@@ -685,19 +688,12 @@ model Message {
   mediaType MediaType?         @map("media_type")
   isRead    Boolean            @default(false) @map("is_read")
   sentAt    DateTime           @default(now()) @map("sent_at")
-  sender    MessageParticipant @relation("MessageSender", fields: [senderId], references: [userId])
+  sender  User  @relation("MessageSender", fields: [senderId], references: [id])
   thread    MessageThread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
   @@map("messages")
 }
 
-model MessageParticipant {
-  userId   String    @id @db.Uuid
-  user     User      @relation("MessageSender", fields: [userId], references: [id])
-  messages Message[] @relation("MessageSender")
-
-  @@map("message_participants")
-}
 
 model Notification {
   id        String           @id @default(uuid()) @db.Uuid
@@ -882,7 +878,7 @@ enum InventoryDamageStatus {
 enum MessageThreadType {
   direct
   group
-  project
+  support
 }
 
 enum CertificationStatus {

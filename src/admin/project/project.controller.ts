@@ -32,7 +32,6 @@ import {
 @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
 export class ProjectController {
   constructor(private projectService: ProjectService) { }
-
   // ─── PROJECTS ──────────────────────────────────────────────────────────────
 
   /** GET /admin/projects */

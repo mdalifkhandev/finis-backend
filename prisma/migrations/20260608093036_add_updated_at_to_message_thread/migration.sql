@@ -5,4 +5,8 @@
 
 */
 -- AlterTable
-ALTER TABLE "message_threads" ADD COLUMN     "updated_at" TIMESTAMP(3) NOT NULL;
+ALTER TABLE "message_threads" 
+ADD COLUMN "updated_at" TIMESTAMP(3) NOT NULL DEFAULT NOW();
+
+UPDATE "message_threads" 
+SET "updated_at" = "created_at";

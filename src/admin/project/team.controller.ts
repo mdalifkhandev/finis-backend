@@ -9,7 +9,7 @@ import { ProjectService } from '../project/project.service';
 
 @Controller('admin/team')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.admin, UserRole.super_admin)
+@Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
 export class TeamController {
   constructor(private projectService: ProjectService) {}
 
