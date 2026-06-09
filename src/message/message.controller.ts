@@ -36,7 +36,6 @@ export class MessageController {
 
   /**
    * GET /messages/contacts?search=
-   * Chat tab এর জন্য user search — super_admin বাদে
    */
   @Get('contacts')
   @Roles('admin', 'manager', 'worker')
@@ -120,7 +119,7 @@ export class MessageController {
    * Thread এর messages পাওয়া
    */
   @Get('threads/:threadId/messages')
-  @Roles('admin', 'manager', 'worker')
+  @Roles('admin', 'manager', 'worker', 'super_admin')
   getMessages(
     @Param('threadId', ParseUUIDPipe) threadId: string,
     @Request() req: any,
