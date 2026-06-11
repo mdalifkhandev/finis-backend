@@ -31,6 +31,7 @@ interface WorkerLocationState {
   hasActiveViolation: boolean;       // violation already আছে কিনা
   sessionId: string | null;          // current attendance session
   trackingActive: boolean;           // check-in হলে location tracking চালু
+  lastSignature: string | null;      // duplicate same-location updates skip
 }
 
 // ─── Ray casting — point inside polygon ──────────────────────────────────────
@@ -122,11 +123,18 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
     isInsideZone: boolean;
     zoneName: string | null;
     status?: 'inside' | 'site' | 'outside';
+    trackingActive?: boolean;
   }) {
+    const signature = `${data.lat.toFixed(5)}:${data.lng.toFixed(5)}:${data.isInsideZone ? 'inside' : (data.trackingActive ? 'site' : 'outside')}`;
     const existing = this.workerStates.get(data.userId);
     const now = new Date();
 
     if (existing) {
+      if (existing.lastSignature === signature) {
+        existing.timestamp = now;
+        existing.trackingActive = data.trackingActive ?? existing.trackingActive;
+        return { state: existing, changed: false };
+      }
       existing.fullName = data.fullName;
       existing.avatarUrl = data.avatarUrl;
       existing.projectId = data.projectId;
@@ -135,7 +143,9 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
       existing.isInsideZone = data.isInsideZone;
       existing.zoneName = data.zoneName;
       existing.timestamp = now;
-      return existing;
+      existing.trackingActive = data.trackingActive ?? existing.trackingActive;
+      existing.lastSignature = signature;
+      return { state: existing, changed: true };
     }
 
     const state: WorkerLocationState = {
@@ -154,11 +164,12 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
       outsideStartedAt: data.isInsideZone ? null : now,
       hasActiveViolation: false,
       sessionId: null,
-      trackingActive: true,
+      trackingActive: data.trackingActive ?? true,
+      lastSignature: signature,
     };
 
     this.workerStates.set(data.userId, state);
-    return state;
+    return { state, changed: true };
   }
 
   // ─── CONNECTION ────────────────────────────────────────────────────────────
@@ -239,6 +250,7 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
             hasActiveViolation: false,
             sessionId: null,
             trackingActive: false,
+            lastSignature: null,
           });
 
           console.log(`✅ Worker Connected: ${user.fullName} → Project: ${projectMember.project.name}`);
@@ -360,7 +372,7 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
     // Admin join করলে সব active workers এর current location পাঠাও
     const activeWorkers: any[] = [];
     this.workerStates.forEach((state) => {
-      if (state.projectId === data.projectId && state.lat !== 0) {
+      if (state.projectId === data.projectId && (state.trackingActive || state.sessionId || state.lat !== 0 || state.lng !== 0)) {
         activeWorkers.push({
           workerId: state.userId,
           workerName: state.fullName,
@@ -790,7 +802,7 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
 
     const activeWorkers: any[] = [];
     this.workerStates.forEach((state) => {
-      if (state.projectId === data.projectId && state.lat !== 0) {
+      if (state.projectId === data.projectId && (state.trackingActive || state.sessionId || state.lat !== 0 || state.lng !== 0)) {
         let currentZoneSeconds = state.totalZoneSeconds;
         if (state.isInsideZone && state.zoneEnteredAt) {
           currentZoneSeconds += Math.floor(

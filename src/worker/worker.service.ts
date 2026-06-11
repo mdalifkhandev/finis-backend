@@ -532,6 +532,11 @@ export class WorkerService {
   }
 
   async checkIn(workerId: string, dto: CheckInDto) {
+    const worker = await this.prisma.user.findUnique({
+      where: { id: workerId },
+      select: { fullName: true, avatarUrl: true },
+    });
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -575,6 +580,39 @@ export class WorkerService {
       });
     }
 
+    const memberships = await this.prisma.projectMember.findMany({
+      where: { userId: workerId },
+      select: { projectId: true },
+    });
+
+    memberships.forEach(({ projectId }) => {
+      const stateResult = this.geofencingGateway.upsertWorkerState({
+        userId: workerId,
+        fullName: worker?.fullName ?? 'Worker',
+        avatarUrl: worker?.avatarUrl ?? null,
+        projectId,
+        lat: dto.lat ?? 0,
+        lng: dto.lng ?? 0,
+        isInsideZone: false,
+        zoneName: null,
+        status: 'site',
+      });
+
+      if (!stateResult.changed) return;
+
+      this.geofencingGateway.emitWorkerLocation(projectId, {
+        workerId,
+        workerName: worker?.fullName,
+        avatarUrl: worker?.avatarUrl ?? null,
+        lat: dto.lat ?? 0,
+        lng: dto.lng ?? 0,
+        isInsideZone: false,
+        zoneName: null,
+        status: 'site',
+        timestamp: new Date(),
+      });
+    });
+
     return {
       message: 'Checked in successfully',
       session,
@@ -583,6 +621,11 @@ export class WorkerService {
   }
 
   async checkOut(workerId: string, dto: CheckOutDto) {
+    const worker = await this.prisma.user.findUnique({
+      where: { id: workerId },
+      select: { fullName: true, avatarUrl: true },
+    });
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -642,6 +685,26 @@ export class WorkerService {
         },
       });
     }
+
+    const memberships = await this.prisma.projectMember.findMany({
+      where: { userId: workerId },
+      select: { projectId: true },
+    });
+
+    memberships.forEach(({ projectId }) => {
+      this.geofencingGateway.upsertWorkerState({
+        userId: workerId,
+        fullName: worker?.fullName ?? 'Worker',
+        avatarUrl: worker?.avatarUrl ?? null,
+        projectId,
+        lat: dto.lat ?? 0,
+        lng: dto.lng ?? 0,
+        isInsideZone: false,
+        zoneName: null,
+        status: 'outside',
+        trackingActive: false,
+      });
+    });
 
     return {
       message: 'Checked out successfully',
