@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { GeofencingGateway } from '../admin/project/geofencing.gateway';
 import type { File as MulterFile } from 'multer';
 import {
   SubmitTaskReportDto,
@@ -22,7 +23,10 @@ import {
 
 @Injectable()
 export class WorkerService {
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly geofencingGateway: GeofencingGateway,
+  ) { }
 
   private isWorkerAssigned(task: { assignedTo?: string | null; taskAssignees?: { userId: string }[] }, workerId: string) {
     return task.assignedTo === workerId || (task.taskAssignees?.some((assignment) => assignment.userId === workerId) ?? false);
@@ -874,6 +878,11 @@ export class WorkerService {
   // ─────────────────────────────────────────────
 
   async updateLocation(workerId: string, dto: UpdateLocationDto) {
+    const worker = await this.prisma.user.findUnique({
+      where: { id: workerId },
+      select: { fullName: true, avatarUrl: true },
+    });
+
     const log = await this.prisma.locationLog.create({
       data: {
         userId: workerId,
@@ -883,6 +892,9 @@ export class WorkerService {
         eventType: dto.eventType ?? 'update',
       },
     });
+
+    let isInsideZone = false;
+    let zoneName: string | null = null;
 
     // Geofence violation check
     if (dto.geofenceId) {
@@ -900,6 +912,9 @@ export class WorkerService {
       ? this.pointInPolygon(dto.lat, dto.lng, coords)
       : false;
 
+  isInsideZone = isInside;
+  zoneName = geofence.zoneName;
+
   if (!isInside) {
     await this.prisma.geofenceViolation.create({
       data: {
@@ -911,6 +926,48 @@ export class WorkerService {
     });
   }
 }
+    }
+
+    const projectIds = new Set<string>();
+
+    if (dto.geofenceId) {
+      const geofence = await this.prisma.geofence.findUnique({
+        where: { id: dto.geofenceId },
+        select: { projectId: true },
+      });
+      if (geofence?.projectId) projectIds.add(geofence.projectId);
+    }
+
+    const memberships = await this.prisma.projectMember.findMany({
+      where: { userId: workerId },
+      select: { projectId: true },
+    });
+    memberships.forEach((m) => projectIds.add(m.projectId));
+
+    for (const projectId of projectIds) {
+      this.geofencingGateway.upsertWorkerState({
+        userId: workerId,
+        fullName: worker?.fullName ?? 'Worker',
+        avatarUrl: worker?.avatarUrl ?? null,
+        projectId,
+        lat: dto.lat,
+        lng: dto.lng,
+        isInsideZone,
+        zoneName,
+        status: isInsideZone ? 'inside' : 'outside',
+      });
+
+      this.geofencingGateway.emitWorkerLocation(projectId, {
+        workerId,
+        workerName: worker?.fullName,
+        avatarUrl: worker?.avatarUrl ?? null,
+        lat: dto.lat,
+        lng: dto.lng,
+        isInsideZone,
+        zoneName,
+        status: isInsideZone ? 'inside' : 'outside',
+        timestamp: new Date(),
+      });
     }
 
     return { message: 'Location updated', log };

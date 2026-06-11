@@ -47,6 +47,6 @@ import { PayrollService } from './payroll/payroll.service';
     InventoryService,
     PayrollService,
   ],
-  exports: [CompanyService, ProjectService, InventoryService, PayrollService],
+  exports: [CompanyService, ProjectService, InventoryService, PayrollService, GeofencingGateway],
 })
 export class AdminModule {}

@@ -108,6 +108,59 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
     private jwtService: JwtService,
   ) {}
 
+  emitWorkerLocation(projectId: string, payload: any) {
+    this.server?.to(`project_${projectId}`).emit('worker_location', payload);
+  }
+
+  upsertWorkerState(data: {
+    userId: string;
+    fullName: string;
+    avatarUrl: string | null;
+    projectId: string;
+    lat: number;
+    lng: number;
+    isInsideZone: boolean;
+    zoneName: string | null;
+    status?: 'inside' | 'site' | 'outside';
+  }) {
+    const existing = this.workerStates.get(data.userId);
+    const now = new Date();
+
+    if (existing) {
+      existing.fullName = data.fullName;
+      existing.avatarUrl = data.avatarUrl;
+      existing.projectId = data.projectId;
+      existing.lat = data.lat;
+      existing.lng = data.lng;
+      existing.isInsideZone = data.isInsideZone;
+      existing.zoneName = data.zoneName;
+      existing.timestamp = now;
+      return existing;
+    }
+
+    const state: WorkerLocationState = {
+      userId: data.userId,
+      fullName: data.fullName,
+      avatarUrl: data.avatarUrl,
+      projectId: data.projectId,
+      lat: data.lat,
+      lng: data.lng,
+      isInsideZone: data.isInsideZone,
+      zoneName: data.zoneName,
+      timestamp: now,
+      zoneEnteredAt: data.isInsideZone ? now : null,
+      totalZoneSeconds: 0,
+      totalOutsideSeconds: 0,
+      outsideStartedAt: data.isInsideZone ? null : now,
+      hasActiveViolation: false,
+      sessionId: null,
+      trackingActive: true,
+    };
+
+    this.workerStates.set(data.userId, state);
+    return state;
+  }
+
   // ─── CONNECTION ────────────────────────────────────────────────────────────
   async handleConnection(client: Socket) {
     try {
@@ -538,6 +591,7 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
       lng,
       isInsideZone: isInsideAny,
       zoneName: isInsideAny ? currentZone.zoneName : null,
+      status: isInsideAny ? 'inside' : 'outside',
       totalZoneHours: secondsToHours(currentZoneSeconds),
       timestamp: now,
     });
@@ -546,6 +600,7 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
     client.emit('location_received', {
       isInsideZone: isInsideAny,
       zoneName: isInsideAny ? currentZone.zoneName : null,
+      status: isInsideAny ? 'inside' : 'outside',
       totalZoneHours: secondsToHours(currentZoneSeconds),
       message: isInsideAny ? '✅ You are inside the zone' : '⚠️ You are outside the zone',
     });
@@ -625,6 +680,7 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
       worker: { id: user.id, fullName: user.fullName, avatarUrl: user.avatarUrl },
       zoneName: checkedInZone?.zoneName ?? 'Unknown Zone',
       isInsideZone: isInsideAny,
+      status: isInsideAny ? 'inside' : 'site',
       checkInTime: new Date(),
     };
 
@@ -749,6 +805,7 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
           lng: state.lng,
           isInsideZone: state.isInsideZone,
           zoneName: state.zoneName,
+          status: state.isInsideZone ? 'inside' : (state.sessionId ? 'site' : 'outside'),
           totalZoneHours: secondsToHours(currentZoneSeconds),
           lastSeen: state.timestamp,
         });
