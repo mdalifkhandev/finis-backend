@@ -10,7 +10,12 @@ import {
   UseGuards,
   Request,
   ParseUUIDPipe,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
 import { MessageService } from './message.service';
 import {
   CreateDirectThreadDto,
@@ -29,6 +34,10 @@ import { Roles } from '../auth/decorators/roles.decorator';
 @Controller('messages')
 export class MessageController {
   constructor(private readonly messageService: MessageService) {}
+
+  private getStoredFileUrl(file: { filename: string }) {
+    return `/uploads/${file.filename}`;
+  }
 
   // ═════════════════════════════════════════════
   // CONTACTS
@@ -139,6 +148,42 @@ export class MessageController {
     @Body() dto: SendMessageDto,
   ) {
     return this.messageService.sendMessage(req.user.id, dto);
+  }
+
+  /**
+   * POST /messages/upload
+   * File upload via multer. Returns stored public URL.
+   */
+  @Post('upload')
+  @Roles('admin', 'manager', 'worker', 'super_admin')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: diskStorage({
+      destination: './uploads',
+      filename: (_req, file, cb) => {
+        const safeBase = file.originalname
+          .replace(/\.[^/.]+$/, '')
+          .replace(/[^a-zA-Z0-9_-]/g, '_')
+          .slice(0, 50);
+        const suffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+        cb(null, `${safeBase}-${suffix}${extname(file.originalname)}`);
+      },
+    }),
+    limits: { fileSize: 20 * 1024 * 1024 },
+  }))
+  uploadFile(
+    @UploadedFile() file: { filename: string; originalname: string; mimetype: string } | undefined,
+  ) {
+    if (!file) {
+      return { message: 'No file uploaded' };
+    }
+
+    return {
+      data: {
+        url: this.getStoredFileUrl(file),
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+      },
+    };
   }
 
   /**

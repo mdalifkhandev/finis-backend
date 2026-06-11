@@ -980,33 +980,64 @@ export class ProjectService {
 
   async addMemberByRole(projectId: string, userId: string, adminId: string, role: 'manager' | 'worker', managerId?: string, userRole?: string) {
     await this.verifyProjectAccess(projectId, adminId, userRole);
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true, managerId: true },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true },
+    });
     if (!user) throw new NotFoundException('User not found');
     if (user.role !== role) throw new BadRequestException(`Only users with role '${role}' can be added as ${role}`);
     const existing = await this.prisma.projectMember.findFirst({ where: { projectId, userId } });
     if (existing) throw new BadRequestException('User is already a team member');
     if (userRole === UserRole.manager && role === 'manager') throw new ForbiddenException('Managers cannot add other managers');
+
     if (role === 'worker') {
-      if (!managerId) throw new BadRequestException('managerId is required for workers');
-      const manager = await this.prisma.projectMember.findFirst({ where: { projectId, userId: managerId, role: 'manager' } });
+      const fallbackManagerId = managerId || project.managerId || (await this.prisma.projectMember.findFirst({
+        where: { projectId, role: 'manager' },
+        select: { userId: true },
+        orderBy: { createdAt: 'asc' },
+      }))?.userId;
+
+      if (!fallbackManagerId) {
+        throw new BadRequestException('No manager is assigned to this project. Add a manager first or choose one.');
+      }
+
+      const manager = await this.prisma.projectMember.findFirst({ where: { projectId, userId: fallbackManagerId, role: 'manager' } });
       if (!manager) throw new NotFoundException('Manager not found in this project');
+
+      managerId = fallbackManagerId;
     }
-    const member = await this.prisma.projectMember.create({
-      data: { projectId, userId, role, ...(managerId && { managerId }) },
-      include: { user: { select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true } } },
-    });
-    if (role === 'worker' && managerId) {
-      const existingMap = await this.prisma.workerManagerMap.findFirst({ where: { workerId: userId, managerId } });
-      if (!existingMap) {
-        try {
-          await this.prisma.workerManagerMap.create({ data: { managerId, workerId: userId } });
-        } catch (e) {
-          // ignore duplicate mapping race (unique constraint) but rethrow other errors
-          if ((e as any)?.code !== 'P2002') throw e;
+
+    try {
+      const member = await this.prisma.projectMember.create({
+        data: { projectId, userId, role, ...(managerId && { managerId }) },
+        include: { user: { select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true } } },
+      });
+      if (role === 'worker' && managerId) {
+        const existingMap = await this.prisma.workerManagerMap.findFirst({ where: { workerId: userId, managerId } });
+        if (!existingMap) {
+          try {
+            await this.prisma.workerManagerMap.create({ data: { managerId, workerId: userId } });
+          } catch (e) {
+            if ((e as any)?.code !== 'P2002') throw e;
+          }
         }
       }
+      return { message: `${role} added successfully`, member: { memberId: member.id, ...member.user } };
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
+        throw new BadRequestException('This user is already assigned in the project.');
+      }
+      if (error?.code === 'P2003') {
+        throw new BadRequestException('Invalid relation data while assigning team member.');
+      }
+      throw error;
     }
-    return { message: `${role} added successfully`, member: { memberId: member.id, ...member.user } };
   }
 
   async removeTeamMember(projectId: string, userId: string, adminId: string, userRole: string) {
