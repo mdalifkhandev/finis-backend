@@ -30,6 +30,7 @@ interface WorkerLocationState {
   outsideStartedAt: Date | null;     // কখন বাইরে গেছে
   hasActiveViolation: boolean;       // violation already আছে কিনা
   sessionId: string | null;          // current attendance session
+  trackingActive: boolean;           // check-in হলে location tracking চালু
 }
 
 // ─── Ray casting — point inside polygon ──────────────────────────────────────
@@ -184,6 +185,7 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
             outsideStartedAt: new Date(), // শুরুতে বাইরে ধরে নিচ্ছি
             hasActiveViolation: false,
             sessionId: null,
+            trackingActive: false,
           });
 
           console.log(`✅ Worker Connected: ${user.fullName} → Project: ${projectMember.project.name}`);
@@ -357,31 +359,19 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
       return;
     }
 
-    const now = new Date();
     let state = this.workerStates.get(user.id);
 
-    // State না থাকলে নতুন বানাও
-    if (!state) {
-      state = {
-        userId: user.id,
-        fullName: user.fullName,
-        avatarUrl: user.avatarUrl,
-        projectId,
-        lat,
-        lng,
-        isInsideZone: false,
-        zoneName: null,
-        timestamp: now,
-        zoneEnteredAt: null,
-        totalZoneSeconds: 0,
-        totalOutsideSeconds: 0,
-        outsideStartedAt: now,
-        hasActiveViolation: false,
-        sessionId: null,
-      };
-      this.workerStates.set(user.id, state);
+    // Check-in না করলে location process করা যাবে না
+    if (!state || !state.trackingActive) {
+      client.emit('location_ignored', {
+        message: 'Location tracking is disabled until check-in.',
+      });
+      return;
     }
 
+    const now = new Date();
+
+    // State না থাকলে নতুন বানাও
     // Active geofences load করো
     const geofences = await this.prisma.geofence.findMany({
       where: { projectId, isActive: true },
@@ -617,6 +607,7 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
       state.sessionId = session.id;
       state.totalZoneSeconds = 0;
       state.totalOutsideSeconds = 0;
+      state.trackingActive = true;
 
       if (isInsideAny) {
         state.isInsideZone = true;
@@ -714,6 +705,7 @@ export class GeofencingGateway implements OnGatewayConnection, OnGatewayDisconne
       state.totalOutsideSeconds = 0;
       state.zoneEnteredAt = null;
       state.outsideStartedAt = null;
+      state.trackingActive = false;
     }
 
     const payload = {

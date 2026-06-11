@@ -56,7 +56,7 @@ const docStorage = diskStorage({
 
 @Controller('admin/companies')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.admin,)
+@Roles(UserRole.admin, UserRole.manager)
 export class CompanyController {
   constructor(private companyService: CompanyService) { }
 
@@ -66,9 +66,10 @@ export class CompanyController {
   @Get()
   getMyCompanies(
     @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
     @Query() query: PaginationQueryDto,
   ) {
-    return this.companyService.getMyCompanies(adminId, query);
+    return this.companyService.getMyCompanies(adminId, query, userRole);
   }
 
   /** POST /admin/companies — create company */
@@ -87,8 +88,9 @@ export class CompanyController {
   getCompanyProfile(
     @Param('id') companyId: string,
     @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
   ) {
-    return this.companyService.getCompanyProfile(companyId, adminId);
+    return this.companyService.getCompanyProfile(companyId, adminId, userRole);
   }
 
   /** PUT /admin/companies/:id — update company */
@@ -98,9 +100,10 @@ export class CompanyController {
     @Param('id') companyId: string,
     @Body() dto: UpdateCompanyDto,
     @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
     @UploadedFile() file?: MulterFile,
   ) {
-    return this.companyService.updateCompany(companyId, dto, adminId, file?.filename);
+    return this.companyService.updateCompany(companyId, dto, adminId, file?.filename, userRole);
   }
 
   /** DELETE /admin/companies/:id — deactivate company */
@@ -108,8 +111,9 @@ export class CompanyController {
   deleteCompany(
     @Param('id') companyId: string,
     @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
   ) {
-    return this.companyService.deleteCompany(companyId, adminId);
+    return this.companyService.deleteCompany(companyId, adminId, userRole);
   }
 
   // ─── ASSIGNED PROJECTS ────────────────────────────────────────────────────
@@ -119,8 +123,9 @@ export class CompanyController {
   getAssignedProjects(
     @Param('id') companyId: string,
     @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
   ) {
-    return this.companyService.getAssignedProjects(companyId, adminId);
+    return this.companyService.getAssignedProjects(companyId, adminId, userRole);
   }
 
   // ─── CONTACTS ─────────────────────────────────────────────────────────────
@@ -130,9 +135,10 @@ export class CompanyController {
   getContacts(
     @Param('id') companyId: string,
     @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
     @Query() query: PaginationQueryDto,
   ) {
-    return this.companyService.getContacts(companyId, adminId, query);
+    return this.companyService.getContacts(companyId, adminId, query, userRole);
   }
 
 
@@ -143,8 +149,9 @@ export class CompanyController {
   getDocuments(
     @Param('id') companyId: string,
     @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
   ) {
-    return this.companyService.getDocuments(companyId, adminId);
+    return this.companyService.getDocuments(companyId, adminId, userRole);
   }
 
   /** POST /admin/companies/:id/documents — upload document */
@@ -153,9 +160,10 @@ export class CompanyController {
   uploadDocument(
     @Param('id') companyId: string,
     @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
     @UploadedFile() file: MulterFile,
   ) {
-    return this.companyService.uploadDocument(companyId, adminId, file);
+    return this.companyService.uploadDocument(companyId, adminId, file, userRole);
   }
 
   /** DELETE /admin/companies/:id/documents/:docId */
@@ -164,7 +172,8 @@ export class CompanyController {
     @Param('id') companyId: string,
     @Param('docId') docId: string,
     @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
   ) {
-    return this.companyService.deleteDocument(companyId, docId, adminId);
+    return this.companyService.deleteDocument(companyId, docId, adminId, userRole);
   }
 }

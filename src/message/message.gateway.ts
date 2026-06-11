@@ -328,4 +328,8 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
       this.server.to(socketId).emit(event, data);
     }
   }
+
+  emitToThread(threadId: string, event: string, data: any) {
+    this.server.to(`thread:${threadId}`).emit(event, data);
+  }
 }

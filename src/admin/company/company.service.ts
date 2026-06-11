@@ -13,11 +13,62 @@ import { File as MulterFile } from 'multer';
 export class CompanyService {
   constructor(private prisma: PrismaService, private config: ConfigService) { }
 
+  private async getAccessibleCompanyIds(userId: string, userRole: string) {
+    if (userRole === 'admin') {
+      const ownedCompanies = await this.prisma.company.findMany({
+        where: { ownerId: userId, isActive: true },
+        select: { id: true },
+      });
+      return ownedCompanies.map((company) => company.id);
+    }
+
+    if (userRole === 'manager') {
+      const memberships = await this.prisma.companyMember.findMany({
+        where: { userId },
+        select: { companyId: true },
+      });
+
+      return [...new Set(memberships.map((membership) => membership.companyId))];
+    }
+
+    return [];
+  }
+
   private async verifyOwner(companyId: string, adminId: string) {
     const company = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!company) throw new NotFoundException('Company not found');
     if (company.ownerId !== adminId) throw new ForbiddenException('You do not own this company');
     return company;
+  }
+
+  private async verifyCompanyAccess(companyId: string, userId: string, userRole: string) {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true, ownerId: true, isActive: true },
+    });
+
+    if (!company || !company.isActive) {
+      throw new NotFoundException('Company not found');
+    }
+
+    if (userRole === 'admin' && company.ownerId === userId) {
+      return company;
+    }
+
+    if (userRole === 'manager') {
+      const membership = await this.prisma.companyMember.findUnique({
+        where: {
+          companyId_userId: {
+            companyId,
+            userId,
+          },
+        },
+      });
+
+      if (membership) return company;
+    }
+
+    throw new ForbiddenException('Access denied');
   }
 
   // ─── PLAN LIMIT CHECK ─────────────────────────────────────────────────────
@@ -55,11 +106,17 @@ export class CompanyService {
     }
   }
 
-  async getMyCompanies(adminId: string, query: PaginationQueryDto) {
+  async getMyCompanies(adminId: string, query: PaginationQueryDto, userRole: string = 'admin') {
     const { page = 1, limit = 10, search } = query;
     const skip = (page - 1) * limit;
 
-    const where: any = { ownerId: adminId, isActive: true };
+    const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
+    const where: any = {
+      isActive: true,
+      ...(userRole === 'manager'
+        ? { id: { in: accessibleCompanyIds } }
+        : { ownerId: adminId }),
+    };
     if (search && search.trim()) {
       const s = search.trim();
       where.AND = [
@@ -113,8 +170,8 @@ export class CompanyService {
     };
   }
 
-  async getCompanyProfile(companyId: string, adminId: string) {
-    await this.verifyOwner(companyId, adminId);
+  async getCompanyProfile(companyId: string, adminId: string, userRole: string = 'admin') {
+    await this.verifyCompanyAccess(companyId, adminId, userRole);
     return this.prisma.company.findUnique({
       where: { id: companyId },
       include: {
@@ -148,8 +205,8 @@ export class CompanyService {
     });
   }
 
-  async updateCompany(companyId: string, dto: UpdateCompanyDto, adminId: string, logoFilename?: string) {
-    await this.verifyOwner(companyId, adminId);
+  async updateCompany(companyId: string, dto: UpdateCompanyDto, adminId: string, logoFilename?: string, userRole: string = 'admin') {
+    await this.verifyCompanyAccess(companyId, adminId, userRole);
 
     const { logoUrl: _, ...restDto } = dto; // body এর logoUrl বাদ দাও
     const logoUrl = logoFilename ? `/uploads/logos/${logoFilename}` : undefined;
@@ -163,14 +220,14 @@ export class CompanyService {
     });
   }
 
-  async deleteCompany(companyId: string, adminId: string) {
-    await this.verifyOwner(companyId, adminId);
+  async deleteCompany(companyId: string, adminId: string, userRole: string = 'admin') {
+    await this.verifyCompanyAccess(companyId, adminId, userRole);
     await this.prisma.company.update({ where: { id: companyId }, data: { isActive: false } });
     return { message: 'Company deactivated successfully' };
   }
 
-  async getAssignedProjects(companyId: string, adminId: string) {
-    await this.verifyOwner(companyId, adminId);
+  async getAssignedProjects(companyId: string, adminId: string, userRole: string = 'admin') {
+    await this.verifyCompanyAccess(companyId, adminId, userRole);
     return this.prisma.project.findMany({
       where: { companyId },
       orderBy: { createdAt: 'desc' },
@@ -186,8 +243,8 @@ export class CompanyService {
     });
   }
 
-  async getContacts(companyId: string, adminId: string, query: PaginationQueryDto) {
-    await this.verifyOwner(companyId, adminId);
+  async getContacts(companyId: string, adminId: string, query: PaginationQueryDto, userRole: string = 'admin') {
+    await this.verifyCompanyAccess(companyId, adminId, userRole);
     const { page = 1, limit = 20 } = query;
 
     const members = await this.prisma.projectMember.findMany({
@@ -227,8 +284,8 @@ export class CompanyService {
     };
   }
 
-  async getDocuments(companyId: string, adminId: string) {
-    await this.verifyOwner(companyId, adminId);
+  async getDocuments(companyId: string, adminId: string, userRole: string = 'admin') {
+    await this.verifyCompanyAccess(companyId, adminId, userRole);
     return this.prisma.document.findMany({
       where: { companyId },
       orderBy: { uploadedAt: 'desc' },
@@ -240,8 +297,8 @@ export class CompanyService {
     });
   }
 
-  async uploadDocument(companyId: string, adminId: string, file: MulterFile) {
-    await this.verifyOwner(companyId, adminId);
+  async uploadDocument(companyId: string, adminId: string, file: MulterFile, userRole: string = 'admin') {
+    await this.verifyCompanyAccess(companyId, adminId, userRole);
     const fileSizeMb = file.size / (1024 * 1024);
     return this.prisma.document.create({
       data: {
@@ -255,8 +312,8 @@ export class CompanyService {
     });
   }
 
-  async deleteDocument(companyId: string, documentId: string, adminId: string) {
-    await this.verifyOwner(companyId, adminId);
+  async deleteDocument(companyId: string, documentId: string, adminId: string, userRole: string = 'admin') {
+    await this.verifyCompanyAccess(companyId, adminId, userRole);
     const doc = await this.prisma.document.findUnique({ where: { id: documentId }, select: { companyId: true } });
     if (!doc) throw new NotFoundException('Document not found');
     if (doc.companyId !== companyId) throw new ForbiddenException('Document does not belong to this company');

@@ -111,10 +111,11 @@ export class AuthService {
 
     // Some deployments may not yet have the login timestamp column.
     // Don't fail authentication if that write is unavailable.
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
-    }).catch(() => undefined);
+    await this.prisma.$executeRaw`
+      UPDATE users
+      SET last_login_at = ${new Date()}
+      WHERE id = ${user.id}
+    `.catch(() => undefined);
 
     const token = this.generateToken(
       user.id,
@@ -280,10 +281,11 @@ export class AuthService {
 
     // User এর password আপডেট করো
     if (invitation.receiverId) {
-      await this.prisma.user.update({
-        where: { id: invitation.receiverId },
-        data: { passwordHash },
-      });
+      await this.prisma.$executeRaw`
+        UPDATE users
+        SET password_hash = ${passwordHash}
+        WHERE id = ${invitation.receiverId}
+      `;
     }
 
     // নতুন credentials email পাঠাও
@@ -317,10 +319,11 @@ export class AuthService {
 
     // User ও inactive করো
     if (invitation.receiverId) {
-      await this.prisma.user.update({
-        where: { id: invitation.receiverId },
-        data: { status: 'inactive' },
-      });
+      await this.prisma.$executeRaw`
+        UPDATE users
+        SET status = 'inactive'
+        WHERE id = ${invitation.receiverId}
+      `;
     }
 
     return { message: 'Invitation cancelled' };
@@ -346,7 +349,7 @@ export class AuthService {
         resetToken: forgotToken,
         resetExpiresAt: expiresAt,
       },
-    });
+    }).catch(() => undefined);
 
     await this.mailService.sendOtpEmail(dto.email, otp);
 
@@ -366,7 +369,7 @@ export class AuthService {
       await this.prisma.user.update({
         where: { id: user.id },
         data: { otp: null, otpExpiresAt: null, resetToken: null, resetExpiresAt: null },
-      });
+      }).catch(() => undefined);
       throw new BadRequestException('OTP expired');
     }
     if (user.otp !== dto.otp) throw new BadRequestException('Invalid OTP');
@@ -377,7 +380,7 @@ export class AuthService {
     await this.prisma.user.update({
       where: { id: user.id },
       data: { otp: null, otpExpiresAt: null, resetToken, resetExpiresAt },
-    });
+    }).catch(() => undefined);
 
     return { message: 'OTP verified', resetToken };
   }
@@ -400,10 +403,13 @@ export class AuthService {
 
     const hash = await bcrypt.hash(dto.newPassword, 10);
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { passwordHash: hash, resetToken: null, resetExpiresAt: null },
-    });
+    await this.prisma.$executeRaw`
+      UPDATE users
+      SET password_hash = ${hash},
+          reset_token = NULL,
+          reset_expires_at = NULL
+      WHERE id = ${user.id}
+    `;
 
     return { message: 'Password updated successfully' };
   }
@@ -566,10 +572,11 @@ export class AuthService {
 
     const hash = await bcrypt.hash(dto.newPassword, 10);
 
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { passwordHash: hash },
-    });
+    await this.prisma.$executeRaw`
+      UPDATE users
+      SET password_hash = ${hash}
+      WHERE id = ${userId}
+    `;
 
     return { message: 'Password updated successfully' };
   }

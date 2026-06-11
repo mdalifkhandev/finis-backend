@@ -29,11 +29,15 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { MessageGateway } from './message.gateway';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('messages')
 export class MessageController {
-  constructor(private readonly messageService: MessageService) {}
+  constructor(
+    private readonly messageService: MessageService,
+    private readonly messageGateway: MessageGateway,
+  ) {}
 
   private getStoredFileUrl(file: { filename: string }) {
     return `/uploads/${file.filename}`;
@@ -147,7 +151,14 @@ export class MessageController {
     @Request() req: any,
     @Body() dto: SendMessageDto,
   ) {
-    return this.messageService.sendMessage(req.user.id, dto);
+    return this.messageService.sendMessage(req.user.id, dto).then((message) => {
+      this.messageGateway.emitToThread(dto.threadId, 'message:new', message);
+      this.messageGateway.emitToThread(dto.threadId, 'thread:updated', {
+        threadId: dto.threadId,
+        lastMessage: message,
+      });
+      return message;
+    });
   }
 
   /**
@@ -253,7 +264,14 @@ export class MessageController {
     @Request() req: any,
     @Body() dto: AdminSendMessageDto,
   ) {
-    return this.messageService.sendAdminSupportMessage(req.user.id, dto);
+    return this.messageService.sendAdminSupportMessage(req.user.id, dto).then((message) => {
+      this.messageGateway.emitToThread(dto.threadId, 'message:new', message);
+      this.messageGateway.emitToThread(dto.threadId, 'thread:updated', {
+        threadId: dto.threadId,
+        lastMessage: message,
+      });
+      return message;
+    });
   }
 
   /**
