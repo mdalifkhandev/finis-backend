@@ -74,6 +74,10 @@ export class ProjectService {
 
     if (this.isSuperAdmin(userRole)) return project;
 
+    if (project.company?.ownerId === userId) {
+      return project;
+    }
+
     if (userRole === UserRole.manager) {
       const member = await this.prisma.projectMember.findFirst({
         where: { projectId, userId, role: 'manager' },
@@ -247,7 +251,11 @@ export class ProjectService {
 
     return this.prisma.project.findMany({
       where: {
-        managerId: userId,
+        OR: [
+          { managerId: userId },
+          { company: { ownerId: userId } },
+          { teamMembers: { some: { userId } } },
+        ],
         ...(status && { status: status as any }),
         ...(search && {
           OR: [

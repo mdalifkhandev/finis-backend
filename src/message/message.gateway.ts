@@ -306,18 +306,16 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
   async handleUserPresence(@MessageBody() data: { userIds: string[] }) {
     const users = await this.prisma.user.findMany({
       where: { id: { in: data.userIds } },
-      select: { id: true, lastActiveAt: true },
+      select: { id: true },
     });
 
     const onlineStatuses: Record<string, boolean> = {};
-    const lastActiveAt: Record<string, Date | null> = {};
 
     for (const user of users) {
       onlineStatuses[user.id] = onlineUsers.has(user.id);
-      lastActiveAt[user.id] = user.lastActiveAt;
     }
 
-    return { event: 'user:presence', onlineStatuses, lastActiveAt };
+    return { event: 'user:presence', onlineStatuses };
   }
 
   // ═════════════════════════════════════════════

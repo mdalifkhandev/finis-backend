@@ -55,7 +55,6 @@ export class MessageService {
         avatarUrl: true,
         role: true,
         status: true,
-        lastActiveAt: true,
       },
       orderBy: { fullName: 'asc' },
     });
