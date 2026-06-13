@@ -29,6 +29,17 @@ export class PayrollController {
 
   // ─── Payroll CRUD ─────────────────────────────────────────────────────────
 
+  /** GET /admin/payroll/users?companyId=uuid */
+  @Get('users')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  getPayrollUsers(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+    @Query('date') date?: string,
+  ) {
+    return this.payrollService.getPayrollUsers(adminId, userRole, date);
+  }
+
   /** POST /admin/payroll */
   @Post()
   @Roles(UserRole.admin, UserRole.super_admin)
