@@ -596,6 +596,7 @@ export class WorkerService {
         isInsideZone: false,
         zoneName: null,
         status: 'site',
+        trackingActive: true,
       });
 
       if (!stateResult.changed) return;
@@ -609,6 +610,7 @@ export class WorkerService {
         isInsideZone: false,
         zoneName: null,
         status: 'site',
+        trackingActive: true,
         timestamp: new Date(),
       });
     });
@@ -703,6 +705,12 @@ export class WorkerService {
         zoneName: null,
         status: 'outside',
         trackingActive: false,
+      });
+
+      this.geofencingGateway.server.to(`project_${projectId}`).emit('location_sharing_stopped', {
+        workerId,
+        workerName: worker?.fullName ?? 'Worker',
+        stoppedAt: new Date(),
       });
     });
 

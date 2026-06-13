@@ -18,6 +18,33 @@ export class ApprovePayrollDto {
   note?: string;
 }
 
+// ─── Update Payroll ─────────────────────────────────────────────────────────
+export class UpdatePayrollDto {
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  regularHours?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  overtimeHours?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  ratePerHour?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  deductions?: number;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
 // ─── Process Payroll ──────────────────────────────────────────────────────────
 export class ProcessPayrollDto {
   @IsOptional()

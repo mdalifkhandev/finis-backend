@@ -19,6 +19,7 @@ import {
   ApprovePayrollDto,
   ProcessPayrollDto,
   CreatePayrollDto,
+  UpdatePayrollDto,
 } from './dto/payroll.dto';
 
 @Controller('admin/payroll')
@@ -37,6 +38,18 @@ export class PayrollController {
     @CurrentUser('role') userRole: string,
   ) {
     return this.payrollService.createPayroll(dto, adminId, userRole);
+  }
+
+  /** PATCH /admin/payroll/:id */
+  @Patch(':id')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  updatePayroll(
+    @Param('id') payrollId: string,
+    @Body() dto: UpdatePayrollDto,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.payrollService.updatePayroll(payrollId, adminId, userRole, dto);
   }
 
   /** GET /admin/payroll/summary?month=1&year=2025&projectId=uuid */
@@ -82,6 +95,23 @@ export class PayrollController {
       adminId,
       userRole,
       dto,
+    );
+  }
+
+  /** PATCH /admin/payroll/:id/paid */
+  @Patch(':id/paid')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  markPayrollPaid(
+    @Param('id') payrollId: string,
+    @Body() dto: ApprovePayrollDto,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.payrollService.markPayrollPaid(
+      payrollId,
+      adminId,
+      userRole,
+      dto.note,
     );
   }
 

@@ -9,6 +9,7 @@ import { WorkerModule } from './worker/worker.module';
 import { JwtModule } from '@nestjs/jwt';
 import { MulterModule } from '@nestjs/platform-express';
 import { SuperAdminModule } from './super-admin/super-admin.module';
+import { PublicUserModule } from './public-user/public-user.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { SuperAdminModule } from './super-admin/super-admin.module';
     MessageModule,
     WorkerModule,
     SuperAdminModule,
+    PublicUserModule,
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET || 'secret',

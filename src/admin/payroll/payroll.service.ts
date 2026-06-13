@@ -9,6 +9,7 @@ import { UserRole } from '../../generated/prisma/client';
 import {
   CreatePayrollDto,
   ApprovePayrollDto,
+  UpdatePayrollDto,
 } from './dto/payroll.dto';
 
 @Injectable()
@@ -39,6 +40,48 @@ export class PayrollService {
     return Math.round(
       attendances.reduce((sum, attendance) => sum + (attendance.totalHours ?? 0), 0) * 100,
     ) / 100;
+  }
+
+  private calculatePayrollFields(
+    regularHours: number,
+    overtimeHours: number,
+    ratePerHour: number,
+    config: {
+      cppEmployeeRate: number;
+      eiEmployeeRate: number;
+      federalTaxRate: number;
+      provincialTaxRate: number;
+      cppEmployerRate: number;
+      eiEmployerRate: number;
+      wsibRate: number;
+      vacationPayRate: number;
+    },
+    overrideDeductions?: number,
+  ) {
+    const regularPay = regularHours * ratePerHour;
+    const overtimePay = overtimeHours * ratePerHour * 1.5;
+    const grossPay = Math.round((regularPay + overtimePay) * 100) / 100;
+
+    const cppEmployee = Math.round(grossPay * config.cppEmployeeRate * 100) / 100;
+    const eiEmployee = Math.round(grossPay * config.eiEmployeeRate * 100) / 100;
+    const federalTax = Math.round(grossPay * config.federalTaxRate * 100) / 100;
+    const provincialTax = Math.round(grossPay * config.provincialTaxRate * 100) / 100;
+    const computedDeductions = Math.round((cppEmployee + eiEmployee + federalTax + provincialTax) * 100) / 100;
+    const deductions = overrideDeductions ?? computedDeductions;
+    const netPay = Math.round((grossPay - deductions) * 100) / 100;
+
+    const cppEmployer = Math.round(grossPay * config.cppEmployerRate * 100) / 100;
+    const eiEmployer = Math.round(grossPay * config.eiEmployerRate * 100) / 100;
+    const wsib = Math.round(grossPay * config.wsibRate * 100) / 100;
+    const vacationPay = Math.round(grossPay * config.vacationPayRate * 100) / 100;
+    const employerCost = Math.round((grossPay + cppEmployer + eiEmployer + wsib + vacationPay) * 100) / 100;
+
+    return {
+      grossPay,
+      deductions,
+      netPay,
+      employerCost,
+    };
   }
 
   // ─── Create Payroll ───────────────────────────────────────────────────────
@@ -94,24 +137,21 @@ export class PayrollService {
     const overtimeHours = 0;
 
     // Gross Pay calculate
-    const regularPay = regularHours * dto.ratePerHour;
-    const overtimePay = overtimeHours * dto.ratePerHour * 1.5;
-    const grossPay = Math.round((regularPay + overtimePay) * 100) / 100;
-
-    // Employee Deductions
-    const cppEmployee = Math.round(grossPay * cppEmployeeRate * 100) / 100;
-    const eiEmployee = Math.round(grossPay * eiEmployeeRate * 100) / 100;
-    const federalTax = Math.round(grossPay * federalTaxRate * 100) / 100;
-    const provincialTax = Math.round(grossPay * provincialTaxRate * 100) / 100;
-    const deductions = Math.round((cppEmployee + eiEmployee + federalTax + provincialTax) * 100) / 100;
-    const netPay = Math.round((grossPay - deductions) * 100) / 100;
-
-    // Employer Cost
-    const cppEmployer = Math.round(grossPay * cppEmployerRate * 100) / 100;
-    const eiEmployer = Math.round(grossPay * eiEmployerRate * 100) / 100;
-    const wsib = Math.round(grossPay * wsibRate * 100) / 100;
-    const vacationPay = Math.round(grossPay * vacationPayRate * 100) / 100;
-    const employerCost = Math.round((grossPay + cppEmployer + eiEmployer + wsib + vacationPay) * 100) / 100;
+    const computed = this.calculatePayrollFields(
+      regularHours,
+      overtimeHours,
+      dto.ratePerHour,
+      {
+        cppEmployeeRate,
+        eiEmployeeRate,
+        federalTaxRate,
+        provincialTaxRate,
+        cppEmployerRate,
+        eiEmployerRate,
+        wsibRate,
+        vacationPayRate,
+      },
+    );
 
     return this.prisma.payroll.create({
       data: {
@@ -123,10 +163,10 @@ export class PayrollService {
         regularHours,
         overtimeHours,
         ratePerHour: dto.ratePerHour,
-        grossPay,
-        deductions,
-        netPay,
-        employerCost,
+        grossPay: computed.grossPay,
+        deductions: computed.deductions,
+        netPay: computed.netPay,
+        employerCost: computed.employerCost,
         status: 'draft',
       },
       include: {
@@ -194,6 +234,8 @@ export class PayrollService {
     );
     const totalPay = payrolls.reduce((s, p) => s + p.grossPay, 0);
     const pending = payrolls.filter((p) => p.status === 'draft').length;
+    const processing = payrolls.filter((p) => p.status === 'approved').length;
+    const paid = payrolls.filter((p) => p.status === 'paid').length;
 
     const inventoryAlerts = await this.prisma.inventoryItem.count({
       where: {
@@ -207,6 +249,8 @@ export class PayrollService {
         totalHours,
         totalPay,
         pending,
+        processing,
+        paid,
         inventoryAlerts,
       },
       workers: payrolls.map((p) => ({
@@ -220,6 +264,76 @@ export class PayrollService {
         status: p.status,
       })),
     };
+  }
+
+  // ─── Update Payroll Draft ────────────────────────────────────────────────
+  async updatePayroll(
+    payrollId: string,
+    adminId: string,
+    userRole: string,
+    dto: UpdatePayrollDto,
+  ) {
+    const payroll = await this.prisma.payroll.findUnique({
+      where: { id: payrollId },
+    });
+    if (!payroll) throw new NotFoundException('Payroll not found');
+    if (payroll.status === 'paid') {
+      throw new BadRequestException('Paid payroll cannot be edited');
+    }
+
+    const config = await this.prisma.payrollConfig.findUnique({
+      where: { companyId: payroll.companyId },
+    });
+
+    const updatedRegularHours = dto.regularHours ?? payroll.regularHours;
+    const updatedOvertimeHours = dto.overtimeHours ?? payroll.overtimeHours;
+    const updatedRatePerHour = dto.ratePerHour ?? payroll.ratePerHour;
+
+    const computed = this.calculatePayrollFields(
+      updatedRegularHours,
+      updatedOvertimeHours,
+      updatedRatePerHour,
+      {
+        cppEmployeeRate: config?.cppEmployeeRate ?? 0.0595,
+        eiEmployeeRate: config?.eiEmployeeRate ?? 0.0166,
+        federalTaxRate: config?.federalTaxRate ?? 0.15,
+        provincialTaxRate: config?.provincialTaxRate ?? 0.0505,
+        cppEmployerRate: config?.cppEmployerRate ?? 0.0595,
+        eiEmployerRate: config?.eiEmployerRate ?? 0.0232,
+        wsibRate: config?.wsibRate ?? 0.0142,
+        vacationPayRate: config?.vacationPayRate ?? 0.04,
+      },
+      dto.deductions,
+    );
+
+    return this.prisma.payroll.update({
+      where: { id: payrollId },
+      data: {
+        regularHours: updatedRegularHours,
+        overtimeHours: updatedOvertimeHours,
+        ratePerHour: updatedRatePerHour,
+        grossPay: computed.grossPay,
+        deductions: computed.deductions,
+        netPay: computed.netPay,
+        employerCost: computed.employerCost,
+      },
+      include: {
+        worker: {
+          select: {
+            id: true,
+            fullName: true,
+            avatarUrl: true,
+            department: true,
+          },
+        },
+        project: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
   }
 
   // ─── Pay Stub ─────────────────────────────────────────────────────────────
@@ -250,18 +364,6 @@ export class PayrollService {
       throw new ForbiddenException('Access denied');
     }
 
-    const regularPay = payroll.regularHours * payroll.ratePerHour;
-    const overtimePay = payroll.overtimeHours * payroll.ratePerHour * 1.5;
-    const siteAllowance = 250;
-    const grossPay = regularPay + overtimePay + siteAllowance;
-
-    const federalTax = Math.round(grossPay * 0.15 * 100) / 100;
-    const stateTax = Math.round(grossPay * 0.0505 * 100) / 100;
-    const socialSec = Math.round(grossPay * 0.062 * 100) / 100;
-    const medicare = Math.round(grossPay * 0.0145 * 100) / 100;
-    const totalDeductions = federalTax + stateTax + socialSec + medicare;
-    const netPay = Math.round((grossPay - totalDeductions) * 100) / 100;
-
     return {
       payrollId: payroll.id,
       worker: payroll.worker,
@@ -272,20 +374,15 @@ export class PayrollService {
       },
       earnings: {
         regularHours: payroll.regularHours,
-        regularPay,
+        regularPay: Math.round((payroll.regularHours * payroll.ratePerHour) * 100) / 100,
         overtimeHours: payroll.overtimeHours,
-        overtimePay,
-        siteAllowance,
-        grossPay,
+        overtimePay: Math.round((payroll.overtimeHours * payroll.ratePerHour * 1.5) * 100) / 100,
+        grossPay: payroll.grossPay,
       },
       deductions: {
-        federalTax,
-        stateTax,
-        socialSecurity: socialSec,
-        medicare,
-        totalDeductions: Math.round(totalDeductions * 100) / 100,
+        totalDeductions: payroll.deductions,
       },
-      netPay,
+      netPay: payroll.netPay,
       status: payroll.status,
     };
   }
@@ -330,7 +427,51 @@ export class PayrollService {
     });
   }
 
-  // ─── Process Payroll — Stripe Transfer ───────────────────────────────────
+  // ─── Mark Payroll as Paid ────────────────────────────────────────────────
+  async markPayrollPaid(
+    payrollId: string,
+    adminId: string,
+    userRole: string,
+    note?: string,
+  ) {
+    const payroll = await this.prisma.payroll.findUnique({
+      where: { id: payrollId },
+    });
+    if (!payroll) throw new NotFoundException('Payroll not found');
+    if (payroll.status === 'paid') {
+      throw new BadRequestException('Payroll is already marked as paid');
+    }
+    if (payroll.status !== 'approved') {
+      throw new BadRequestException('Only approved payrolls can be marked as paid');
+    }
+
+    return this.prisma.payroll.update({
+      where: { id: payrollId },
+      data: {
+        status: 'paid',
+        processedBy: adminId,
+        processedAt: new Date(),
+      },
+      include: {
+        worker: {
+          select: {
+            id: true,
+            fullName: true,
+            avatarUrl: true,
+            department: true,
+          },
+        },
+        project: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+  }
+
+  // ─── Payroll Processing Summary ──────────────────────────────────────────
   async processPayroll(
     adminId: string,
     userRole: string,
@@ -383,7 +524,7 @@ export class PayrollService {
       grossPay: number;
       deductions: number;
       netPay: number;
-      status: 'calculated';
+      status: 'processing';
     }> = [];
 
     for (const payroll of payrolls) {
@@ -396,7 +537,7 @@ export class PayrollService {
         grossPay: payroll.grossPay,
         deductions: payroll.deductions,
         netPay: payroll.netPay,
-        status: 'calculated',
+        status: 'processing',
       });
     }
 
@@ -405,7 +546,7 @@ export class PayrollService {
     const totalNetPay = results.reduce((sum, item) => sum + item.netPay, 0);
 
     return {
-      message: `Payroll calculated for ${results.length} record(s)`,
+      message: `Payroll processing started for ${results.length} record(s)`,
       summary: {
         totalPayrolls: results.length,
         totalGrossPay: Math.round(totalGrossPay * 100) / 100,
