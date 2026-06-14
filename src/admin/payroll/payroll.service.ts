@@ -35,9 +35,9 @@ export class PayrollService {
   }
 
   /**
-   * Selected date-এর attendance sessions থেকে total worked hours বের করো।
-   * প্রতিটা checkIn-checkOut pair এর duration যোগ করে।
-   * চলমান (checkOut নেই) session বাদ দেওয়া হবে।
+   * Selected date-এর attendance sessions থেকে zone-এর ভেতরের total worked hours বের করো।
+   * প্রতিটা session-এর zoneSeconds যোগ করা হয়, raw checkIn-checkOut duration নয়।
+   * চলমান (checkOut নেই) session-ও তার zoneSeconds অনুযায়ী count হবে।
    */
   private async getWorkedHoursForDate(
     workerId: string,
@@ -78,7 +78,7 @@ export class PayrollService {
       };
     }
 
-    let totalMinutes = 0;
+    let totalZoneSeconds = 0;
     const sessionDetails: Array<{
       checkInTime: Date;
       checkOutTime: Date | null;
@@ -86,31 +86,20 @@ export class PayrollService {
     }> = [];
 
     for (const session of attendance.sessions) {
-      if (!session.checkOutTime) {
-        // চলমান session — বাদ দাও
-        sessionDetails.push({
-          checkInTime: session.checkInTime,
-          checkOutTime: null,
-          durationMinutes: 0,
-        });
-        continue;
-      }
-
-      const diffMs =
-        session.checkOutTime.getTime() - session.checkInTime.getTime();
-      const diffMinutes = Math.floor(diffMs / (1000 * 60));
-      totalMinutes += diffMinutes;
+      const zoneSeconds = session.zoneSeconds ?? 0;
+      totalZoneSeconds += zoneSeconds;
 
       sessionDetails.push({
         checkInTime: session.checkInTime,
         checkOutTime: session.checkOutTime,
-        durationMinutes: diffMinutes,
+        durationMinutes: Math.floor(zoneSeconds / 60),
       });
     }
 
+    const totalMinutes = Math.floor(totalZoneSeconds / 60);
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
-    const totalHours = Math.round((totalMinutes / 60) * 100) / 100;
+    const totalHours = Math.round((totalZoneSeconds / 3600) * 100) / 100;
 
     return {
       totalHours,

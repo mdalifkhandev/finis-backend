@@ -177,6 +177,20 @@ export class WorkerController {
     );
   }
 
+  // PAYROLL
+
+  /**
+   * GET /worker/payroll?date=2026-06-13
+   * Selected date er payroll summary + project breakdown + transactions
+   */
+  @Get('payroll')
+  getMyPayroll(
+    @CurrentUser('id') workerId: string,
+    @Query('date') date?: string,
+  ) {
+    return this.workerService.getMyPayroll(workerId, date);
+  }
+
   // ATTENDANCE
 
   /**

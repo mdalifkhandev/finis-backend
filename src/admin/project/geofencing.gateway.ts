@@ -16,10 +16,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 /**
  * Worker Status:
  * - 'inside'  → zone এর ভেতরে আছে (GREEN)
- * - 'site'    → site এ আছে কিন্তু zone এর বাইরে (YELLOW)
- * - 'outside' → সম্পূর্ণ বাইরে বা offline (RED)
+ * - 'outside' → zone এর বাইরে আছে বা tracking paused (RED)
  */
-type WorkerStatus = 'inside' | 'site' | 'outside';
+type WorkerStatus = 'inside' | 'outside';
 
 interface WorkerState {
   userId: string;
@@ -176,12 +175,31 @@ export class GeofencingGateway
       // Admin/Super Admin
       if (user.role === 'admin' || user.role === 'super_admin') {
         client.join(`admin_${user.id}`);
+
+        if (user.role === 'super_admin') {
+          const projects = await this.prisma.project.findMany({
+            select: { id: true },
+          });
+
+          for (const project of projects) {
+            client.join(`project_${project.id}`);
+          }
+
+          console.log(
+            `✅ Super Admin joined ${projects.length} project rooms: ${user.fullName}`,
+          );
+        }
+
         client.emit('connected', {
           message: 'Connected successfully',
           userId: user.id,
           role: user.role,
         });
-        console.log(`✅ Admin Connected: ${user.fullName}`);
+        console.log(
+          user.role === 'super_admin'
+            ? `✅ Super Admin Connected: ${user.fullName}`
+            : `✅ Admin Connected: ${user.fullName}`,
+        );
         return;
       }
 
@@ -353,7 +371,7 @@ export class GeofencingGateway
         state.totalZoneSeconds = existingOpenSession.zoneSeconds ?? 0;
         state.isInsideZone = isInsideZone.inside;
         state.zoneName = isInsideZone.zoneName;
-        state.status = isInsideZone.inside ? 'inside' : 'site';
+        state.status = isInsideZone.inside ? 'inside' : 'outside';
         state.zoneEnteredAt = isInsideZone.inside ? new Date() : null;
         state.lastLat = null;
         state.lastLng = null;
@@ -364,7 +382,7 @@ export class GeofencingGateway
         message: '✅ Resumed existing session',
         sessionId: existingOpenSession.id,
         isInsideZone: isInsideZone.inside,
-        status: isInsideZone.inside ? 'inside' : 'site',
+        status: isInsideZone.inside ? 'inside' : 'outside',
         zoneName: isInsideZone.zoneName,
         checkInTime: existingOpenSession.checkInTime,
       });
@@ -394,7 +412,7 @@ export class GeofencingGateway
       state.totalZoneSeconds = 0;
       state.isInsideZone = isInsideZone.inside;
       state.zoneName = isInsideZone.zoneName;
-      state.status = isInsideZone.inside ? 'inside' : 'site';
+      state.status = isInsideZone.inside ? 'inside' : 'outside';
       state.zoneEnteredAt = isInsideZone.inside ? new Date() : null;
       state.hasActiveViolation = false;
       state.lastLat = null;
@@ -406,7 +424,7 @@ export class GeofencingGateway
       worker: { id: user.id, fullName: user.fullName, avatarUrl: user.avatarUrl },
       isInsideZone: isInsideZone.inside,
       zoneName: isInsideZone.zoneName,
-      status: isInsideZone.inside ? 'inside' : 'site',
+      status: isInsideZone.inside ? 'inside' : 'outside',
       checkInTime: session.checkInTime,
       lat,
       lng,
@@ -537,7 +555,7 @@ export class GeofencingGateway
 
     // ─── Zone Enter ────────────────────────────────────────────────────────
     if (isInsideAny && !wasInsideZone) {
-      // Zone এ ঢুকেছে
+      // Zone এ ঢুকলে timer আবার start/resume হবে
       state.zoneEnteredAt = now;
       state.isInsideZone = true;
       state.zoneName = zoneResult.zoneName;
@@ -559,7 +577,7 @@ export class GeofencingGateway
 
     // ─── Zone Exit ─────────────────────────────────────────────────────────
     else if (!isInsideAny && wasInsideZone) {
-      // Zone এ থাকার সময় count করো — বাইরে গেলে time stop
+      // Zone ছেড়ে গেলে timer pause হবে, কিন্তু session open থাকবে
       if (state.zoneEnteredAt) {
         state.totalZoneSeconds += Math.floor(
           (now.getTime() - state.zoneEnteredAt.getTime()) / 1000,
@@ -569,7 +587,7 @@ export class GeofencingGateway
 
       state.isInsideZone = false;
       state.zoneName = null;
-      state.status = 'site';
+      state.status = 'outside';
 
       // exit log
       const nearestZone = await this.getNearestZone(lat, lng, projectId);
@@ -602,7 +620,7 @@ export class GeofencingGateway
         });
       }
 
-      // Session এ current zone seconds save করো
+      // Paused state persist করো, যাতে re-enter করলে এখান থেকে continue করা যায়
       if (state.sessionId) {
         await this.prisma.attendanceSession.update({
           where: { id: state.sessionId },
@@ -637,11 +655,7 @@ export class GeofencingGateway
     }
 
     // Status determine
-    const workerStatus: WorkerStatus = isInsideAny
-      ? 'inside'
-      : state.trackingActive
-      ? 'site'
-      : 'outside';
+    const workerStatus: WorkerStatus = isInsideAny ? 'inside' : 'outside';
 
     state.status = workerStatus;
 
@@ -841,6 +855,10 @@ export class GeofencingGateway
     return { inside: false, zone: null, zoneName: null };
   }
 
+  async resolveZoneStatus(lat: number, lng: number, projectId: string) {
+    return this.checkInsideZone(lat, lng, projectId);
+  }
+
   /**
    * নিকটতম zone খুঁজো (violation এর জন্য)
    */
@@ -932,6 +950,60 @@ export class GeofencingGateway
       const center = coords.length > 0 ? polygonCenter(coords) : null;
       return { ...geo, center };
     });
+  }
+
+  upsertWorkerState(data: {
+    userId: string;
+    fullName: string;
+    avatarUrl: string | null;
+    projectId: string;
+    lat: number;
+    lng: number;
+    isInsideZone: boolean;
+    zoneName: string | null;
+    status: WorkerStatus;
+    trackingActive?: boolean;
+  }) {
+    const existing = this.workerStates.get(data.userId);
+    const now = new Date();
+
+    if (existing) {
+      existing.fullName = data.fullName;
+      existing.avatarUrl = data.avatarUrl;
+      existing.projectId = data.projectId;
+      existing.lat = data.lat;
+      existing.lng = data.lng;
+      existing.timestamp = now;
+      existing.isInsideZone = data.isInsideZone;
+      existing.zoneName = data.zoneName;
+      existing.status = data.status;
+      existing.trackingActive = data.trackingActive ?? existing.trackingActive;
+      return { state: existing, changed: true };
+    }
+
+    const state: WorkerState = {
+      userId: data.userId,
+      fullName: data.fullName,
+      avatarUrl: data.avatarUrl,
+      projectId: data.projectId,
+      lat: data.lat,
+      lng: data.lng,
+      timestamp: now,
+      isInsideZone: data.isInsideZone,
+      zoneName: data.zoneName,
+      status: data.status,
+      zoneEnteredAt: data.isInsideZone ? now : null,
+      totalZoneSeconds: 0,
+      sessionId: null,
+      trackingActive: data.trackingActive ?? true,
+      hasActiveViolation: false,
+      lastLat: null,
+      lastLng: null,
+      lastInsideZone: null,
+    };
+
+    this.workerStates.set(data.userId, state);
+    return { state, changed: true };
   }
 
   emitWorkerLocation(projectId: string, payload: any) {

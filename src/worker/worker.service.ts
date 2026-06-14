@@ -28,6 +28,13 @@ export class WorkerService {
     private readonly geofencingGateway: GeofencingGateway,
   ) { }
 
+  private formatHoursAndMinutes(hours: number) {
+    const totalMinutes = Math.round(hours * 60);
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return `${h}h ${m}m`;
+  }
+
   private isWorkerAssigned(task: { assignedTo?: string | null; taskAssignees?: { userId: string }[] }, workerId: string) {
     return task.assignedTo === workerId || (task.taskAssignees?.some((assignment) => assignment.userId === workerId) ?? false);
   }
@@ -585,7 +592,12 @@ export class WorkerService {
       select: { projectId: true },
     });
 
-    memberships.forEach(({ projectId }) => {
+    await Promise.all(memberships.map(async ({ projectId }) => {
+      const zoneResult =
+        dto.lat != null && dto.lng != null
+          ? await this.geofencingGateway.resolveZoneStatus(dto.lat, dto.lng, projectId)
+          : { inside: false, zoneName: null };
+
       const stateResult = this.geofencingGateway.upsertWorkerState({
         userId: workerId,
         fullName: worker?.fullName ?? 'Worker',
@@ -593,9 +605,9 @@ export class WorkerService {
         projectId,
         lat: dto.lat ?? 0,
         lng: dto.lng ?? 0,
-        isInsideZone: false,
-        zoneName: null,
-        status: 'site',
+        isInsideZone: zoneResult.inside,
+        zoneName: zoneResult.zoneName,
+        status: zoneResult.inside ? 'inside' : 'outside',
         trackingActive: true,
       });
 
@@ -607,13 +619,13 @@ export class WorkerService {
         avatarUrl: worker?.avatarUrl ?? null,
         lat: dto.lat ?? 0,
         lng: dto.lng ?? 0,
-        isInsideZone: false,
-        zoneName: null,
-        status: 'site',
+        isInsideZone: zoneResult.inside,
+        zoneName: zoneResult.zoneName,
+        status: zoneResult.inside ? 'inside' : 'outside',
         trackingActive: true,
         timestamp: new Date(),
       });
-    });
+    }));
 
     return {
       message: 'Checked in successfully',
@@ -650,8 +662,8 @@ export class WorkerService {
     }
 
     const now = new Date();
-    const hoursWorked =
-      (now.getTime() - openSession.checkInTime.getTime()) / (1000 * 60 * 60);
+    const sessionZoneSeconds = openSession.zoneSeconds ?? 0;
+    const hoursWorked = sessionZoneSeconds / 3600;
 
     // Session close করো
     const updatedSession = await this.prisma.attendanceSession.update({
@@ -664,12 +676,15 @@ export class WorkerService {
       },
     });
 
-    // Attendance-এ totalHours recalculate করো
+    // update এর পরে fetch করো — না হলে পুরনো hoursWorked যোগ হবে
     const allSessions = await this.prisma.attendanceSession.findMany({
       where: { attendanceId: attendance.id },
     });
 
-    const totalHours = allSessions.reduce((sum, s) => sum + (s.hoursWorked ?? 0), 0);
+    // শুধু closed session এর zone time যোগ করো
+    const totalHours = allSessions
+      .filter((s) => s.checkOutTime !== null)
+      .reduce((sum, s) => sum + ((s.zoneSeconds ?? 0) / 3600), 0);
 
     await this.prisma.attendance.update({
       where: { id: attendance.id },
@@ -1074,6 +1089,96 @@ export class WorkerService {
       data: { isRead: true },
     });
     return { message: 'All notifications marked as read' };
+  }
+
+  // ─────────────────────────────────────────────
+  // PAYROLL
+  // ─────────────────────────────────────────────
+
+  async getMyPayroll(workerId: string, date?: string) {
+    // selected date er start & end
+    const selected = date ? new Date(date) : new Date();
+    selected.setHours(0, 0, 0, 0);
+    const selectedEnd = new Date(selected);
+    selectedEnd.setHours(23, 59, 59, 999);
+
+    const [payrolls, attendanceRecord] = await Promise.all([
+      // sei diner moddhe payPeriodStart theke payPeriodEnd er moddhe pore emon payroll
+      this.prisma.payroll.findMany({
+        where: {
+          workerId,
+          payPeriodStart: { lte: selectedEnd },
+          payPeriodEnd: { gte: selected },
+        },
+        include: {
+          company: { select: { id: true, name: true, logoUrl: true } },
+          project: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      // sei diner attendance (total hours)
+      this.prisma.attendance.findUnique({
+        where: { userId_date: { userId: workerId, date: selected } },
+        include: {
+          sessions: { orderBy: { checkInTime: 'asc' } },
+        },
+      }),
+    ]);
+
+    // admin side er motoi — sessions theke manually calculate koro
+    // attendance.totalHours e open session er time count hoy na
+    const sessions = attendanceRecord?.sessions ?? [];
+    // Only zone time counts here. Check-in / check-out duration must not affect payroll.
+    const totalZoneHours = sessions.reduce(
+      (sum, s) => sum + (s.zoneSeconds ?? 0) / 3600,
+      0,
+    );
+    const totalGrossPay = payrolls.reduce((sum, p) => sum + p.grossPay, 0);
+    const totalDeductions = payrolls.reduce((sum, p) => sum + p.deductions, 0);
+    const totalNetPay = payrolls.reduce((sum, p) => sum + p.netPay, 0);
+
+    // per project breakdown
+    const projectBreakdown = payrolls
+      .filter((p) => p.project)
+      .map((p) => ({
+        projectId: p.project!.id,
+        projectName: p.project!.name,
+        grossPay: Math.round(p.grossPay * 100) / 100,
+        netPay: Math.round(p.netPay * 100) / 100,
+        regularHours: p.regularHours,
+        overtimeHours: p.overtimeHours,
+        status: p.status,
+      }));
+
+    const transactions = payrolls.map((p) => ({
+      id: p.id,
+      title: p.project?.name ?? p.company.name,
+      company: p.company,
+      project: p.project ?? null,
+      paidAt: p.processedAt ?? p.createdAt,
+      amount: Math.round(p.netPay * 100) / 100,
+      status: p.status,
+      regularHours: p.regularHours,
+      overtimeHours: p.overtimeHours,
+      ratePerHour: p.ratePerHour,
+      grossPay: Math.round(p.grossPay * 100) / 100,
+      deductions: Math.round(p.deductions * 100) / 100,
+      netPay: Math.round(p.netPay * 100) / 100,
+    }));
+
+    return {
+      date: selected,
+      summary: {
+        totalHours: this.formatHoursAndMinutes(totalZoneHours),
+        totalZoneHours: this.formatHoursAndMinutes(totalZoneHours),
+        totalGrossPay: Math.round(totalGrossPay * 100) / 100,
+        totalDeductions: Math.round(totalDeductions * 100) / 100,
+        totalNetPay: Math.round(totalNetPay * 100) / 100,
+        sessionsCount: attendanceRecord?.sessions?.length ?? 0,
+      },
+      projectBreakdown,
+      transactions,
+    };
   }
 
   // ─────────────────────────────────────────────
