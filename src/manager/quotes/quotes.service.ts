@@ -28,7 +28,6 @@ export class QuotesService {
         },
       },
       include: {
-        project: { select: { id: true, name: true, companyId: true } },
         createdBy: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
       },
     });
@@ -42,7 +41,6 @@ export class QuotesService {
         ...(filters?.unitType && { unitType: filters.unitType }),
       },
       include: {
-        project: { select: { id: true, name: true, companyId: true } },
         createdBy: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -59,7 +57,6 @@ export class QuotesService {
     const quote = await this.prisma.quote.findUnique({
       where: { id },
       include: {
-        project: true,
         createdBy: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
       },
     });
@@ -91,7 +88,6 @@ export class QuotesService {
         isCustom: dto.isCustom ?? quote.isCustom,
       },
       include: {
-        project: { select: { id: true, name: true, companyId: true } },
         createdBy: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
       },
     });
