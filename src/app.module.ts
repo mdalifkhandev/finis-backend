@@ -11,6 +11,7 @@ import { MulterModule } from '@nestjs/platform-express';
 import { SuperAdminModule } from './super-admin/super-admin.module';
 import { PublicUserModule } from './public-user/public-user.module';
 import { ManagerModule } from './manager/manager.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { ManagerModule } from './manager/manager.module';
     SuperAdminModule,
     PublicUserModule,
     ManagerModule,
+    NotificationsModule,
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET || 'secret',

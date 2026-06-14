@@ -8,6 +8,7 @@ import {
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeofencingGateway } from '../admin/project/geofencing.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
 import type { File as MulterFile } from 'multer';
 import {
   SubmitTaskReportDto,
@@ -26,6 +27,7 @@ export class WorkerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly geofencingGateway: GeofencingGateway,
+    private readonly notificationsService: NotificationsService,
   ) { }
 
   private formatHoursAndMinutes(hours: number) {
@@ -355,6 +357,22 @@ export class WorkerService {
         reviewDecision: 'pending',
       },
     });
+
+    const taskWithProject = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: { project: { include: { company: true } } },
+    });
+
+    if (taskWithProject?.project?.company?.ownerId) {
+      await this.notificationsService.send({
+        userId: taskWithProject.project.company.ownerId,
+        title: 'New Task Report Submitted',
+        body: `A worker submitted a report for task: ${taskWithProject.title}`,
+        type: 'report',
+        refId: taskId,
+        refType: 'task',
+      });
+    }
 
     // Task status → in_progress এ রাখো
     await this.prisma.task.update({
@@ -807,7 +825,7 @@ export class WorkerService {
     if (conflict)
       throw new ConflictException('You already have a pending leave request for this period');
 
-    return this.prisma.leaveRequest.create({
+    const leaveRequest = await this.prisma.leaveRequest.create({
       data: {
         userId: workerId,
         leaveType: dto.leaveType,
@@ -817,6 +835,23 @@ export class WorkerService {
         status: 'pending',
       },
     });
+
+    const managerMap = await this.prisma.workerManagerMap.findUnique({
+      where: { workerId },
+      include: { manager: { select: { id: true } } },
+    });
+    if (managerMap?.manager?.id) {
+      await this.notificationsService.send({
+        userId: managerMap.manager.id,
+        title: 'New Leave Request',
+        body: `A worker has submitted a leave request.`,
+        type: 'attendance',
+        refId: leaveRequest.id,
+        refType: 'leave_request',
+      });
+    }
+
+    return leaveRequest;
   }
 
   async getMyLeaveRequests(workerId: string) {

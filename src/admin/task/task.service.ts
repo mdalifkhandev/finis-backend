@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 import {
   CreateTaskDto,
   UpdateTaskDto,
@@ -16,7 +17,10 @@ import { UserRole } from '../../generated/prisma/client';
 
 @Injectable()
 export class TaskService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    private notificationsService: NotificationsService,
+  ) { }
 
   private toTaskResponse(task: any) {
     const assignees = task.taskAssignees?.map((assignment: any) => assignment.user) ?? [];
@@ -380,6 +384,18 @@ export class TaskService {
 
     if (!updated) throw new NotFoundException('Task not found');
 
+    // Notify each assigned worker
+    for (const workerId of newAssigneeIds) {
+      await this.notificationsService.send({
+        userId: workerId,
+        title: 'New Task Assigned',
+        body: `You have been assigned to task: ${task.title}`,
+        type: 'task',
+        refId: taskId,
+        refType: 'task',
+      });
+    }
+
     return this.toTaskResponse(updated);
   }
 
@@ -400,6 +416,16 @@ export class TaskService {
         reviewedBy: userId,
         reviewedAt: new Date(),
       },
+    });
+
+    // Notify worker about review result
+    await this.notificationsService.send({
+      userId: report.workerId,
+      title: dto.reviewDecision === 'approved' ? 'Task Report Approved ✓' : 'Task Report Rejected',
+      body: dto.reviewDescription ?? (dto.reviewDecision === 'approved' ? 'Your task report has been approved.' : 'Your task report was rejected.'),
+      type: 'report',
+      refId: reportId,
+      refType: 'task_report',
     });
 
     if (dto.reviewDecision === 'approved') {

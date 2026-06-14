@@ -85,6 +85,7 @@ model User {
   locationLogs            LocationLog[]
   sentMessages            Message[]                @relation("MessageSender")
   notifications           Notification[]
+  deviceTokens            DeviceToken[]
   payrolls                Payroll[]
   quotesCreated           Quote[]
   inventoryUsageLogs      InventoryUsageLog[]
@@ -732,6 +733,17 @@ model Notification {
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("notifications")
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  token     String   @unique
+  platform  String?
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("device_tokens")
 }
 
 enum UserRole {

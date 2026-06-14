@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -134,6 +135,7 @@ export class GeofencingGateway
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
+    private notificationsService: NotificationsService,
   ) {}
 
   // ─── CONNECTION ─────────────────────────────────────────────────────────────
@@ -617,6 +619,15 @@ export class GeofencingGateway
           geofenceName: nearestZone.zoneName,
           distanceM,
           occurredAt: now,
+        });
+
+        await this.notificationsService.send({
+          userId: user.id,
+          title: '⚠️ Geofence Alert',
+          body: 'You have left the designated work zone.',
+          type: 'geofence',
+          refId: nearestZone.id,
+          refType: 'geofence_violation',
         });
       }
 

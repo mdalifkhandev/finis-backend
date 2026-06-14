@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '../prisma/prisma.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 import { DashboardController } from './dashboard/dashboard.controller';
 import { DashboardService } from './dashboard/dashboard.service';
@@ -26,7 +27,7 @@ import { PayrollController } from './payroll/payroll.controller';
 import { PayrollService } from './payroll/payroll.service';
 
 @Module({
-  imports: [PrismaModule, ConfigModule],
+  imports: [PrismaModule, ConfigModule, NotificationsModule],
   controllers: [
     DashboardController,
     CompanyController,

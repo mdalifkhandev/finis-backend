@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 import { UserRole } from '../../generated/prisma/client';
 import {
   CreatePayrollDto,
@@ -14,7 +15,10 @@ import {
 
 @Injectable()
 export class PayrollService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notificationsService: NotificationsService,
+  ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
   // PRIVATE HELPERS
@@ -682,7 +686,7 @@ export class PayrollService {
       throw new BadRequestException('Only draft payrolls can be approved');
     }
 
-    return this.prisma.payroll.update({
+    const updated = await this.prisma.payroll.update({
       where: { id: payrollId },
       data: {
         status: 'approved',
@@ -703,6 +707,17 @@ export class PayrollService {
         },
       },
     });
+
+    await this.notificationsService.send({
+      userId: payroll.workerId,
+      title: 'Payroll Approved',
+      body: `Your payroll for the period has been approved. Net pay: ${payroll.netPay}`,
+      type: 'payroll',
+      refId: payroll.id,
+      refType: 'payroll',
+    });
+
+    return updated;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -727,7 +742,7 @@ export class PayrollService {
       );
     }
 
-    return this.prisma.payroll.update({
+    const updated = await this.prisma.payroll.update({
       where: { id: payrollId },
       data: {
         status: 'paid',
@@ -748,6 +763,17 @@ export class PayrollService {
         },
       },
     });
+
+    await this.notificationsService.send({
+      userId: payroll.workerId,
+      title: 'Payment Processed 💰',
+      body: `Your payment of ${payroll.netPay} has been processed.`,
+      type: 'payroll',
+      refId: payroll.id,
+      refType: 'payroll',
+    });
+
+    return updated;
   }
 
   // ─────────────────────────────────────────────────────────────────────────

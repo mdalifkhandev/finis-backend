@@ -15,10 +15,14 @@ import {
   CreateGeofenceDto,
 } from './dto/project.dto';
 import { UserStatus, UserRole, ProjectType, FloorStatus, ProjectStatus } from '../../generated/prisma/client';
+import { NotificationsService } from '../../notifications/notifications.service';
 
 @Injectable()
 export class ProjectService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    private notificationsService: NotificationsService,
+  ) { }
 
   private readonly allowedHouseSections = ['basement', 'upstairs', 'main_floor', 'exterior'];
 
@@ -332,6 +336,20 @@ export class ProjectService {
         status: 'planning',
         progress: 0,
       },
+    });
+
+    const company = await this.prisma.company.findUnique({
+      where: { id: dto.companyId },
+      select: { id: true, name: true },
+    });
+
+    await this.notificationsService.send({
+      targetRole: 'super_admin',
+      title: 'New project created',
+      body: `${dto.name} project has been created${company?.name ? ` under ${company.name}` : ''}`,
+      type: 'general',
+      refType: 'project',
+      refId: project.id,
     });
 
     if (dto.autoGenerateFloors && dto.numFloors && dto.roomsPerFloor) {

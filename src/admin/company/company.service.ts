@@ -6,12 +6,17 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 import { CreateCompanyDto, UpdateCompanyDto, CreateContactDto, UpdateContactDto, PaginationQueryDto } from './dto/company.dto';
 import { File as MulterFile } from 'multer';
 
 @Injectable()
 export class CompanyService {
-  constructor(private prisma: PrismaService, private config: ConfigService) { }
+  constructor(
+    private prisma: PrismaService,
+    private config: ConfigService,
+    private notificationsService: NotificationsService,
+  ) { }
 
   private async getAccessibleCompanyIds(userId: string, userRole: string) {
     if (userRole === 'admin') {
@@ -188,7 +193,7 @@ export class CompanyService {
 
     const logoUrl = logoFilename ? `/uploads/logos/${logoFilename}` : undefined;
 
-    return this.prisma.company.create({
+    const company = await this.prisma.company.create({
       data: {
         ownerId: adminId,
         name: dto.name,
@@ -203,6 +208,17 @@ export class CompanyService {
         logoUrl,
       },
     });
+
+    await this.notificationsService.send({
+      targetRole: 'super_admin',
+      title: 'New company created',
+      body: `${dto.name} company has been created`,
+      type: 'general',
+      refType: 'company',
+      refId: company.id,
+    });
+
+    return company;
   }
 
   async updateCompany(companyId: string, dto: UpdateCompanyDto, adminId: string, logoFilename?: string, userRole: string = 'admin') {
