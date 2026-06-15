@@ -36,9 +36,9 @@ export class MessageService {
 
   async getChatContacts(userId: string, userRole: string, search?: string) {
     const roleFilter: Record<string, any> = {
-      admin: { notIn: ['super_admin'] },
-      manager: { in: ['admin', 'worker'] },
-      worker: { equals: 'manager' },
+      admin: { not: 'super_admin' },
+      manager: { not: 'super_admin' },
+      worker: { not: 'super_admin' },
     };
 
     const contacts = await this.prisma.user.findMany({
@@ -764,7 +764,7 @@ export class MessageService {
           title: 'New message',
           body: preview.slice(0, 120),
           type: 'message',
-          refType: 'message/thread',
+          refType: 'message_thread',
           refId: threadId,
         }),
       ),
