@@ -11,6 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { PayrollService } from '../payroll/payroll.service';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -136,6 +137,7 @@ export class GeofencingGateway
     private prisma: PrismaService,
     private jwtService: JwtService,
     private notificationsService: NotificationsService,
+    private payrollService: PayrollService,
   ) {}
 
   // ─── CONNECTION ─────────────────────────────────────────────────────────────
@@ -299,6 +301,11 @@ export class GeofencingGateway
           console.error('Session update on disconnect failed:', e);
         }
       }
+
+      // Auto payroll upsert on disconnect — check-out না করে disconnect হলেও payroll হবে
+      const disconnectDay = new Date();
+      disconnectDay.setHours(0, 0, 0, 0);
+      void this.payrollService.autoUpsertDailyPayroll(user.id, disconnectDay);
 
       // Admin কে জানাও
       this.server.to(`project_${projectId}`).emit('worker_offline', {
@@ -493,6 +500,12 @@ export class GeofencingGateway
 
     // Attendance total hours update
     await this.updateAttendanceTotalHours(state.sessionId);
+
+    // Auto payroll upsert — আজকের সব session মিলিয়ে একটাই draft payroll
+    // প্রতিটা check-out এ call হবে, কিন্তু DB তে ঐ দিনের একটাই record থাকবে
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    void this.payrollService.autoUpsertDailyPayroll(user.id, today);
 
     // State reset — location tracking off
     state.sessionId = null;

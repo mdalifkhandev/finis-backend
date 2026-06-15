@@ -12,6 +12,8 @@ import { SuperAdminModule } from './super-admin/super-admin.module';
 import { PublicUserModule } from './public-user/public-user.module';
 import { ManagerModule } from './manager/manager.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { PublicPlansModule } from './public-plans/public-plans.module';
+import { SubscriptionModule } from './subscription/subscription.module';
 
 @Module({
   imports: [
@@ -24,6 +26,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     PublicUserModule,
     ManagerModule,
     NotificationsModule,
+    PublicPlansModule,
+    SubscriptionModule,
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET || 'secret',

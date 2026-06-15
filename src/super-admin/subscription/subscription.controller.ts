@@ -14,7 +14,6 @@ import { SubscriptionService } from './subscription.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { UserRole } from '../../generated/prisma/client';
 import {
   CreatePlanDto,
@@ -156,25 +155,3 @@ export class SubscriptionController {
   }
 }
 
-// ══════════════════════════════════════════════════════════════
-//  ADMIN SELF-SERVICE ENDPOINT  (admin নিজের plan দেখবে)
-// ══════════════════════════════════════════════════════════════
-
-import { Controller as NestController } from '@nestjs/common';
-
-@NestController('admin/subscription')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.admin)
-export class AdminSubscriptionController {
-  constructor(private subscriptionService: SubscriptionService) {}
-
-  /**
-   * GET /admin/subscription/my-plan
-   * Admin নিজের plan + usage দেখবে
-   * (কতটা company/project/user limit বাকি আছে)
-   */
-  @Get('my-plan')
-  getMyPlan(@CurrentUser('tenantId') tenantId: string) {
-    return this.subscriptionService.getMyPlanUsage(tenantId);
-  }
-}

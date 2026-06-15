@@ -36,10 +36,6 @@ export class CreatePlanDto {
   maxUsers?: number;
 
   @IsOptional()
-  @IsNumber()
-  storageGb?: number;
-
-  @IsOptional()
   @IsBoolean()
   hasGeofencing?: boolean;
 
@@ -86,10 +82,6 @@ export class UpdatePlanDto {
   @IsOptional()
   @IsNumber()
   maxUsers?: number;
-
-  @IsOptional()
-  @IsNumber()
-  storageGb?: number;
 
   @IsOptional()
   @IsBoolean()

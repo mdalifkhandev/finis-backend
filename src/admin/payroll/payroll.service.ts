@@ -133,6 +133,80 @@ export class PayrollService {
     };
   }
 
+  private async getTenantSubscriptionContext(adminId: string) {
+    const admin = await this.prisma.user.findUnique({
+      where: { id: adminId },
+      select: {
+        id: true,
+        tenantId: true,
+        role: true,
+      },
+    });
+
+    if (!admin?.tenantId) {
+      return {
+        tenantId: null,
+        tenantName: null,
+        subscriptionStatus: null,
+        currentPeriodEnd: null,
+        plan: null,
+        isExpired: false,
+      };
+    }
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: admin.tenantId },
+      include: { plan: true },
+    });
+
+    if (!tenant) {
+      return {
+        tenantId: admin.tenantId,
+        tenantName: null,
+        subscriptionStatus: null,
+        currentPeriodEnd: null,
+        plan: null,
+        isExpired: false,
+      };
+    }
+
+    const isExpired = Boolean(
+      tenant.currentPeriodEnd && new Date(tenant.currentPeriodEnd).getTime() < Date.now(),
+    );
+
+    return {
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      subscriptionStatus: tenant.subscriptionStatus ?? null,
+      currentPeriodEnd: tenant.currentPeriodEnd,
+      plan: tenant.plan
+        ? {
+            id: tenant.plan.id,
+            name: tenant.plan.name,
+            priceMonthly: tenant.plan.priceMonthly,
+            priceYearly: tenant.plan.priceYearly,
+            hasGeofencing: tenant.plan.hasGeofencing,
+            hasAdvancedReporting: tenant.plan.hasAdvancedReporting,
+            supportLevel: tenant.plan.supportLevel,
+          }
+        : null,
+      isExpired,
+    };
+  }
+
+  private async assertPayrollSubscriptionActive(adminId: string, userRole: string) {
+    if (userRole === UserRole.super_admin) return this.getTenantSubscriptionContext(adminId);
+
+    const ctx = await this.getTenantSubscriptionContext(adminId);
+    if (!ctx.tenantId) {
+      return ctx;
+    }
+    if (ctx.subscriptionStatus !== 'active' || ctx.isExpired) {
+      throw new ForbiddenException('Active subscription required for payroll');
+    }
+    return ctx;
+  }
+
   private calculatePayrollFields(
     regularHours: number,
     overtimeHours: number,
@@ -187,6 +261,7 @@ export class PayrollService {
   // 1. GET PAYROLL USERS — selected date-এর attendance থেকে hours
   // ─────────────────────────────────────────────────────────────────────────
   async getPayrollUsers(adminId: string, userRole: string, date?: string) {
+    const subscription = await this.assertPayrollSubscriptionActive(adminId, userRole);
     const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
 
     // Selected date অথবা আজকের date
@@ -353,6 +428,7 @@ export class PayrollService {
       date: targetDate,
       totalUsers: filteredUsers.length,
       users: filteredUsers,
+      subscription,
     };
   }
 
@@ -367,6 +443,7 @@ export class PayrollService {
   // 2. CREATE PAYROLL — geofencing attendance থেকে auto hours
   // ─────────────────────────────────────────────────────────────────────────
   async createPayroll(dto: CreatePayrollDto, adminId: string, userRole: string) {
+    await this.assertPayrollSubscriptionActive(adminId, userRole);
     const worker = await this.prisma.user.findUnique({
       where: { id: dto.workerId },
     });
@@ -462,6 +539,7 @@ export class PayrollService {
     year?: string,
     projectId?: string,
   ) {
+    const subscription = await this.assertPayrollSubscriptionActive(adminId, userRole);
     const now = new Date();
     const m = month ? parseInt(month) - 1 : now.getMonth();
     const y = year ? parseInt(year) : now.getFullYear();
@@ -509,6 +587,7 @@ export class PayrollService {
     });
 
     return {
+      subscription,
       summary: {
         totalHours: Math.round(totalHours * 100) / 100,
         totalHoursDisplay: this.formatMinutes(Math.floor(totalHours * 60)),
@@ -546,6 +625,7 @@ export class PayrollService {
     userRole: string,
     dto: UpdatePayrollDto,
   ) {
+    await this.assertPayrollSubscriptionActive(adminId, userRole);
     const payroll = await this.prisma.payroll.findUnique({
       where: { id: payrollId },
     });
@@ -678,6 +758,7 @@ export class PayrollService {
     userRole: string,
     dto: ApprovePayrollDto,
   ) {
+    await this.assertPayrollSubscriptionActive(adminId, userRole);
     const payroll = await this.prisma.payroll.findUnique({
       where: { id: payrollId },
     });
@@ -729,6 +810,7 @@ export class PayrollService {
     userRole: string,
     note?: string,
   ) {
+    await this.assertPayrollSubscriptionActive(adminId, userRole);
     const payroll = await this.prisma.payroll.findUnique({
       where: { id: payrollId },
     });
@@ -786,6 +868,7 @@ export class PayrollService {
     year?: string,
     projectId?: string,
   ) {
+    await this.assertPayrollSubscriptionActive(adminId, userRole);
     const now = new Date();
     const m = month ? parseInt(month) - 1 : now.getMonth();
     const y = year ? parseInt(year) : now.getFullYear();
@@ -844,5 +927,151 @@ export class PayrollService {
       },
       results,
     };
+  }
+
+  async getPayrollSubscriptionStatus(adminId: string, userRole: string) {
+    const subscription = await this.assertPayrollSubscriptionActive(adminId, userRole);
+    return subscription;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // AUTO UPSERT DAILY PAYROLL — check-out এর পরে gateway থেকে call হবে
+  // সারাদিনে যতবার check-out হোক, ঐ দিনের জন্য একটাই draft payroll থাকবে
+  // আগে থাকলে → hours recalculate করে update, না থাকলে → নতুন create
+  // Subscription check নেই — শুধু internal use
+  // ─────────────────────────────────────────────────────────────────────────
+  async autoUpsertDailyPayroll(workerId: string, date: Date): Promise<void> {
+    try {
+      // Worker এবং তার company/project খুঁজে বের করো
+      const worker = await this.prisma.user.findUnique({
+        where: { id: workerId },
+        select: {
+          id: true,
+          hourlyRate: true,
+          role: true,
+          companyMembers: {
+            select: {
+              companyId: true,
+            },
+            take: 1,
+          },
+          projectMemberships: {
+            select: {
+              projectId: true,
+              project: {
+                select: {
+                  id: true,
+                  companyId: true,
+                },
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+      });
+
+      if (!worker || worker.role !== UserRole.worker) return;
+
+      // companyId বের করো — companyMembers থেকে আগে, না পেলে project থেকে
+      const companyId =
+        worker.companyMembers[0]?.companyId ??
+        worker.projectMemberships[0]?.project?.companyId;
+      if (!companyId) return;
+
+      const projectId = worker.projectMemberships[0]?.projectId ?? null;
+
+      // সেই দিনের সব session থেকে মোট zone hours বের করো
+      const workedData = await this.getWorkedHoursForDate(workerId, date);
+
+      // 0 hours হলে payroll তৈরি করব না
+      if (workedData.totalHours <= 0) return;
+
+      // PayrollConfig থেকে rates নাও, না থাকলে default
+      const config = await this.prisma.payrollConfig.findUnique({
+        where: { companyId },
+      });
+
+      const configRates = {
+        cppEmployeeRate: config?.cppEmployeeRate ?? 0.0595,
+        eiEmployeeRate: config?.eiEmployeeRate ?? 0.0166,
+        federalTaxRate: config?.federalTaxRate ?? 0.15,
+        provincialTaxRate: config?.provincialTaxRate ?? 0.0505,
+        cppEmployerRate: config?.cppEmployerRate ?? 0.0595,
+        eiEmployerRate: config?.eiEmployerRate ?? 0.0232,
+        wsibRate: config?.wsibRate ?? 0.0142,
+        vacationPayRate: config?.vacationPayRate ?? 0.04,
+      };
+
+      const ratePerHour = worker.hourlyRate ?? 0;
+
+      const computed = this.calculatePayrollFields(
+        workedData.totalHours,
+        0,
+        ratePerHour,
+        configRates,
+      );
+
+      // সেই দিনের শুরু ও শেষ
+      const dayStart = new Date(date);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(date);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      // এই worker এর এই দিনের জন্য draft payroll আছে কিনা চেক করো
+      const existing = await this.prisma.payroll.findFirst({
+        where: {
+          workerId,
+          companyId,
+          status: 'draft',
+          payPeriodStart: { gte: dayStart, lte: dayEnd },
+        },
+      });
+
+      if (existing) {
+        // আগে আছে → শুধু hours ও calculated fields update করো
+        // Admin যদি manually edit করে approved/paid করে রাখে সেটা touch করব না
+        await this.prisma.payroll.update({
+          where: { id: existing.id },
+          data: {
+            regularHours: workedData.totalHours,
+            overtimeHours: 0,
+            ratePerHour,
+            grossPay: computed.grossPay,
+            deductions: computed.deductions,
+            netPay: computed.netPay,
+            employerCost: computed.employerCost,
+          },
+        });
+        console.log(
+          `📝 Payroll updated: worker=${workerId} hours=${workedData.displayTime}`,
+        );
+      } else {
+        // নতুন draft payroll create করো
+        await this.prisma.payroll.create({
+          data: {
+            companyId,
+            workerId,
+            ...(projectId && { projectId }),
+            payPeriodStart: dayStart,
+            payPeriodEnd: dayEnd,
+            regularHours: workedData.totalHours,
+            overtimeHours: 0,
+            ratePerHour,
+            grossPay: computed.grossPay,
+            deductions: computed.deductions,
+            netPay: computed.netPay,
+            employerCost: computed.employerCost,
+            status: 'draft',
+          },
+        });
+        console.log(
+          `✅ Payroll auto-created: worker=${workerId} hours=${workedData.displayTime}`,
+        );
+      }
+    } catch (e) {
+      // Auto payroll fail হলেও check-out flow থামাবে না
+      console.error('autoUpsertDailyPayroll failed:', e);
+    }
   }
 }

@@ -1,15 +1,31 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsGateway } from './notifications.gateway';
+import {
+  cert,
+  getApps,
+  initializeApp,
+  type ServiceAccount,
+} from 'firebase-admin/app';
+import {
+  getMessaging,
+  type Messaging,
+  type MulticastMessage,
+} from 'firebase-admin/messaging';
 
 type NotificationRole = 'super_admin' | 'admin' | 'manager' | 'worker' | 'viewer';
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+  private readonly messaging: Messaging | null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: NotificationsGateway,
-  ) {}
+  ) {
+    this.messaging = this.initFirebaseMessaging();
+  }
 
   async send(dto: {
     userId?: string;
@@ -47,7 +63,11 @@ export class NotificationsService {
       this.gateway.broadcastAll(notification);
     }
 
-    await this.sendExpoPush(dto.userId, dto.title, dto.body);
+    await this.sendFirebasePush(dto.userId, dto.title, dto.body, {
+      type: dto.type,
+      refId: dto.refId,
+      refType: dto.refType,
+    });
     return notification;
   }
 
@@ -90,84 +110,160 @@ export class NotificationsService {
       this.gateway.sendToRole(role, notification);
     });
 
-    await this.sendExpoPushToRole(role, dto.title, dto.body);
+    await this.sendFirebasePushToRole(role, dto.title, dto.body, {
+      type: dto.type,
+      refId: dto.refId,
+      refType: dto.refType,
+    });
     return notifications;
   }
 
-  private async sendExpoPush(
+  private initFirebaseMessaging(): Messaging | null {
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+
+    if (!projectId || !clientEmail || !privateKey) {
+      this.logger.warn(
+        'Firebase push is disabled. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY.',
+      );
+      return null;
+    }
+
+    if (!getApps().length) {
+      initializeApp({
+        credential: cert({
+          projectId,
+          clientEmail,
+          privateKey,
+        } as ServiceAccount),
+      });
+    }
+
+    return getMessaging();
+  }
+
+  private async sendFirebasePush(
     userId: string | undefined,
     title: string,
     body: string,
+    data?: Record<string, string | undefined>,
   ) {
     try {
-      let tokens: string[] = [];
-
-      if (userId) {
-        const deviceTokens = await this.prisma.deviceToken.findMany({
-          where: { userId },
-          select: { token: true },
-        });
-        tokens = deviceTokens.map((d) => d.token);
-      }
-
-      if (!tokens.length) return;
-
-      const messages = tokens.map((token) => ({
-        to: token,
-        title,
-        body,
-        sound: 'default',
-      }));
-
-      await fetch('https://exp.host/--/api/v2/push/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify(messages),
-      });
-    } catch (error) {
-      console.error('Expo push error:', error);
-    }
-  }
-
-  private async sendExpoPushToRole(
-    role: NotificationRole,
-    title: string,
-    body: string,
-  ) {
-    try {
-      const users = await this.prisma.user.findMany({
-        where: { role },
-        select: { id: true },
-      });
+      if (!this.messaging || !userId) return;
 
       const deviceTokens = await this.prisma.deviceToken.findMany({
-        where: { userId: { in: users.map((u) => u.id) } },
+        where: { userId },
         select: { token: true },
       });
 
       const tokens = deviceTokens.map((d) => d.token);
       if (!tokens.length) return;
 
-      const messages = tokens.map((token) => ({
-        to: token,
-        title,
-        body,
-        sound: 'default',
-      }));
-
-      await fetch('https://exp.host/--/api/v2/push/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
+      const message: MulticastMessage = {
+        tokens,
+        notification: { title, body },
+        data: Object.fromEntries(
+          Object.entries({
+            type: data?.type,
+            refId: data?.refId,
+            refType: data?.refType,
+          }).filter(([, value]) => value !== undefined) as Array<[string, string]>,
+        ),
+        android: {
+          priority: 'high',
         },
-        body: JSON.stringify(messages),
+        apns: {
+          payload: {
+            aps: {
+              sound: 'default',
+            },
+          },
+        },
+      };
+
+      const result = await this.messaging.sendEachForMulticast(message);
+
+      const invalidTokens: string[] = [];
+      result.responses.forEach((response, index) => {
+        if (!response.success) {
+          const errorCode = response.error?.code ?? '';
+          if (
+            errorCode.includes('registration-token-not-registered') ||
+            errorCode.includes('invalid-registration-token')
+          ) {
+            invalidTokens.push(tokens[index]);
+          }
+        }
       });
+
+      if (invalidTokens.length) {
+        await this.prisma.deviceToken.deleteMany({
+          where: { token: { in: invalidTokens } },
+        });
+      }
     } catch (error) {
-      console.error('Expo push role error:', error);
+      this.logger.error('Firebase push error', error as Error);
+    }
+  }
+
+  private async sendFirebasePushToRole(
+    role: NotificationRole,
+    title: string,
+    body: string,
+    data?: Record<string, string | undefined>,
+  ) {
+    try {
+      if (!this.messaging) return;
+
+      const tokens = await this.prisma.deviceToken.findMany({
+        where: { user: { role } },
+        select: { token: true },
+      });
+
+      if (!tokens.length) return;
+
+      const tokenList = tokens.map((item) => item.token);
+      const result = await this.messaging.sendEachForMulticast({
+        tokens: tokenList,
+        notification: { title, body },
+        data: Object.fromEntries(
+          Object.entries({
+            type: data?.type,
+            refId: data?.refId,
+            refType: data?.refType,
+          }).filter(([, value]) => value !== undefined) as Array<[string, string]>,
+        ),
+        android: { priority: 'high' },
+        apns: {
+          payload: {
+            aps: {
+              sound: 'default',
+            },
+          },
+        },
+      });
+
+      const invalidTokens: string[] = [];
+      result.responses.forEach((response, index) => {
+        if (!response.success) {
+          const errorCode = response.error?.code ?? '';
+          if (
+            errorCode.includes('registration-token-not-registered') ||
+            errorCode.includes('invalid-registration-token')
+          ) {
+            invalidTokens.push(tokenList[index]);
+          }
+        }
+      });
+
+      if (invalidTokens.length) {
+        await this.prisma.deviceToken.deleteMany({
+          where: { token: { in: invalidTokens } },
+        });
+      }
+    } catch (error) {
+      this.logger.error('Firebase push role error', error as Error);
     }
   }
 

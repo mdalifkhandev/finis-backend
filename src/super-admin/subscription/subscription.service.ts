@@ -15,10 +15,95 @@ import {
   UpdateTenantStatusDto,
 } from './dto/subscription.dto';
 import { UserRole } from '../../generated/prisma/client';
+import Stripe from 'stripe';
 
 @Injectable()
 export class SubscriptionService {
-  constructor(private prisma: PrismaService) {}
+  private readonly stripe: any;
+
+  constructor(private prisma: PrismaService) {
+    this.stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+      apiVersion: '2026-04-22.dahlia' as any,
+    });
+  }
+
+  private async syncStripePrices(plan: {
+    id: string;
+    name: string;
+    priceMonthly: number;
+    priceYearly: number | null;
+    stripeProductId: string | null;
+    stripePriceMonthlyId: string | null;
+    stripePriceYearlyId: string | null;
+  }) {
+    const product =
+      plan.stripeProductId
+        ? await this.stripe.products.retrieve(plan.stripeProductId)
+        : await this.stripe.products.create({
+            name: plan.name,
+            metadata: { planId: plan.id },
+          });
+
+    const resolveRecurringPrice = async (
+      priceId: string | null | undefined,
+      interval: 'month' | 'year',
+      amount: number,
+      label: 'monthly' | 'yearly',
+    ) => {
+      if (priceId) {
+        try {
+          const existing = await this.stripe.prices.retrieve(priceId);
+          if (existing?.recurring?.interval === interval && existing?.active !== false) {
+            return { id: existing.id };
+          }
+        } catch {
+          // recreate below
+        }
+      }
+
+      const created = await this.stripe.prices.create({
+        product: product.id,
+        currency: 'usd',
+        unit_amount: Math.round(Number(amount) * 100),
+        recurring: { interval },
+        metadata: { planId: plan.id, interval: label },
+      });
+
+      return { id: created.id };
+    };
+
+    const monthlyPrice = await resolveRecurringPrice(
+      plan.stripePriceMonthlyId,
+      'month',
+      plan.priceMonthly,
+      'monthly',
+    );
+
+    let yearlyPriceId: string | null = null;
+    if (plan.priceYearly !== null && plan.priceYearly !== undefined) {
+      const yearlyPrice = await resolveRecurringPrice(
+        plan.stripePriceYearlyId,
+        'year',
+        plan.priceYearly,
+        'yearly',
+      );
+      yearlyPriceId = yearlyPrice.id;
+    }
+
+    return {
+      stripeProductId: product.id,
+      stripePriceMonthlyId: monthlyPrice.id,
+      stripePriceYearlyId: yearlyPriceId,
+    };
+  }
+
+  private getBilledAmount(
+    plan: { priceMonthly: number; priceYearly: number | null },
+    interval?: string | null,
+  ) {
+    if (interval === 'yearly') return plan.priceYearly ?? plan.priceMonthly;
+    return plan.priceMonthly;
+  }
 
   // ══════════════════════════════════════════════════════════════
   //  PLAN MANAGEMENT  (super_admin only)
@@ -50,7 +135,6 @@ export class SubscriptionService {
         maxCompanies: p.maxCompanies,
         maxProjects: p.maxProjects,
         maxUsers: p.maxUsers,
-        storageGb: p.storageGb,
         hasGeofencing: p.hasGeofencing,
         hasAdvancedReporting: p.hasAdvancedReporting,
         hasCustomReporting: p.hasCustomReporting,
@@ -80,7 +164,7 @@ export class SubscriptionService {
     });
     if (exists) throw new ConflictException('A plan with this name already exists');
 
-    return this.prisma.subscriptionPlan.create({
+    const plan = await this.prisma.subscriptionPlan.create({
       data: {
         name: dto.name,
         priceMonthly: dto.priceMonthly,
@@ -88,7 +172,6 @@ export class SubscriptionService {
         maxCompanies: dto.maxCompanies,
         maxProjects: dto.maxProjects,
         maxUsers: dto.maxUsers,
-        storageGb: dto.storageGb,
         hasGeofencing: dto.hasGeofencing ?? false,
         hasAdvancedReporting: dto.hasAdvancedReporting ?? false,
         hasCustomReporting: dto.hasCustomReporting ?? false,
@@ -96,6 +179,21 @@ export class SubscriptionService {
         supportLevel: dto.supportLevel,
         isActive: true,
       },
+    });
+
+    const stripeData = await this.syncStripePrices({
+      id: plan.id,
+      name: plan.name,
+      priceMonthly: plan.priceMonthly,
+      priceYearly: plan.priceYearly,
+      stripeProductId: (plan as any).stripeProductId,
+      stripePriceMonthlyId: (plan as any).stripePriceMonthlyId,
+      stripePriceYearlyId: (plan as any).stripePriceYearlyId,
+    });
+
+    return this.prisma.subscriptionPlan.update({
+      where: { id: plan.id },
+      data: stripeData,
     });
   }
 
@@ -116,10 +214,30 @@ export class SubscriptionService {
       if (duplicate) throw new ConflictException('Another plan with this name already exists');
     }
 
-    return this.prisma.subscriptionPlan.update({
+    const updated = await this.prisma.subscriptionPlan.update({
       where: { id: planId },
       data: { ...dto },
     });
+
+    const shouldResync = dto.name !== undefined || dto.priceMonthly !== undefined || dto.priceYearly !== undefined;
+    if (shouldResync) {
+      const stripeData = await this.syncStripePrices({
+        id: updated.id,
+        name: updated.name,
+        priceMonthly: updated.priceMonthly,
+        priceYearly: updated.priceYearly,
+        stripeProductId: (updated as any).stripeProductId,
+        stripePriceMonthlyId: (updated as any).stripePriceMonthlyId,
+        stripePriceYearlyId: (updated as any).stripePriceYearlyId,
+      });
+
+      return this.prisma.subscriptionPlan.update({
+        where: { id: planId },
+        data: stripeData,
+      });
+    }
+
+    return updated;
   }
 
   /** Plan delete — active tenant থাকলে block */
@@ -168,6 +286,7 @@ export class SubscriptionService {
               id: true,
               name: true,
               priceMonthly: true,
+              priceYearly: true,
               hasGeofencing: true,
             },
           },
@@ -185,6 +304,15 @@ export class SubscriptionService {
         billingEmail: t.billingEmail,
         status: t.status,
         trialEndsAt: t.trialEndsAt,
+        subscriptionStatus: t.subscriptionStatus ?? null,
+        currentPeriodStart: t.currentPeriodStart,
+        currentPeriodEnd: t.currentPeriodEnd,
+        planInterval: t.planInterval ?? null,
+        stripeSubscriptionId: t.stripeSubscriptionId ?? null,
+        billedAmount: this.getBilledAmount(
+          { priceMonthly: t.plan.priceMonthly, priceYearly: t.plan.priceYearly ?? null },
+          t.planInterval,
+        ),
         plan: t.plan,
         userCount: t._count.users,
         companyCount: t._count.companies,
@@ -236,6 +364,17 @@ export class SubscriptionService {
 
     return {
       ...tenant,
+      subscription: {
+        subscriptionStatus: tenant.subscriptionStatus ?? null,
+        currentPeriodStart: tenant.currentPeriodStart,
+        currentPeriodEnd: tenant.currentPeriodEnd,
+        planInterval: tenant.planInterval ?? null,
+        stripeSubscriptionId: tenant.stripeSubscriptionId ?? null,
+        billedAmount: this.getBilledAmount(
+          { priceMonthly: tenant.plan.priceMonthly, priceYearly: tenant.plan.priceYearly ?? null },
+          tenant.planInterval,
+        ),
+      },
       usage: {
         companies: { used: companyCount, max: tenant.plan.maxCompanies ?? 'Unlimited' },
         projects: { used: projectCount, max: tenant.plan.maxProjects ?? 'Unlimited' },
@@ -536,10 +675,6 @@ export class SubscriptionService {
           used: tenant._count.users,
           max: tenant.plan.maxUsers ?? null,
           unlimited: tenant.plan.maxUsers === null,
-        },
-        storage: {
-          maxGb: tenant.plan.storageGb ?? null,
-          unlimited: tenant.plan.storageGb === null,
         },
       },
     };

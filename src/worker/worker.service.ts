@@ -50,6 +50,78 @@ export class WorkerService {
     };
   }
 
+  private async syncDailyPayrollDraft(workerId: string, attendanceDate: Date, totalZoneHours: number) {
+    const membership = await this.prisma.projectMember.findFirst({
+      where: { userId: workerId },
+      include: {
+        project: {
+          select: { id: true, name: true, companyId: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!membership?.project?.companyId) {
+      return null;
+    }
+
+    const companyId = membership.project.companyId;
+    const payrollConfig = await this.prisma.payrollConfig.findUnique({
+      where: { companyId },
+    });
+
+    const worker = await this.prisma.user.findUnique({
+      where: { id: workerId },
+      select: { hourlyRate: true },
+    });
+
+    const existingPayroll = await this.prisma.payroll.findFirst({
+      where: {
+        workerId,
+        companyId,
+        projectId: membership.project.id,
+        payPeriodStart: attendanceDate,
+        payPeriodEnd: attendanceDate,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const effectiveRate = existingPayroll?.ratePerHour ?? worker?.hourlyRate ?? 0;
+    const grossPay = Math.round((totalZoneHours * effectiveRate) * 100) / 100;
+    const deductions = existingPayroll?.deductions ?? 0;
+    const netPay = Math.round((grossPay - deductions) * 100) / 100;
+    const employerCost = existingPayroll?.employerCost ?? grossPay;
+
+    const data = {
+      companyId,
+      workerId,
+      projectId: membership.project.id,
+      payPeriodStart: attendanceDate,
+      payPeriodEnd: attendanceDate,
+      regularHours: totalZoneHours,
+      overtimeHours: 0,
+      ratePerHour: effectiveRate,
+      grossPay,
+      deductions,
+      netPay,
+      employerCost,
+      status: 'draft' as const,
+      processedBy: null,
+      processedAt: null,
+    };
+
+    if (existingPayroll) {
+      return this.prisma.payroll.update({
+        where: { id: existingPayroll.id },
+        data,
+      });
+    }
+
+    return this.prisma.payroll.create({
+      data,
+    });
+  }
+
   // ─────────────────────────────────────────────
   // DASHBOARD
   // ─────────────────────────────────────────────
@@ -708,6 +780,8 @@ export class WorkerService {
       where: { id: attendance.id },
       data: { totalHours: Math.round(totalHours * 100) / 100 },
     });
+
+    await this.syncDailyPayrollDraft(workerId, today, Math.round(totalHours * 100) / 100);
 
     // Location log
     if (dto.lat && dto.lng) {

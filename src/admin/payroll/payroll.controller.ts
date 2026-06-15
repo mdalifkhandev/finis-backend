@@ -36,8 +36,18 @@ export class PayrollController {
     @CurrentUser('id') adminId: string,
     @CurrentUser('role') userRole: string,
     @Query('date') date?: string,
-  ) {
+    ) {
     return this.payrollService.getPayrollUsers(adminId, userRole, date);
+  }
+
+  /** GET /admin/payroll/subscription-status */
+  @Get('subscription-status')
+  @Roles(UserRole.admin)
+  getPayrollSubscriptionStatus(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.payrollService.getPayrollSubscriptionStatus(adminId, userRole);
   }
 
   /** POST /admin/payroll */
