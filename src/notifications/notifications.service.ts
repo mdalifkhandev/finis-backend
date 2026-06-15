@@ -14,6 +14,10 @@ import {
 } from 'firebase-admin/messaging';
 
 type NotificationRole = 'super_admin' | 'admin' | 'manager' | 'worker' | 'viewer';
+type PushPayload = Record<string, string | undefined>;
+
+const DEFAULT_ANDROID_CHANNEL_ID = 'default';
+const DEFAULT_NOTIFICATION_SOUND = 'default';
 
 @Injectable()
 export class NotificationsService {
@@ -117,6 +121,28 @@ export class NotificationsService {
     return notifications;
   }
 
+  private buildPushPayload(data?: PushPayload) {
+    return Object.fromEntries(
+      Object.entries({
+        type: data?.type,
+        refId: data?.refId,
+        refType: data?.refType,
+        channelId: DEFAULT_ANDROID_CHANNEL_ID,
+        sound: DEFAULT_NOTIFICATION_SOUND,
+      }).filter(([, value]) => value !== undefined) as Array<[string, string]>,
+    );
+  }
+
+  private buildAndroidNotification() {
+    return {
+      priority: 'high' as const,
+      notification: {
+        channelId: DEFAULT_ANDROID_CHANNEL_ID,
+        sound: DEFAULT_NOTIFICATION_SOUND,
+      },
+    };
+  }
+
   private initFirebaseMessaging(): Messaging | null {
     const projectId = process.env.FIREBASE_PROJECT_ID;
     const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
@@ -162,16 +188,8 @@ export class NotificationsService {
       const message: MulticastMessage = {
         tokens,
         notification: { title, body },
-        data: Object.fromEntries(
-          Object.entries({
-            type: data?.type,
-            refId: data?.refId,
-            refType: data?.refType,
-          }).filter(([, value]) => value !== undefined) as Array<[string, string]>,
-        ),
-        android: {
-          priority: 'high',
-        },
+        data: this.buildPushPayload(data),
+        android: this.buildAndroidNotification(),
         apns: {
           payload: {
             aps: {
@@ -226,14 +244,8 @@ export class NotificationsService {
       const result = await this.messaging.sendEachForMulticast({
         tokens: tokenList,
         notification: { title, body },
-        data: Object.fromEntries(
-          Object.entries({
-            type: data?.type,
-            refId: data?.refId,
-            refType: data?.refType,
-          }).filter(([, value]) => value !== undefined) as Array<[string, string]>,
-        ),
-        android: { priority: 'high' },
+        data: this.buildPushPayload(data),
+        android: this.buildAndroidNotification(),
         apns: {
           payload: {
             aps: {
