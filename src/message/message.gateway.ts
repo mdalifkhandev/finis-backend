@@ -157,6 +157,7 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
           content:   dto.content,
           mediaUrl:  dto.mediaUrl,
           mediaType: dto.mediaType,
+          locationUrl: dto.locationUrl,
         });
       } else {
         // Regular user
@@ -165,6 +166,7 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
           content:   dto.content,
           mediaUrl:  dto.mediaUrl,
           mediaType: dto.mediaType,
+          locationUrl: dto.locationUrl,
         });
       }
 
