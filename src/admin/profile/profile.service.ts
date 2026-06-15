@@ -45,6 +45,7 @@ export class ProfileService {
     userId: string,
     dto: UpdateProfileDto,
     avatarFile?: MulterFile,
+    removeAvatar = false,
   ) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
@@ -57,6 +58,7 @@ export class ProfileService {
         ...(dto.dateOfBirth && { dateOfBirth: new Date(dto.dateOfBirth) }),
         ...(dto.gender && { bio: dto.gender }), // store gender in bio or add field
         ...(avatarFile && { avatarUrl: `/uploads/avatars/${avatarFile.filename}` }),
+        ...(removeAvatar && !avatarFile && { avatarUrl: null }),
       },
       select: {
         id: true,

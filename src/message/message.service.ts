@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { onlineUsers } from './message-presence.store';
 import {
   CreateDirectThreadDto,
@@ -17,7 +18,10 @@ import {
 
 @Injectable()
 export class MessageService {
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) { }
 
   private getPresence(userId: string, lastActiveAt?: Date | null) {
     return {
@@ -659,7 +663,7 @@ export class MessageService {
     }
 
 
-    return this.prisma.message.create({
+    const message = await this.prisma.message.create({
       data: {
         threadId,
         senderId,
@@ -675,6 +679,9 @@ export class MessageService {
         },
       },
     });
+
+    await this.notifyUnreadThreadParticipants(threadId, senderId, message.content ?? 'New message');
+    return message;
   }
 
   // ─────────────────────────────────────────────
@@ -712,7 +719,7 @@ export class MessageService {
     }
 
 
-    return this.prisma.message.create({
+    const message = await this.prisma.message.create({
       data: {
         threadId,
         senderId: adminId,
@@ -727,6 +734,41 @@ export class MessageService {
         },
       },
     });
+
+    await this.notifyUnreadThreadParticipants(threadId, adminId, message.content ?? 'New message');
+    return message;
+  }
+
+  private async notifyUnreadThreadParticipants(threadId: string, senderId: string, preview: string) {
+    const thread = await this.prisma.messageThread.findUnique({
+      where: { id: threadId },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: { id: true, fullName: true, role: true },
+            },
+          },
+        },
+      },
+    });
+
+    const recipients = thread?.participants
+      .map((participant) => participant.user)
+      .filter((user) => user.id !== senderId) ?? [];
+
+    await Promise.all(
+      recipients.map((recipient) =>
+        this.notificationsService.send({
+          userId: recipient.id,
+          title: 'New message',
+          body: preview.slice(0, 120),
+          type: 'message',
+          refType: 'message/thread',
+          refId: threadId,
+        }),
+      ),
+    );
   }
 
   // ─────────────────────────────────────────────

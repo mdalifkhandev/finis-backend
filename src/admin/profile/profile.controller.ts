@@ -42,7 +42,8 @@ export class ProfileController {
     @Body() dto: UpdateProfileDto,
     @UploadedFile() file?: MulterFile,
   ) {
-    return this.profileService.updateProfile(userId, dto, file);
+    const removeAvatar = (dto as UpdateProfileDto & { removeAvatar?: string }).removeAvatar;
+    return this.profileService.updateProfile(userId, dto, file, removeAvatar === 'true');
   }
 
   /** PUT /admin/profile/change-password */
