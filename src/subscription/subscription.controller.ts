@@ -21,6 +21,8 @@ export class SubscriptionController {
   constructor(private readonly subscriptionService: SubscriptionService) {}
 
   @Post('verify-and-checkout')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.admin)
   verifyAndCheckout(@Body() dto: VerifyCheckoutDto) {
     return this.subscriptionService.verifyAndCheckout(dto);
   }

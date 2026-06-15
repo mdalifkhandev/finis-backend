@@ -322,6 +322,102 @@ export class SubscriptionService {
     };
   }
 
+  /** Subscription purchase history — who bought which plan, how much, how long */
+  async getSubscriptionPurchases(page = 1, limit = 20, search?: string) {
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+      OR: [
+        { subscriptionStatus: { not: null } },
+        { stripeSubscriptionId: { not: null } },
+      ],
+    };
+
+    if (search) {
+      where.AND = [
+        {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { billingEmail: { contains: search, mode: 'insensitive' } },
+            { plan: { name: { contains: search, mode: 'insensitive' } } },
+          ],
+        },
+      ];
+    }
+
+    const [tenants, total] = await Promise.all([
+      this.prisma.tenant.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { updatedAt: 'desc' },
+        include: {
+          plan: {
+            select: {
+              id: true,
+              name: true,
+              priceMonthly: true,
+              priceYearly: true,
+              maxCompanies: true,
+              maxProjects: true,
+              maxUsers: true,
+            },
+          },
+          users: {
+            where: { role: UserRole.admin },
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              status: true,
+              createdAt: true,
+            },
+          },
+        },
+      }),
+      this.prisma.tenant.count({ where }),
+    ]);
+
+    return {
+      data: tenants.map((tenant) => {
+        const interval = tenant.planInterval ?? 'monthly';
+        const billedAmount = this.getBilledAmount(
+          { priceMonthly: tenant.plan.priceMonthly, priceYearly: tenant.plan.priceYearly ?? null },
+          interval,
+        );
+        const periodStart = tenant.currentPeriodStart ?? null;
+        const periodEnd = tenant.currentPeriodEnd ?? null;
+        const durationDays = periodStart && periodEnd
+          ? Math.max(1, Math.ceil((periodEnd.getTime() - periodStart.getTime()) / (1000 * 60 * 60 * 24)))
+          : interval === 'yearly'
+            ? 365
+            : 30;
+
+        return {
+          tenant: {
+            id: tenant.id,
+            name: tenant.name,
+            domain: tenant.domain,
+            billingEmail: tenant.billingEmail,
+            status: tenant.status,
+          },
+          adminUsers: tenant.users,
+          plan: tenant.plan,
+          subscription: {
+            subscriptionStatus: tenant.subscriptionStatus ?? null,
+            stripeSubscriptionId: tenant.stripeSubscriptionId ?? null,
+            currentPeriodStart: periodStart,
+            currentPeriodEnd: periodEnd,
+            planInterval: interval,
+            billedAmount,
+            durationDays,
+          },
+        };
+      }),
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
   /** Single tenant detail */
   async getTenantById(tenantId: string) {
     const tenant = await this.prisma.tenant.findUnique({

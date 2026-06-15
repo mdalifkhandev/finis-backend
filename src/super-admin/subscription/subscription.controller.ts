@@ -153,5 +153,22 @@ export class SubscriptionController {
   deleteTenant(@Param('id') id: string) {
     return this.subscriptionService.deleteTenant(id);
   }
+
+  /**
+   * GET /super-admin/subscriptions/purchases
+   * কারা plan কিনেছে, কত টাকার, কত দিনের, pagination সহ
+   */
+  @Get('purchases')
+  getSubscriptionPurchases(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.subscriptionService.getSubscriptionPurchases(
+      page ? parseInt(page) : 1,
+      limit ? parseInt(limit) : 20,
+      search,
+    );
+  }
 }
 
