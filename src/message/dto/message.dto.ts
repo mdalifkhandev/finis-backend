@@ -53,6 +53,10 @@ export class SendMessageDto {
   @IsOptional()
   @IsEnum(MediaType)
   mediaType?: MediaType;
+
+  @IsOptional()
+  @IsString()
+  locationUrl?: string;
 }
 
 export class SocketMessageDto {
@@ -60,6 +64,7 @@ export class SocketMessageDto {
   content?: string;
   mediaUrl?: string;
   mediaType?: MediaType;
+  locationUrl?: string;
 }
 
 // ─────────────────────────────────────────────
@@ -111,4 +116,8 @@ export class AdminSendMessageDto {
   @IsOptional()
   @IsEnum(MediaType)
   mediaType?: MediaType;
+
+  @IsOptional()
+  @IsString()
+  locationUrl?: string;
 }

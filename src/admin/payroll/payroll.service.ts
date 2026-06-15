@@ -452,23 +452,24 @@ export class PayrollService {
       throw new BadRequestException('User is not a worker');
     }
 
-    if (dto.projectId) {
-      const project = await this.prisma.project.findUnique({
-        where: { id: dto.projectId },
-      });
-      if (!project) throw new NotFoundException('Project not found');
+    const project = await this.prisma.project.findUnique({
+      where: { id: dto.projectId },
+      select: { id: true, companyId: true, name: true },
+    });
+    if (!project) throw new NotFoundException('Project not found');
 
-      const isMember = await this.prisma.projectMember.findFirst({
-        where: { projectId: dto.projectId, userId: dto.workerId },
-      });
-      if (!isMember) {
-        throw new BadRequestException('Worker is not a member of this project');
-      }
+    const isMember = await this.prisma.projectMember.findFirst({
+      where: { projectId: dto.projectId, userId: dto.workerId },
+    });
+    if (!isMember) {
+      throw new BadRequestException('Worker is not a member of this project');
     }
+
+    const companyId = project.companyId;
 
     // Config থেকে rates নাও
     const config = await this.prisma.payrollConfig.findUnique({
-      where: { companyId: dto.companyId },
+      where: { companyId },
     });
 
     const configRates = {
@@ -498,9 +499,9 @@ export class PayrollService {
 
     return this.prisma.payroll.create({
       data: {
-        companyId: dto.companyId,
+        companyId,
         workerId: dto.workerId,
-        ...(dto.projectId && { projectId: dto.projectId }),
+        projectId: dto.projectId,
         payPeriodStart: new Date(dto.payPeriodStart),
         payPeriodEnd: new Date(dto.payPeriodEnd),
         regularHours,

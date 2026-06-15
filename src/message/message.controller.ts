@@ -15,7 +15,8 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { extname, join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
 import { MessageService } from './message.service';
 import {
   CreateDirectThreadDto,
@@ -41,6 +42,14 @@ export class MessageController {
 
   private getStoredFileUrl(file: { filename: string }) {
     return `/uploads/${file.filename}`;
+  }
+
+  private ensureUploadDir() {
+    const uploadDir = join(process.cwd(), 'uploads');
+    if (!existsSync(uploadDir)) {
+      mkdirSync(uploadDir, { recursive: true });
+    }
+    return uploadDir;
   }
 
   // ═════════════════════════════════════════════
@@ -169,7 +178,13 @@ export class MessageController {
   @Roles('admin', 'manager', 'worker', 'super_admin')
   @UseInterceptors(FileInterceptor('file', {
     storage: diskStorage({
-      destination: './uploads',
+      destination: (_req, _file, cb) => {
+        const uploadDir = join(process.cwd(), 'uploads');
+        if (!existsSync(uploadDir)) {
+          mkdirSync(uploadDir, { recursive: true });
+        }
+        cb(null, uploadDir);
+      },
       filename: (_req, file, cb) => {
         const safeBase = file.originalname
           .replace(/\.[^/.]+$/, '')

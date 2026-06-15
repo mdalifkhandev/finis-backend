@@ -627,9 +627,10 @@ export class MessageService {
   // ─────────────────────────────────────────────
 
   async sendMessage(senderId: string, dto: SendMessageDto) {
-    const { threadId, content, mediaUrl, mediaType } = dto;
+    const { threadId, content, mediaUrl, mediaType, locationUrl } = dto;
+    const finalMediaUrl = mediaUrl ?? locationUrl ?? null;
 
-    if (!content && !mediaUrl) {
+    if (!content && !finalMediaUrl) {
       throw new BadRequestException('Message must have content or media');
     }
 
@@ -668,7 +669,7 @@ export class MessageService {
         threadId,
         senderId,
         content: content ?? null,
-        mediaUrl: mediaUrl ?? null,
+        mediaUrl: finalMediaUrl,
         mediaType: mediaType ?? null,
         isRead: false,
       },
@@ -680,7 +681,12 @@ export class MessageService {
       },
     });
 
-    await this.notifyUnreadThreadParticipants(threadId, senderId, message.content ?? 'New message');
+    await this.notifyUnreadThreadParticipants(
+      threadId,
+      senderId,
+      message.sender?.fullName ?? 'New message',
+      message.content ?? (locationUrl ? 'Shared a location' : ''),
+    );
     return message;
   }
 
@@ -689,9 +695,10 @@ export class MessageService {
   // ─────────────────────────────────────────────
 
   async sendAdminSupportMessage(adminId: string, dto: AdminSendMessageDto) {
-    const { threadId, content, mediaUrl, mediaType } = dto;
+    const { threadId, content, mediaUrl, mediaType, locationUrl } = dto;
+    const finalMediaUrl = mediaUrl ?? locationUrl ?? null;
 
-    if (!content && !mediaUrl) {
+    if (!content && !finalMediaUrl) {
       throw new BadRequestException('Message must have content or media');
     }
 
@@ -724,7 +731,7 @@ export class MessageService {
         threadId,
         senderId: adminId,
         content: content ?? null,
-        mediaUrl: mediaUrl ?? null,
+        mediaUrl: finalMediaUrl,
         mediaType: mediaType ?? null,
         isRead: false,
       },
@@ -735,11 +742,21 @@ export class MessageService {
       },
     });
 
-    await this.notifyUnreadThreadParticipants(threadId, adminId, message.content ?? 'New message');
+    await this.notifyUnreadThreadParticipants(
+      threadId,
+      adminId,
+      message.sender?.fullName ?? 'New message',
+      message.content ?? (locationUrl ? 'Shared a location' : ''),
+    );
     return message;
   }
 
-  private async notifyUnreadThreadParticipants(threadId: string, senderId: string, preview: string) {
+  private async notifyUnreadThreadParticipants(
+    threadId: string,
+    senderId: string,
+    senderName: string,
+    preview: string,
+  ) {
     const thread = await this.prisma.messageThread.findUnique({
       where: { id: threadId },
       include: {
@@ -761,8 +778,8 @@ export class MessageService {
       recipients.map((recipient) =>
         this.notificationsService.send({
           userId: recipient.id,
-          title: 'New message',
-          body: preview.slice(0, 120),
+          title: senderName,
+          body: preview.slice(0, 120) || 'Sent you a message',
           type: 'message',
           refType: 'message_thread',
           refId: threadId,

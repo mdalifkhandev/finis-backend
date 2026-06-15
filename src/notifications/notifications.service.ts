@@ -63,6 +63,7 @@ export class NotificationsService {
 
     if (dto.userId) {
       this.gateway.sendToUser(dto.userId, notification);
+      await this.pruneUserNotifications(dto.userId);
     } else {
       this.gateway.broadcastAll(notification);
     }
@@ -112,6 +113,8 @@ export class NotificationsService {
     notifications.forEach((notification) => {
       this.gateway.sendToRole(role, notification);
     });
+
+    await Promise.all(users.map((user) => this.pruneUserNotifications(user.id)));
 
     await this.sendFirebasePushToRole(role, dto.title, dto.body, {
       type: dto.type,
@@ -282,7 +285,25 @@ export class NotificationsService {
     return this.prisma.notification.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
-      take: 50,
+      take: 20,
+    });
+  }
+
+  private async pruneUserNotifications(userId: string) {
+    const latest = await this.prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+      skip: 20,
+    });
+
+    if (!latest.length) return;
+
+    await this.prisma.notification.deleteMany({
+      where: {
+        userId,
+        id: { in: latest.map((item) => item.id) },
+      },
     });
   }
 
