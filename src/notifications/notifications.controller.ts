@@ -54,8 +54,8 @@ export class NotificationsController {
   }
 
   @Patch(':id/read')
-  markRead(@Param('id') id: string) {
-    return this.service.markRead(id);
+  markRead(@Param('id') id: string, @Request() req: any) {
+    return this.service.markRead(id, req.user.id);
   }
 
   @Patch('mark-all-read')

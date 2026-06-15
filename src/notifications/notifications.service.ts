@@ -106,7 +106,6 @@ export class NotificationsService {
     );
 
     notifications.forEach((notification) => {
-      this.gateway.sendToUser(notification.userId, notification);
       this.gateway.sendToRole(role, notification);
     });
 
@@ -275,7 +274,15 @@ export class NotificationsService {
     });
   }
 
-  async markRead(id: string) {
+  async markRead(id: string, userId: string) {
+    const notification = await this.prisma.notification.findFirst({
+      where: { id, userId },
+    });
+
+    if (!notification) {
+      return null;
+    }
+
     return this.prisma.notification.update({
       where: { id },
       data: { isRead: true },
