@@ -23,6 +23,12 @@ export class MessageService {
     private readonly notificationsService: NotificationsService,
   ) { }
 
+  private normalizePagination(query: { page?: number | string; limit?: number | string }) {
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const limit = Math.max(1, Number(query.limit ?? 20) || 20);
+    return { page, limit, skip: (page - 1) * limit };
+  }
+
   private getPresence(userId: string, lastActiveAt?: Date | null) {
     return {
       isOnline: onlineUsers.has(userId),
@@ -104,6 +110,7 @@ export class MessageService {
 
   async getUserChatThreads(userId: string, query: ThreadQueryDto) {
     const { search } = query;
+    const { page, limit, skip } = this.normalizePagination(query);
 
     const threads = await this.prisma.messageThread.findMany({
       where: {
@@ -112,6 +119,8 @@ export class MessageService {
         participants: { some: { userId } },
       },
       orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
       include: {
         participants: {
           include: {
@@ -162,7 +171,7 @@ export class MessageService {
 
     return {
       data: filtered,
-      meta: { total: filtered.length },
+      meta: { page, limit, total: filtered.length, totalPages: Math.ceil(filtered.length / limit) },
     };
   }
 
@@ -358,6 +367,7 @@ export class MessageService {
 
   async getAdminSupportThreads(adminId: string, query: ThreadQueryDto) {
     const { search } = query;
+    const { page, limit, skip } = this.normalizePagination(query);
 
     const threads = await this.prisma.messageThread.findMany({
       where: {
@@ -367,6 +377,8 @@ export class MessageService {
         },
       },
       orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
       include: {
         participants: {
           include: {
@@ -416,7 +428,7 @@ export class MessageService {
 
     return {
       data: filtered,
-      meta: { total: filtered.length },
+      meta: { page, limit, total: filtered.length, totalPages: Math.ceil(filtered.length / limit) },
     };
   }
 
@@ -426,10 +438,13 @@ export class MessageService {
 
   async getAdminChatThreads(query: ThreadQueryDto) {
     const { search } = query;
+    const { page, limit, skip } = this.normalizePagination(query);
 
     const threads = await this.prisma.messageThread.findMany({
       where: { type: 'direct' },
       orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
       include: {
         participants: {
           include: {
@@ -476,11 +491,12 @@ export class MessageService {
 
     return {
       data: filtered,
-      meta: { total: filtered.length },
+      meta: { page, limit, total: filtered.length, totalPages: Math.ceil(filtered.length / limit) },
     };
   }
 
   async getAdminChatThreadMessages(threadId: string, query: MessageQueryDto) {
+    const { page, limit, skip } = this.normalizePagination(query);
     const thread = await this.prisma.messageThread.findFirst({
       where: {
         id: threadId,
@@ -515,6 +531,8 @@ export class MessageService {
       this.prisma.message.findMany({
         where: { threadId },
         orderBy: { sentAt: 'asc' },
+        skip,
+        take: limit,
         include: {
             sender: {
               select: {
@@ -531,7 +549,7 @@ export class MessageService {
 
     return {
       data: messages,
-      meta: { total },
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
 
@@ -575,6 +593,7 @@ export class MessageService {
   // ─────────────────────────────────────────────
 
   async getMessages(threadId: string, userId: string, query: MessageQueryDto) {
+    const { page, limit, skip } = this.normalizePagination(query);
     const isParticipant = await this.prisma.threadParticipant.findUnique({
       where: { threadId_userId: { threadId, userId } },
     });
@@ -584,6 +603,8 @@ export class MessageService {
       this.prisma.message.findMany({
         where: { threadId },
         orderBy: { sentAt: 'asc' },
+        skip,
+        take: limit,
         include: {
           sender: {
             select: { id: true, fullName: true, avatarUrl: true, role: true },
@@ -601,7 +622,7 @@ export class MessageService {
 
     return {
       data: messages,
-      meta: { total },
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
 
