@@ -23,12 +23,6 @@ export class MessageService {
     private readonly notificationsService: NotificationsService,
   ) { }
 
-  private normalizePagination(query: { page?: number | string; limit?: number | string }) {
-    const page = Math.max(1, Number(query.page ?? 1) || 1);
-    const limit = Math.max(1, Number(query.limit ?? 20) || 20);
-    return { page, limit, skip: (page - 1) * limit };
-  }
-
   private getPresence(userId: string, lastActiveAt?: Date | null) {
     return {
       isOnline: onlineUsers.has(userId),
@@ -110,7 +104,6 @@ export class MessageService {
 
   async getUserChatThreads(userId: string, query: ThreadQueryDto) {
     const { search } = query;
-    const { page, limit, skip } = this.normalizePagination(query);
 
     const threads = await this.prisma.messageThread.findMany({
       where: {
@@ -119,8 +112,6 @@ export class MessageService {
         participants: { some: { userId } },
       },
       orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit,
       include: {
         participants: {
           include: {
@@ -171,7 +162,7 @@ export class MessageService {
 
     return {
       data: filtered,
-      meta: { page, limit, total: filtered.length, totalPages: Math.ceil(filtered.length / limit) },
+      meta: { total: filtered.length },
     };
   }
 
@@ -367,7 +358,6 @@ export class MessageService {
 
   async getAdminSupportThreads(adminId: string, query: ThreadQueryDto) {
     const { search } = query;
-    const { page, limit, skip } = this.normalizePagination(query);
 
     const threads = await this.prisma.messageThread.findMany({
       where: {
@@ -377,8 +367,6 @@ export class MessageService {
         },
       },
       orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit,
       include: {
         participants: {
           include: {
@@ -428,7 +416,7 @@ export class MessageService {
 
     return {
       data: filtered,
-      meta: { page, limit, total: filtered.length, totalPages: Math.ceil(filtered.length / limit) },
+      meta: { total: filtered.length },
     };
   }
 
@@ -438,13 +426,10 @@ export class MessageService {
 
   async getAdminChatThreads(query: ThreadQueryDto) {
     const { search } = query;
-    const { page, limit, skip } = this.normalizePagination(query);
 
     const threads = await this.prisma.messageThread.findMany({
       where: { type: 'direct' },
       orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit,
       include: {
         participants: {
           include: {
@@ -491,12 +476,11 @@ export class MessageService {
 
     return {
       data: filtered,
-      meta: { page, limit, total: filtered.length, totalPages: Math.ceil(filtered.length / limit) },
+      meta: { total: filtered.length },
     };
   }
 
   async getAdminChatThreadMessages(threadId: string, query: MessageQueryDto) {
-    const { page, limit, skip } = this.normalizePagination(query);
     const thread = await this.prisma.messageThread.findFirst({
       where: {
         id: threadId,
@@ -527,29 +511,24 @@ export class MessageService {
       throw new ForbiddenException('This endpoint is only for read-only chat threads');
     }
 
-    const [messages, total] = await Promise.all([
-      this.prisma.message.findMany({
-        where: { threadId },
-        orderBy: { sentAt: 'asc' },
-        skip,
-        take: limit,
-        include: {
-            sender: {
-              select: {
-                id: true,
-                fullName: true,
-                avatarUrl: true,
-                role: true,
-              },
-            },
+    const messages = await this.prisma.message.findMany({
+      where: { threadId },
+      orderBy: { sentAt: 'asc' },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            fullName: true,
+            avatarUrl: true,
+            role: true,
+          },
         },
-      }),
-      this.prisma.message.count({ where: { threadId } }),
-    ]);
+      },
+    });
 
     return {
       data: messages,
-      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      meta: { total: messages.length },
     };
   }
 
@@ -593,26 +572,20 @@ export class MessageService {
   // ─────────────────────────────────────────────
 
   async getMessages(threadId: string, userId: string, query: MessageQueryDto) {
-    const { page, limit, skip } = this.normalizePagination(query);
     const isParticipant = await this.prisma.threadParticipant.findUnique({
       where: { threadId_userId: { threadId, userId } },
     });
     if (!isParticipant) throw new ForbiddenException('You are not a participant of this thread');
 
-    const [messages, total] = await Promise.all([
-      this.prisma.message.findMany({
-        where: { threadId },
-        orderBy: { sentAt: 'asc' },
-        skip,
-        take: limit,
-        include: {
-          sender: {
-            select: { id: true, fullName: true, avatarUrl: true, role: true },
-          },
+    const messages = await this.prisma.message.findMany({
+      where: { threadId },
+      orderBy: { sentAt: 'asc' },
+      include: {
+        sender: {
+          select: { id: true, fullName: true, avatarUrl: true, role: true },
         },
-      }),
-      this.prisma.message.count({ where: { threadId } }),
-    ]);
+      },
+    });
 
     // Read mark করা
     await this.prisma.message.updateMany({
@@ -622,7 +595,7 @@ export class MessageService {
 
     return {
       data: messages,
-      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      meta: { total: messages.length },
     };
   }
 

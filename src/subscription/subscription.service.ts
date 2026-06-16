@@ -231,6 +231,30 @@ export class SubscriptionService {
           },
         });
 
+        const plan = await this.prisma.subscriptionPlan.findUnique({
+          where: { id: session.metadata?.planId },
+        });
+        const user = await this.prisma.user.findUnique({
+          where: { id: session.metadata?.adminUserId },
+          select: { id: true },
+        });
+        if (plan && user) {
+          await (this.prisma as any).subscriptionPurchase.create({
+            data: {
+              tenantId,
+              userId: user.id,
+              planId: plan.id,
+              planName: plan.name,
+              stripeSubscriptionId: subscriptionId ?? null,
+              stripePriceId: session.metadata?.priceId ?? null,
+              interval: session.metadata?.interval ?? 'monthly',
+              amount: plan.priceMonthly,
+              status: 'active',
+              startedAt: new Date(),
+            },
+          });
+        }
+
         const adminUserId = session.metadata?.adminUserId;
         if (adminUserId) {
           await this.prisma.user.update({
@@ -332,6 +356,86 @@ export class SubscriptionService {
       currentPeriodEnd: tenant.currentPeriodEnd,
       planInterval: tenant.planInterval ?? null,
       isExpired,
+    };
+  }
+
+  async getAdminSubscriptionHistory(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, tenantId: true },
+    });
+
+    if (!user?.tenantId) {
+      return {
+        tenantId: null,
+        current: null,
+        history: [],
+      };
+    }
+
+    const [tenant, history] = await Promise.all([
+      this.prisma.tenant.findUnique({
+        where: { id: user.tenantId },
+        include: { plan: true },
+      }),
+      (this.prisma as any).subscriptionPurchase.findMany({
+        where: { tenantId: user.tenantId, userId: user.id },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          plan: {
+            select: {
+              id: true,
+              name: true,
+              priceMonthly: true,
+              priceYearly: true,
+              maxCompanies: true,
+              maxProjects: true,
+              maxUsers: true,
+              hasGeofencing: true,
+              hasAdvancedReporting: true,
+              hasCustomReporting: true,
+              hasWhiteLabel: true,
+              supportLevel: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      tenantId: user.tenantId,
+      current: tenant
+        ? {
+            tenantId: tenant.id,
+            tenantName: tenant.name,
+            subscriptionStatus: tenant.subscriptionStatus ?? null,
+            currentPeriodStart: tenant.currentPeriodStart,
+            currentPeriodEnd: tenant.currentPeriodEnd,
+            planInterval: tenant.planInterval ?? null,
+            plan: tenant.plan
+              ? {
+                  id: tenant.plan.id,
+                  name: tenant.plan.name,
+                  priceMonthly: tenant.plan.priceMonthly,
+                  priceYearly: tenant.plan.priceYearly,
+                }
+              : null,
+            isExpired: Boolean(tenant.currentPeriodEnd && new Date(tenant.currentPeriodEnd).getTime() < Date.now()),
+          }
+        : null,
+      history: history.map((item) => ({
+        id: item.id,
+        planId: item.planId,
+        planName: item.planName,
+        interval: item.interval,
+        amount: item.amount,
+        status: item.status,
+        stripeSubscriptionId: item.stripeSubscriptionId,
+        stripePriceId: item.stripePriceId,
+        startedAt: item.startedAt,
+        endedAt: item.endedAt,
+        plan: item.plan,
+      })),
     };
   }
 }

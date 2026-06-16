@@ -5,10 +5,7 @@ import {
   IsEnum,
   IsArray,
   IsNotEmpty,
-  IsInt,
-  Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 
 export enum ThreadType {
   DIRECT = 'direct',
@@ -78,33 +75,9 @@ export class ThreadQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  limit?: number = 20;
 }
 
-export class MessageQueryDto {
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  limit?: number = 20;
-}
+export class MessageQueryDto {}
 
 // ─────────────────────────────────────────────
 // SUPPORT DTOs
