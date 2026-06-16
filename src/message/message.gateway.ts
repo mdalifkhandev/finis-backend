@@ -334,6 +334,8 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
   }
 
   joinOnlineParticipantsToThread(threadId: string, participantIds: string[]) {
+    if (!this.server?.sockets?.sockets) return;
+
     for (const userId of participantIds) {
       const socketId = onlineUsers.get(userId);
       if (!socketId) continue;
@@ -343,6 +345,8 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
   }
 
   emitToThread(threadId: string, event: string, data: any, participantIds?: string[]) {
+    if (!this.server) return;
+
     if (participantIds?.length) {
       this.joinOnlineParticipantsToThread(threadId, participantIds);
     }

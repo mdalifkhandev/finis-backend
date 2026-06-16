@@ -75,20 +75,9 @@ export class ThreadQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
-
-  @IsOptional()
-  page?: number = 1;
-
-  @IsOptional()
-  limit?: number = 20;
 }
 
 export class MessageQueryDto {
-  @IsOptional()
-  page?: number;
-
-  @IsOptional()
-  limit?: number;
 }
 
 // ─────────────────────────────────────────────

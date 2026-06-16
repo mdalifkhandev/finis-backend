@@ -103,8 +103,7 @@ export class MessageService {
   // ─────────────────────────────────────────────
 
   async getUserChatThreads(userId: string, query: ThreadQueryDto) {
-    const { search, page = 1, limit = 20 } = query;
-    const skip = (page - 1) * limit;
+    const { search } = query;
 
     const threads = await this.prisma.messageThread.findMany({
       where: {
@@ -113,8 +112,6 @@ export class MessageService {
         participants: { some: { userId } },
       },
       orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit,
       include: {
         participants: {
           include: {
@@ -165,7 +162,7 @@ export class MessageService {
 
     return {
       data: filtered,
-      meta: { page, limit, total: filtered.length },
+      meta: { total: filtered.length },
     };
   }
 
@@ -360,8 +357,7 @@ export class MessageService {
   // ─────────────────────────────────────────────
 
   async getAdminSupportThreads(adminId: string, query: ThreadQueryDto) {
-    const { search, page = 1, limit = 20 } = query;
-    const skip = (page - 1) * limit;
+    const { search } = query;
 
     const threads = await this.prisma.messageThread.findMany({
       where: {
@@ -371,8 +367,6 @@ export class MessageService {
         },
       },
       orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit,
       include: {
         participants: {
           include: {
@@ -422,7 +416,7 @@ export class MessageService {
 
     return {
       data: filtered,
-      meta: { page, limit, total: filtered.length },
+      meta: { total: filtered.length },
     };
   }
 
@@ -431,14 +425,11 @@ export class MessageService {
   // ─────────────────────────────────────────────
 
   async getAdminChatThreads(query: ThreadQueryDto) {
-    const { search, page = 1, limit = 20 } = query;
-    const skip = (page - 1) * limit;
+    const { search } = query;
 
     const threads = await this.prisma.messageThread.findMany({
       where: { type: 'direct' },
       orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit,
       include: {
         participants: {
           include: {
@@ -485,14 +476,11 @@ export class MessageService {
 
     return {
       data: filtered,
-      meta: { page, limit, total: filtered.length },
+      meta: { total: filtered.length },
     };
   }
 
   async getAdminChatThreadMessages(threadId: string, query: MessageQueryDto) {
-    const page = Number(query.page ?? 1);
-    const limit = Number(query.limit ?? 20);
-
     const thread = await this.prisma.messageThread.findFirst({
       where: {
         id: threadId,
@@ -527,8 +515,6 @@ export class MessageService {
       this.prisma.message.findMany({
         where: { threadId },
         orderBy: { sentAt: 'asc' },
-        skip: (page - 1) * limit,
-        take: limit,
         include: {
             sender: {
               select: {
@@ -545,7 +531,7 @@ export class MessageService {
 
     return {
       data: messages,
-      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      meta: { total },
     };
   }
 
@@ -589,9 +575,6 @@ export class MessageService {
   // ─────────────────────────────────────────────
 
   async getMessages(threadId: string, userId: string, query: MessageQueryDto) {
-    const page = Number(query.page ?? 1);
-    const limit = Number(query.limit ?? 20);
-
     const isParticipant = await this.prisma.threadParticipant.findUnique({
       where: { threadId_userId: { threadId, userId } },
     });
@@ -601,8 +584,6 @@ export class MessageService {
       this.prisma.message.findMany({
         where: { threadId },
         orderBy: { sentAt: 'asc' },
-        skip: (page - 1) * limit,
-        take: limit,
         include: {
           sender: {
             select: { id: true, fullName: true, avatarUrl: true, role: true },
@@ -620,7 +601,7 @@ export class MessageService {
 
     return {
       data: messages,
-      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      meta: { total },
     };
   }
 
