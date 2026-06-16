@@ -167,6 +167,36 @@ export class ProjectService {
     }
   }
 
+  private async checkUserLimit(adminId: string) {
+    const admin = await this.prisma.user.findUnique({
+      where: { id: adminId },
+      select: { tenantId: true },
+    });
+
+    if (!admin?.tenantId) return; // পুরনো account — limit নেই
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: admin.tenantId },
+      include: { plan: { select: { maxUsers: true } }, _count: { select: { users: true } } },
+    });
+
+    if (!tenant) return;
+
+    if (tenant.status === 'suspended')
+      throw new ForbiddenException('Your account is suspended. Please contact support.');
+    if (tenant.status === 'cancelled')
+      throw new ForbiddenException('Your subscription has been cancelled.');
+
+    const max = tenant.plan.maxUsers;
+    if (max === null || max === undefined) return; // unlimited
+
+    if (tenant._count.users >= max) {
+      throw new ForbiddenException(
+        `User limit reached (${tenant._count.users}/${max}). Please upgrade your plan.`,
+      );
+    }
+  }
+
   private async checkGeofencingAccess(adminId: string) {
     const admin = await this.prisma.user.findUnique({
       where: { id: adminId },
@@ -1006,6 +1036,9 @@ export class ProjectService {
 
   async addMemberByRole(projectId: string, userId: string, adminId: string, role: 'manager' | 'worker', managerId?: string, userRole?: string) {
     await this.verifyProjectAccess(projectId, adminId, userRole);
+    if (!this.isSuperAdmin(userRole)) {
+      await this.checkUserLimit(adminId);
+    }
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
       select: { id: true, managerId: true },

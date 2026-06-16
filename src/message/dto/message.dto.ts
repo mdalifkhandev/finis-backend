@@ -85,10 +85,10 @@ export class ThreadQueryDto {
 
 export class MessageQueryDto {
   @IsOptional()
-  page?: number = 1;
+  page?: number;
 
   @IsOptional()
-  limit?: number = 30;
+  limit?: number;
 }
 
 // ─────────────────────────────────────────────

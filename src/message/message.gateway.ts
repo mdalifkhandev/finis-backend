@@ -170,10 +170,12 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
         });
       }
 
+      const thread = await this.messageService.getThreadById(dto.threadId, userId);
+      const participantIds = thread.participants.map((participant) => participant.userId);
+      this.joinOnlineParticipantsToThread(dto.threadId, participantIds);
+
       // Thread room এ সবাইকে নতুন message পাঠানো
-      this.server
-        .to(`thread:${dto.threadId}`)
-        .emit('message:new', message);
+      this.emitToThread(dto.threadId, 'message:new', message, participantIds);
 
       // Thread list update করা
       this.server.emit('thread:updated', {
@@ -331,7 +333,19 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
     }
   }
 
-  emitToThread(threadId: string, event: string, data: any) {
+  joinOnlineParticipantsToThread(threadId: string, participantIds: string[]) {
+    for (const userId of participantIds) {
+      const socketId = onlineUsers.get(userId);
+      if (!socketId) continue;
+      const socket = this.server.sockets.sockets.get(socketId);
+      socket?.join(`thread:${threadId}`);
+    }
+  }
+
+  emitToThread(threadId: string, event: string, data: any, participantIds?: string[]) {
+    if (participantIds?.length) {
+      this.joinOnlineParticipantsToThread(threadId, participantIds);
+    }
     this.server.to(`thread:${threadId}`).emit(event, data);
   }
 }

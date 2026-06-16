@@ -105,7 +105,11 @@ export class MessageController {
     @Request() req: any,
     @Body() dto: CreateDirectThreadDto,
   ) {
-    return this.messageService.createDirectThread(req.user.id, dto);
+    return this.messageService.createDirectThread(req.user.id, dto).then((thread: any) => {
+      const participantIds = thread.participants?.map((participant: any) => participant.userId) ?? [];
+      this.messageGateway.joinOnlineParticipantsToThread(thread.id, participantIds);
+      return thread;
+    });
   }
 
   // ═════════════════════════════════════════════
@@ -129,7 +133,11 @@ export class MessageController {
   @Post('support/thread')
   @Roles('admin', 'manager', 'worker')
   getOrCreateSupportThread(@Request() req: any) {
-    return this.messageService.getOrCreateSupportThread(req.user.id);
+    return this.messageService.getOrCreateSupportThread(req.user.id).then((thread: any) => {
+      const participantIds = thread.participants?.map((participant: any) => participant.userId) ?? [];
+      this.messageGateway.joinOnlineParticipantsToThread(thread.id, participantIds);
+      return thread;
+    });
   }
 
   // ═════════════════════════════════════════════
@@ -160,12 +168,15 @@ export class MessageController {
     @Request() req: any,
     @Body() dto: SendMessageDto,
   ) {
-    return this.messageService.sendMessage(req.user.id, dto).then((message) => {
-      this.messageGateway.emitToThread(dto.threadId, 'message:new', message);
+    return this.messageService.sendMessage(req.user.id, dto).then(async (message) => {
+      const thread = await this.messageService.getThreadById(dto.threadId, req.user.id);
+      const participantIds = thread.participants?.map((participant: any) => participant.userId) ?? [];
+      this.messageGateway.joinOnlineParticipantsToThread(dto.threadId, participantIds);
+      this.messageGateway.emitToThread(dto.threadId, 'message:new', message, participantIds);
       this.messageGateway.emitToThread(dto.threadId, 'thread:updated', {
         threadId: dto.threadId,
         lastMessage: message,
-      });
+      }, participantIds);
       return message;
     });
   }
@@ -266,7 +277,11 @@ export class MessageController {
     @Request() req: any,
     @Body() dto: StartSupportThreadDto,
   ) {
-    return this.messageService.getOrCreateSupportThread(req.user.id, dto.targetUserId);
+    return this.messageService.getOrCreateSupportThread(req.user.id, dto.targetUserId).then((thread: any) => {
+      const participantIds = thread.participants?.map((participant: any) => participant.userId) ?? [];
+      this.messageGateway.joinOnlineParticipantsToThread(thread.id, participantIds);
+      return thread;
+    });
   }
 
   /**
@@ -279,12 +294,15 @@ export class MessageController {
     @Request() req: any,
     @Body() dto: AdminSendMessageDto,
   ) {
-    return this.messageService.sendAdminSupportMessage(req.user.id, dto).then((message) => {
-      this.messageGateway.emitToThread(dto.threadId, 'message:new', message);
+    return this.messageService.sendAdminSupportMessage(req.user.id, dto).then(async (message) => {
+      const thread = await this.messageService.getThreadById(dto.threadId, req.user.id);
+      const participantIds = thread.participants?.map((participant: any) => participant.userId) ?? [];
+      this.messageGateway.joinOnlineParticipantsToThread(dto.threadId, participantIds);
+      this.messageGateway.emitToThread(dto.threadId, 'message:new', message, participantIds);
       this.messageGateway.emitToThread(dto.threadId, 'thread:updated', {
         threadId: dto.threadId,
         lastMessage: message,
-      });
+      }, participantIds);
       return message;
     });
   }

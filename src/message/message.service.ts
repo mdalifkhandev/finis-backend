@@ -490,7 +490,8 @@ export class MessageService {
   }
 
   async getAdminChatThreadMessages(threadId: string, query: MessageQueryDto) {
-    const { page = 1, limit = 30 } = query;
+    const page = Number(query.page ?? 1);
+    const limit = Number(query.limit ?? 20);
 
     const thread = await this.prisma.messageThread.findFirst({
       where: {
@@ -588,7 +589,8 @@ export class MessageService {
   // ─────────────────────────────────────────────
 
   async getMessages(threadId: string, userId: string, query: MessageQueryDto) {
-    const { page = 1, limit = 30 } = query;
+    const page = Number(query.page ?? 1);
+    const limit = Number(query.limit ?? 20);
 
     const isParticipant = await this.prisma.threadParticipant.findUnique({
       where: { threadId_userId: { threadId, userId } },

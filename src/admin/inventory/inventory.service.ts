@@ -24,6 +24,11 @@ type AuthUser = {
   companyId?: string;
 };
 
+type PaginationInput = {
+  page?: number | string;
+  limit?: number | string;
+};
+
 @Injectable()
 export class InventoryService {
   constructor(private readonly prisma: PrismaService) {}
@@ -65,6 +70,17 @@ export class InventoryService {
     return scope;
   }
 
+  private hasScope(scope: Record<string, any>): boolean {
+    return Object.keys(scope).length > 0;
+  }
+
+  private normalizePagination(query: PaginationInput) {
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const limit = Math.max(1, Number(query.limit ?? 20) || 20);
+
+    return { page, limit, skip: (page - 1) * limit };
+  }
+
   // ════════════════════════════════════════════
   // PROJECT LIST  (dropdown)
   // ════════════════════════════════════════════
@@ -92,17 +108,20 @@ export class InventoryService {
   async getSummary(user: AuthUser, projectId?: string) {
     const scope        = await this.getProjectScope(user);
     const projectWhere = this.mergeScope(scope, projectId);
+    const hasProjectScope = this.hasScope(projectWhere);
 
     const [allItems, damages] = await Promise.all([
       this.prisma.inventoryItem.findMany({
-        where:  { project: projectWhere },
+        where:  hasProjectScope ? { project: projectWhere } : {},
         select: { currentQty: true, minStockQty: true },
       }),
       this.prisma.inventoryDamage.count({
-        where: {
-          status:    'unresolved',
-          inventory: { project: projectWhere },
-        },
+        where: hasProjectScope
+          ? {
+              status: 'unresolved',
+              inventory: { project: projectWhere },
+            }
+          : { status: 'unresolved' },
       }),
     ]);
 
@@ -135,18 +154,17 @@ export class InventoryService {
       category,
       location,
       lowStock,
-      page  = 1,
-      limit = 20,
     } = query;
 
-    const skip       = (page - 1) * limit;
+    const { page, limit, skip } = this.normalizePagination(query);
     const isLowStock = lowStock === true || (lowStock as any) === 'true';
 
     const scope        = await this.getProjectScope(user);
     const projectWhere = this.mergeScope(scope, projectId);
+    const hasProjectScope = this.hasScope(projectWhere);
 
     // Build search / filter where
-    const where: any = { project: projectWhere };
+    const where: any = hasProjectScope ? { project: projectWhere } : {};
     if (search)   where.name     = { contains: search,   mode: 'insensitive' };
     if (category) where.category = { contains: category, mode: 'insensitive' };
     if (location) where.location = { contains: location, mode: 'insensitive' };
@@ -197,6 +215,29 @@ export class InventoryService {
     };
   }
 
+  /**
+   * Super admin details endpoint:
+   * summary + stock items + usage + damages + project list
+   * in one response for the details page.
+   */
+  async getInventoryDetails(user: AuthUser, query: InventoryQueryDto & PaginationDto) {
+    const [projects, summary, inventory, usageHistory, damages] = await Promise.all([
+      this.getProjectList(user),
+      this.getSummary(user, query.projectId),
+      this.getInventoryItems(user, query),
+      this.getUsageHistory(user, query),
+      this.getDamageReports(user, query),
+    ]);
+
+    return {
+      projects,
+      summary,
+      inventory,
+      usageHistory,
+      damages,
+    };
+  }
+
   // ════════════════════════════════════════════
   // LOW STOCK ALERTS  (mobile banner)
   // ════════════════════════════════════════════
@@ -204,9 +245,10 @@ export class InventoryService {
   async getLowStockAlerts(user: AuthUser, projectId?: string) {
     const scope        = await this.getProjectScope(user);
     const projectWhere = this.mergeScope(scope, projectId);
+    const hasProjectScope = this.hasScope(projectWhere);
 
     const items = await this.prisma.inventoryItem.findMany({
-      where:   { project: projectWhere },
+      where:   hasProjectScope ? { project: projectWhere } : {},
       orderBy: { currentQty: 'asc' },
       include: { project: { select: { id: true, name: true } } },
     });
@@ -233,17 +275,20 @@ export class InventoryService {
   // ════════════════════════════════════════════
 
   async getUsageHistory(user: AuthUser, query: PaginationDto) {
-    const { projectId, page = 1, limit = 20 } = query;
-    const skip = (page - 1) * limit;
+    const { projectId } = query;
+    const { page, limit, skip } = this.normalizePagination(query);
 
     const scope        = await this.getProjectScope(user);
     const projectWhere = this.mergeScope(scope, projectId);
+    const hasProjectScope = this.hasScope(projectWhere);
+
+    const usageWhere = hasProjectScope
+      ? { inventory: { project: projectWhere } }
+      : {};
 
     const [logs, total] = await Promise.all([
       this.prisma.inventoryUsageLog.findMany({
-        where: {
-          inventory: { project: projectWhere },
-        },
+        where: usageWhere,
         orderBy: { loggedAt: 'desc' },
         skip,
         take: limit,
@@ -258,9 +303,7 @@ export class InventoryService {
           },
         },
       }),
-      this.prisma.inventoryUsageLog.count({
-        where: { inventory: { project: projectWhere } },
-      }),
+      this.prisma.inventoryUsageLog.count({ where: usageWhere }),
     ]);
 
     return {
@@ -279,15 +322,20 @@ export class InventoryService {
   // ════════════════════════════════════════════
 
   async getDamageReports(user: AuthUser, query: PaginationDto) {
-    const { projectId, page = 1, limit = 20 } = query;
-    const skip = (page - 1) * limit;
+    const { projectId } = query;
+    const { page, limit, skip } = this.normalizePagination(query);
 
     const scope        = await this.getProjectScope(user);
     const projectWhere = this.mergeScope(scope, projectId);
+    const hasProjectScope = this.hasScope(projectWhere);
+
+    const damageWhere = hasProjectScope
+      ? { inventory: { project: projectWhere } }
+      : {};
 
     const [damages, total] = await Promise.all([
       this.prisma.inventoryDamage.findMany({
-        where:   { inventory: { project: projectWhere } },
+        where:   damageWhere,
         orderBy: { reportedAt: 'desc' },
         skip,
         take: limit,
@@ -302,9 +350,7 @@ export class InventoryService {
           },
         },
       }),
-      this.prisma.inventoryDamage.count({
-        where: { inventory: { project: projectWhere } },
-      }),
+      this.prisma.inventoryDamage.count({ where: damageWhere }),
     ]);
 
     return {

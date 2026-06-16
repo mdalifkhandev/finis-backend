@@ -78,6 +78,17 @@ export class InventoryController {
   }
 
   /**
+   * GET /inventory/details
+   * Super admin details page helper endpoint.
+   * Returns projects + summary + inventory + usage + damages.
+   */
+  @Get('details')
+  @Roles('super_admin')
+  getInventoryDetails(@Request() req: any, @Query() query: InventoryQueryDto & PaginationDto) {
+    return this.inventoryService.getInventoryDetails(req.user, query);
+  }
+
+  /**
    * GET /inventory/low-stock
    * "Low Stock Alerts" — all low-stock items with project name.
    * Used in mobile alert banner.
