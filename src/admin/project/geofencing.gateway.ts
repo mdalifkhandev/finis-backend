@@ -334,7 +334,14 @@ export class GeofencingGateway
     if (!user) return;
 
     const { lat, lng } = data;
-    const projectId = client.data.projectId ?? data.projectId;
+    const projectId = await this.resolveProjectIdForWorker(
+      user.id,
+      client.data.projectId ?? data.projectId,
+    );
+    console.log('[Geofencing] resolved project for check_in', {
+      userId: user.id,
+      projectId,
+    });
     if (!projectId) {
       client.emit('error', { message: 'No active project' });
       return;
@@ -462,7 +469,14 @@ export class GeofencingGateway
     if (!user) return;
 
     const { lat, lng } = data;
-    const projectId = client.data.projectId ?? data.projectId;
+    const projectId = await this.resolveProjectIdForWorker(
+      user.id,
+      client.data.projectId ?? data.projectId,
+    );
+    console.log('[Geofencing] resolved project for check_out', {
+      userId: user.id,
+      projectId,
+    });
     if (!projectId) {
       client.emit('error', { message: 'No active project' });
       return;
@@ -547,7 +561,14 @@ export class GeofencingGateway
     if (!user) return;
 
     const { lat, lng } = data;
-    const projectId = client.data.projectId ?? data.projectId;
+    const projectId = await this.resolveProjectIdForWorker(
+      user.id,
+      client.data.projectId ?? data.projectId,
+    );
+    console.log('[Geofencing] resolved project for location_update', {
+      userId: user.id,
+      projectId,
+    });
     if (!projectId) return;
 
     const state = this.workerStates.get(user.id);
@@ -881,6 +902,23 @@ export class GeofencingGateway
 
   async resolveZoneStatus(lat: number, lng: number, projectId: string) {
     return this.checkInsideZone(lat, lng, projectId);
+  }
+
+  private async resolveProjectIdForWorker(
+    userId: string,
+    projectId?: string,
+  ): Promise<string | null> {
+    if (projectId) {
+      return projectId;
+    }
+
+    const membership = await this.prisma.projectMember.findFirst({
+      where: { userId },
+      select: { projectId: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return membership?.projectId ?? null;
   }
 
   /**

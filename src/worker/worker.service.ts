@@ -1089,6 +1089,14 @@ export class WorkerService {
   // ─────────────────────────────────────────────
 
   async updateLocation(workerId: string, dto: UpdateLocationDto) {
+    console.log('[WorkerService] updateLocation start', {
+      workerId,
+      lat: dto.lat,
+      lng: dto.lng,
+      geofenceId: dto.geofenceId ?? null,
+      eventType: dto.eventType ?? 'update',
+    });
+
     const worker = await this.prisma.user.findUnique({
       where: { id: workerId },
       select: { fullName: true, avatarUrl: true },
@@ -1155,6 +1163,13 @@ export class WorkerService {
     });
     memberships.forEach((m) => projectIds.add(m.projectId));
 
+    console.log('[WorkerService] updateLocation projectIds', {
+      workerId,
+      projectIds: Array.from(projectIds),
+      isInsideZone,
+      zoneName,
+    });
+
     for (const projectId of projectIds) {
       this.geofencingGateway.upsertWorkerState({
         userId: workerId,
@@ -1178,6 +1193,15 @@ export class WorkerService {
         zoneName,
         status: isInsideZone ? 'inside' : 'outside',
         timestamp: new Date(),
+      });
+
+      console.log('[WorkerService] emitWorkerLocation', {
+        workerId,
+        projectId,
+        lat: dto.lat,
+        lng: dto.lng,
+        isInsideZone,
+        zoneName,
       });
     }
 
