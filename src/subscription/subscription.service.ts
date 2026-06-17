@@ -115,9 +115,14 @@ export class SubscriptionService {
 
     const alreadyActive =
       existingTenant &&
-      existingTenant.subscriptionStatus === 'active' &&
-      existingTenant.currentPeriodEnd &&
-      new Date(existingTenant.currentPeriodEnd).getTime() > Date.now();
+      (
+        existingTenant.subscriptionStatus === 'active' ||
+        existingTenant.subscriptionStatus === 'pending'
+      ) &&
+      (
+        !existingTenant.currentPeriodEnd ||
+        new Date(existingTenant.currentPeriodEnd).getTime() > Date.now()
+      );
 
     if (alreadyActive) {
       throw new BadRequestException('Tenant already has an active subscription');
@@ -239,6 +244,12 @@ export class SubscriptionService {
           select: { id: true },
         });
         if (plan && user) {
+          const existingPurchase = await (this.prisma as any).subscriptionPurchase.findFirst({
+            where: {
+              stripeSubscriptionId: subscriptionId ?? null,
+            },
+          });
+          if (!existingPurchase) {
           await (this.prisma as any).subscriptionPurchase.create({
             data: {
               tenantId,
@@ -253,6 +264,7 @@ export class SubscriptionService {
               startedAt: new Date(),
             },
           });
+          }
         }
 
         const adminUserId = session.metadata?.adminUserId;
@@ -324,7 +336,16 @@ export class SubscriptionService {
       },
     });
 
-    if (!user?.tenant) {
+    const tenant =
+      user?.tenant ??
+      (user?.email
+        ? await this.prisma.tenant.findFirst({
+            where: { billingEmail: user.email },
+            include: { plan: true },
+          })
+        : null);
+
+    if (!tenant) {
       return {
         tenantId: null,
         tenantName: null,
@@ -337,7 +358,13 @@ export class SubscriptionService {
       };
     }
 
-    const tenant = user.tenant as any;
+    if (user && user.tenantId !== tenant.id) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { tenantId: tenant.id },
+      });
+    }
+
     const isExpired = Boolean(tenant.currentPeriodEnd && new Date(tenant.currentPeriodEnd).getTime() < Date.now());
 
     return {
@@ -362,10 +389,22 @@ export class SubscriptionService {
   async getAdminSubscriptionHistory(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, tenantId: true },
+      select: { id: true, tenantId: true, email: true },
     });
 
-    if (!user?.tenantId) {
+    const tenant = user?.tenantId
+      ? await this.prisma.tenant.findUnique({
+          where: { id: user.tenantId },
+          include: { plan: true },
+        })
+      : user?.email
+        ? await this.prisma.tenant.findFirst({
+            where: { billingEmail: user.email },
+            include: { plan: true },
+          })
+        : null;
+
+    if (!tenant) {
       return {
         tenantId: null,
         current: null,
@@ -373,55 +412,56 @@ export class SubscriptionService {
       };
     }
 
-    const [tenant, history] = await Promise.all([
-      this.prisma.tenant.findUnique({
-        where: { id: user.tenantId },
-        include: { plan: true },
-      }),
-      (this.prisma as any).subscriptionPurchase.findMany({
-        where: { tenantId: user.tenantId, userId: user.id },
-        orderBy: { createdAt: 'desc' },
-        include: {
-          plan: {
-            select: {
-              id: true,
-              name: true,
-              priceMonthly: true,
-              priceYearly: true,
-              maxCompanies: true,
-              maxProjects: true,
-              maxUsers: true,
-              hasGeofencing: true,
-              hasAdvancedReporting: true,
-              hasCustomReporting: true,
-              hasWhiteLabel: true,
-              supportLevel: true,
-            },
+    if (user && user.tenantId !== tenant.id) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { tenantId: tenant.id },
+      });
+    }
+
+    const history = await (this.prisma as any).subscriptionPurchase.findMany({
+      where: { tenantId: tenant.id, userId: user!.id },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        plan: {
+          select: {
+            id: true,
+            name: true,
+            priceMonthly: true,
+            priceYearly: true,
+            maxCompanies: true,
+            maxProjects: true,
+            maxUsers: true,
+            hasGeofencing: true,
+            hasAdvancedReporting: true,
+            hasCustomReporting: true,
+            hasWhiteLabel: true,
+            supportLevel: true,
           },
         },
-      }),
-    ]);
+      },
+    });
 
     return {
-      tenantId: user.tenantId,
+      tenantId: tenant.id,
       current: tenant
         ? {
-            tenantId: tenant.id,
-            tenantName: tenant.name,
-            subscriptionStatus: tenant.subscriptionStatus ?? null,
-            currentPeriodStart: tenant.currentPeriodStart,
-            currentPeriodEnd: tenant.currentPeriodEnd,
-            planInterval: tenant.planInterval ?? null,
-            plan: tenant.plan
-              ? {
-                  id: tenant.plan.id,
-                  name: tenant.plan.name,
-                  priceMonthly: tenant.plan.priceMonthly,
-                  priceYearly: tenant.plan.priceYearly,
-                }
-              : null,
-            isExpired: Boolean(tenant.currentPeriodEnd && new Date(tenant.currentPeriodEnd).getTime() < Date.now()),
-          }
+          tenantId: tenant.id,
+          tenantName: tenant.name,
+          subscriptionStatus: tenant.subscriptionStatus ?? null,
+          currentPeriodStart: tenant.currentPeriodStart,
+          currentPeriodEnd: tenant.currentPeriodEnd,
+          planInterval: tenant.planInterval ?? null,
+          plan: tenant.plan
+            ? {
+                id: tenant.plan.id,
+                name: tenant.plan.name,
+                priceMonthly: tenant.plan.priceMonthly,
+                priceYearly: tenant.plan.priceYearly,
+              }
+            : null,
+          isExpired: Boolean(tenant.currentPeriodEnd && new Date(tenant.currentPeriodEnd).getTime() < Date.now()),
+        }
         : null,
       history: history.map((item) => ({
         id: item.id,

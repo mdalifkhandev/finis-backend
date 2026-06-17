@@ -649,10 +649,14 @@ export class WorkerService {
       include: { sessions: true },
     });
 
-    // যদি কোনো session এখনো open থাকে (checkout হয়নি) → block
+    // যদি কোনো session এখনো open থাকে (checkout হয়নি) → একই session রিটার্ন করো
     const openSession = attendance.sessions.find((s) => !s.checkOutTime);
     if (openSession) {
-      throw new ConflictException('Already checked in. Please check out first.');
+      return {
+        message: 'Already checked in',
+        session: openSession,
+        totalSessionsToday: attendance.sessions.length,
+      };
     }
 
     // নতুন session তৈরি করো
@@ -748,6 +752,18 @@ export class WorkerService {
       .sort((a, b) => b.checkInTime.getTime() - a.checkInTime.getTime())[0];
 
     if (!openSession) {
+      const latestSession = attendance.sessions
+        .slice()
+        .sort((a, b) => b.checkInTime.getTime() - a.checkInTime.getTime())[0];
+
+      if (latestSession?.checkOutTime) {
+        return {
+          message: 'Already checked out',
+          session: latestSession,
+          totalHoursToday: Math.round((attendance.totalHours ?? 0) * 100) / 100,
+        };
+      }
+
       throw new ConflictException('No active check-in found. Please check in first.');
     }
 
