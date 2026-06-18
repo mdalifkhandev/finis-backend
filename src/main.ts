@@ -4,7 +4,6 @@ import { ValidationPipe, Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { NextFunction, Request, Response } from 'express';
-import * as express from 'express';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 
@@ -70,8 +69,6 @@ async function bootstrap() {
   app.useGlobalInterceptors(new ResponseInterceptor());
   
   app.enableCors();
-
-  app.use('/subscription/webhook', express.raw({ type: 'application/json' }));
 
 app.useStaticAssets(join(process.cwd(), 'uploads'), {
   prefix: '/uploads',

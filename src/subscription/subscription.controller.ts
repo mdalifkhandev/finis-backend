@@ -7,6 +7,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -26,9 +27,11 @@ export class SubscriptionController {
   }
 
   @Post('webhook')
-  async webhook(@Req() req: Request, @Headers('stripe-signature') signature?: string) {
-    const rawBody = req.body as Buffer;
-    return this.subscriptionService.handleWebhook(rawBody, signature);
+  async webhook(
+    @Req() req: RawBodyRequest<Request>,
+    @Headers('stripe-signature') signature?: string,
+  ) {
+    return this.subscriptionService.handleWebhook(req.rawBody ?? Buffer.alloc(0), signature);
   }
 }
 

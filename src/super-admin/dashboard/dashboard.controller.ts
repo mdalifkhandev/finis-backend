@@ -4,7 +4,7 @@ import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { UserRole } from '../../generated/prisma/client';
-import { SuperAdminDashboardQueryDto, PaginationQueryDto } from './dto/dashboard.dto';
+import { SuperAdminDashboardQueryDto, PaginationQueryDto, AttendanceQueryDto } from './dto/dashboard.dto';
 
 @Controller('super-admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -46,5 +46,23 @@ export class SuperAdminDashboardController {
       query.page,
       query.limit,
     );
+  }
+
+  /**
+   * GET /super-admin/dashboard/attendance-summary
+   * Attendance analytics for super admin
+   */
+  @Get('dashboard/attendance-summary')
+  getAttendanceSummary(@Query() query: AttendanceQueryDto) {
+    return this.superAdminDashboardService.getAttendanceSummary(query);
+  }
+
+  /**
+   * GET /super-admin/dashboard/attendance-records
+   * Paginated attendance records
+   */
+  @Get('dashboard/attendance-records')
+  getAttendanceRecords(@Query() query: AttendanceQueryDto) {
+    return this.superAdminDashboardService.getAttendanceRecords(query);
   }
 }

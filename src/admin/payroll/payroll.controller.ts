@@ -91,6 +91,22 @@ export class PayrollController {
     );
   }
 
+  /** GET /admin/payroll/overview?month=1&year=2025 */
+  @Get('overview')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  getPayrollOverview(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+    @Query() query: PayrollSummaryQueryDto,
+  ) {
+    return this.payrollService.getPayrollOverview(
+      adminId,
+      userRole,
+      query.month,
+      query.year,
+    );
+  }
+
   /** GET /admin/payroll/:id/stub */
   @Get(':id/stub')
   @Roles(UserRole.admin, UserRole.super_admin, UserRole.worker)

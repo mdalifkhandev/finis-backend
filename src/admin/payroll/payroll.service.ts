@@ -38,6 +38,34 @@ export class PayrollService {
     return companies.map((c) => c.id);
   }
 
+  private async assertPayrollCompanyAccess(
+    companyId: string,
+    adminId: string,
+    userRole: string,
+  ) {
+    if (userRole === UserRole.super_admin) return;
+
+    const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
+    if (!accessibleCompanyIds.includes(companyId)) {
+      throw new ForbiddenException('Access denied');
+    }
+  }
+
+  private async getAdminCompanyIds(adminId: string, userRole: string) {
+    if (userRole === UserRole.super_admin) {
+      const companies = await this.prisma.company.findMany({
+        select: { id: true },
+      });
+      return companies.map((c) => c.id);
+    }
+
+    const companies = await this.prisma.company.findMany({
+      where: { ownerId: adminId, isActive: true },
+      select: { id: true },
+    });
+    return companies.map((c) => c.id);
+  }
+
   /**
    * Selected date-এর attendance sessions থেকে zone-এর ভেতরের total worked hours বের করো।
    * প্রতিটা session-এর zoneSeconds যোগ করা হয়, raw checkIn-checkOut duration নয়।
@@ -344,11 +372,6 @@ export class PayrollService {
           },
         });
 
-        // Present না হলে skip
-        if (!attendanceOnDate || attendanceOnDate.status !== 'present') {
-          return null;
-        }
-
         // Geofencing sessions থেকে actual worked hours বের করো
         const workedData = await this.getWorkedHoursForDate(userId, targetDate);
 
@@ -391,7 +414,7 @@ export class PayrollService {
           projects: entry.projects,
           attendance: {
             date: targetDate,
-            status: attendanceOnDate.status,
+            status: attendanceOnDate?.status ?? 'absent',
             // checkIn/checkOut sessions
             sessions: workedData.sessions.map((s) => ({
               checkInTime: s.checkInTime,
@@ -457,6 +480,7 @@ export class PayrollService {
       select: { id: true, companyId: true, name: true },
     });
     if (!project) throw new NotFoundException('Project not found');
+    await this.assertPayrollCompanyAccess(project.companyId, adminId, userRole);
 
     const isMember = await this.prisma.projectMember.findFirst({
       where: { projectId: dto.projectId, userId: dto.workerId },
@@ -541,6 +565,7 @@ export class PayrollService {
     projectId?: string,
   ) {
     const subscription = await this.assertPayrollSubscriptionActive(adminId, userRole);
+    const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
     const now = new Date();
     const m = month ? parseInt(month) - 1 : now.getMonth();
     const y = year ? parseInt(year) : now.getFullYear();
@@ -550,6 +575,7 @@ export class PayrollService {
 
     const payrolls = await this.prisma.payroll.findMany({
       where: {
+        ...(accessibleCompanyIds.length > 0 ? { companyId: { in: accessibleCompanyIds } } : {}),
         payPeriodStart: { gte: startDate },
         payPeriodEnd: { lte: endDate },
         ...(projectId && { projectId }),
@@ -631,6 +657,7 @@ export class PayrollService {
       where: { id: payrollId },
     });
     if (!payroll) throw new NotFoundException('Payroll not found');
+    await this.assertPayrollCompanyAccess(payroll.companyId, adminId, userRole);
     if (payroll.status === 'paid') {
       throw new BadRequestException('Paid payroll cannot be edited');
     }
@@ -710,6 +737,10 @@ export class PayrollService {
 
     if (!payroll) throw new NotFoundException('Payroll not found');
 
+    if (userRole !== UserRole.worker) {
+      await this.assertPayrollCompanyAccess(payroll.companyId, userId, userRole);
+    }
+
     if (userRole === UserRole.worker && payroll.workerId !== userId) {
       throw new ForbiddenException('Access denied');
     }
@@ -764,6 +795,7 @@ export class PayrollService {
       where: { id: payrollId },
     });
     if (!payroll) throw new NotFoundException('Payroll not found');
+    await this.assertPayrollCompanyAccess(payroll.companyId, adminId, userRole);
     if (payroll.status !== 'draft') {
       throw new BadRequestException('Only draft payrolls can be approved');
     }
@@ -816,6 +848,7 @@ export class PayrollService {
       where: { id: payrollId },
     });
     if (!payroll) throw new NotFoundException('Payroll not found');
+    await this.assertPayrollCompanyAccess(payroll.companyId, adminId, userRole);
     if (payroll.status === 'paid') {
       throw new BadRequestException('Payroll is already marked as paid');
     }
@@ -870,6 +903,7 @@ export class PayrollService {
     projectId?: string,
   ) {
     await this.assertPayrollSubscriptionActive(adminId, userRole);
+    const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
     const now = new Date();
     const m = month ? parseInt(month) - 1 : now.getMonth();
     const y = year ? parseInt(year) : now.getFullYear();
@@ -879,6 +913,7 @@ export class PayrollService {
 
     const payrolls = await this.prisma.payroll.findMany({
       where: {
+        ...(accessibleCompanyIds.length > 0 ? { companyId: { in: accessibleCompanyIds } } : {}),
         status: 'approved',
         payPeriodStart: { gte: startDate },
         payPeriodEnd: { lte: endDate },
@@ -927,6 +962,64 @@ export class PayrollService {
         totalNetPay: Math.round(totalNetPay * 100) / 100,
       },
       results,
+    };
+  }
+
+  async getPayrollOverview(adminId: string, userRole: string, month?: string, year?: string) {
+    const subscription = await this.assertPayrollSubscriptionActive(adminId, userRole);
+    const companyIds = await this.getAdminCompanyIds(adminId, userRole);
+
+    const now = new Date();
+    const m = month ? parseInt(month) - 1 : now.getMonth();
+    const y = year ? parseInt(year) : now.getFullYear();
+    const startDate = new Date(y, m, 1);
+    const endDate = new Date(y, m + 1, 0);
+
+    const [payrolls, activeWorkers, inventoryAlerts] = await Promise.all([
+      this.prisma.payroll.findMany({
+        where: {
+          ...(companyIds.length > 0 ? { companyId: { in: companyIds } } : {}),
+          payPeriodStart: { gte: startDate },
+          payPeriodEnd: { lte: endDate },
+        },
+        select: {
+          regularHours: true,
+          overtimeHours: true,
+          grossPay: true,
+          status: true,
+        },
+      }),
+      this.prisma.user.count({
+        where: {
+          role: UserRole.worker,
+          OR: [
+            { companyMembers: { some: { companyId: { in: companyIds } } } },
+            { projectMemberships: { some: { project: { companyId: { in: companyIds } } } } },
+          ],
+        },
+      }),
+      this.prisma.inventoryItem.count({
+        where: {
+          ...(companyIds.length > 0 ? { project: { companyId: { in: companyIds } } } : {}),
+          currentQty: { lte: 0 },
+        },
+      }),
+    ]);
+
+    const totalHours = payrolls.reduce((sum, payroll) => sum + payroll.regularHours + payroll.overtimeHours, 0);
+    const totalPay = payrolls.reduce((sum, payroll) => sum + payroll.grossPay, 0);
+    const pending = payrolls.filter((payroll) => payroll.status === 'draft').length;
+
+    return {
+      subscription,
+      summary: {
+        totalHours: Math.round(totalHours * 100) / 100,
+        totalHoursDisplay: this.formatMinutes(Math.floor(totalHours * 60)),
+        totalPay: Math.round(totalPay * 100) / 100,
+        pending,
+        inventoryAlerts,
+        activeWorkers,
+      },
     };
   }
 

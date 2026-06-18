@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SuperAdminDashboardQueryDto } from './dto/dashboard.dto';
+import { SuperAdminDashboardQueryDto, AttendanceQueryDto } from './dto/dashboard.dto';
 
 @Injectable()
 export class SuperAdminDashboardService {
@@ -489,5 +489,110 @@ export class SuperAdminDashboardService {
         hasPrevPage: page > 1,
       },
     };
+  }
+
+  // ─── ATTENDANCE SUMMARY (Super Admin) ─────────────────────────────────────
+  async getAttendanceSummary(query: AttendanceQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const date = query.date ? new Date(query.date) : new Date();
+
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(date);
+    end.setHours(23, 59, 59, 999);
+
+    const [total, present, late, absent, activeCheckIns, records] = await Promise.all([
+      this.prisma.attendance.count({ where: { date: { gte: start, lte: end } } }),
+      this.prisma.attendance.count({ where: { date: { gte: start, lte: end }, status: 'present' } }),
+      this.prisma.attendance.count({ where: { date: { gte: start, lte: end }, status: 'late' } }),
+      this.prisma.attendance.count({ where: { date: { gte: start, lte: end }, status: 'absent' } }),
+      this.prisma.attendance.count({
+        where: {
+          date: { gte: start, lte: end },
+          status: 'present',
+          sessions: { some: { checkOutTime: null } },
+        },
+      }),
+      this.prisma.attendance.findMany({
+        where: { date: { gte: start, lte: end } },
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { updatedAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              avatarUrl: true,
+              role: true,
+              projectMemberships: {
+                take: 1,
+                orderBy: { createdAt: 'desc' },
+                include: { project: { select: { name: true } } },
+              },
+            },
+          },
+          sessions: {
+            orderBy: { checkInTime: 'desc' },
+            take: 1,
+            select: {
+              checkInTime: true,
+              checkOutTime: true,
+              inLat: true,
+              inLng: true,
+              outLat: true,
+              outLng: true,
+              zoneSeconds: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      stats: {
+        total,
+        present,
+        late,
+        absent,
+        activeCheckIns,
+        attendanceRate: total > 0 ? Math.round((present / total) * 1000) / 10 : 0,
+      },
+      data: records.map((attendance) => ({
+        id: attendance.id,
+        date: attendance.date,
+        status: attendance.status,
+        totalHours: attendance.totalHours ?? 0,
+        worker: {
+          id: attendance.user.id,
+          fullName: attendance.user.fullName,
+          avatarUrl: attendance.user.avatarUrl,
+          role: attendance.user.projectMemberships?.[0]?.role ?? attendance.user.role,
+          projectName: attendance.user.projectMemberships?.[0]?.project?.name ?? null,
+        },
+        session: attendance.sessions[0]
+          ? {
+              checkInTime: attendance.sessions[0].checkInTime,
+              checkOutTime: attendance.sessions[0].checkOutTime,
+              inLat: attendance.sessions[0].inLat,
+              inLng: attendance.sessions[0].inLng,
+              outLat: attendance.sessions[0].outLat,
+              outLng: attendance.sessions[0].outLng,
+              zoneSeconds: attendance.sessions[0].zoneSeconds ?? 0,
+            }
+          : null,
+      })),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getAttendanceRecords(query: AttendanceQueryDto) {
+    return this.getAttendanceSummary(query);
   }
 }

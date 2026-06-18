@@ -775,4 +775,74 @@ export class SubscriptionService {
       },
     };
   }
+
+  /**
+   * Current logged-in super-admin/admin user's own subscription state.
+   * Returns null-ish structure if the account is not linked to a tenant yet.
+   */
+  async getMySubscription(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, tenantId: true, role: true },
+    });
+
+    const tenant = user?.tenantId
+      ? await this.prisma.tenant.findUnique({
+          where: { id: user.tenantId },
+          include: {
+            plan: true,
+            _count: { select: { users: true, companies: true } },
+          },
+        })
+      : user?.email
+        ? await this.prisma.tenant.findFirst({
+            where: { billingEmail: user.email },
+            include: {
+              plan: true,
+              _count: { select: { users: true, companies: true } },
+            },
+          })
+        : null;
+
+    if (!tenant) {
+      return {
+        tenantId: null,
+        tenantName: null,
+        plan: null,
+        subscriptionStatus: null,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+        planInterval: null,
+        isExpired: false,
+        usage: null,
+      };
+    }
+
+    const projectCount = await this.prisma.project.count({
+      where: { company: { tenantId: tenant.id } },
+    });
+
+    return {
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      plan: tenant.plan
+        ? {
+            id: tenant.plan.id,
+            name: tenant.plan.name,
+            priceMonthly: tenant.plan.priceMonthly,
+            priceYearly: tenant.plan.priceYearly,
+          }
+        : null,
+      subscriptionStatus: tenant.subscriptionStatus ?? null,
+      currentPeriodStart: tenant.currentPeriodStart,
+      currentPeriodEnd: tenant.currentPeriodEnd,
+      planInterval: tenant.planInterval ?? null,
+      isExpired: Boolean(tenant.currentPeriodEnd && new Date(tenant.currentPeriodEnd).getTime() < Date.now()),
+      usage: {
+        companies: { used: tenant._count.companies, max: tenant.plan?.maxCompanies ?? null },
+        projects: { used: projectCount, max: tenant.plan?.maxProjects ?? null },
+        users: { used: tenant._count.users, max: tenant.plan?.maxUsers ?? null },
+      },
+    };
+  }
 }

@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { UserRole } from '../../generated/prisma/client';
+import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import {
   CreatePlanDto,
   UpdatePlanDto,
@@ -170,5 +171,14 @@ export class SubscriptionController {
       search,
     );
   }
-}
 
+  /**
+   * GET /super-admin/subscriptions/me
+   * Current logged-in user's tenant subscription + usage
+   */
+  @Get('me')
+  @Roles(UserRole.super_admin, UserRole.admin) // class-level @Roles(super_admin) ছিল, admin কখনো এই route call করতে পারতো না
+  getMySubscription(@CurrentUser('id') userId: string) {
+    return this.subscriptionService.getMySubscription(userId);
+  }
+}

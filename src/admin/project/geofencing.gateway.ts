@@ -222,31 +222,79 @@ export class GeofencingGateway
           client.data.projectId = projectId;
           client.join(`project_${projectId}`);
 
-          // State initialize — tracking off (check-in পর্যন্ত)
-          this.workerStates.set(user.id, {
-            userId: user.id,
-            fullName: user.fullName,
-            avatarUrl: user.avatarUrl,
-            projectId,
-            lat: 0,
-            lng: 0,
-            timestamp: new Date(),
-            isInsideZone: false,
-            zoneName: null,
-            status: 'outside',
-            zoneEnteredAt: null,
-            totalZoneSeconds: 0,
-            sessionId: null,
-            trackingActive: false,
-            hasActiveViolation: false,
-            lastLat: null,
-            lastLng: null,
-            lastInsideZone: null,
+          // ✅ Reconnect হলে DB তে আগের open session আছে কিনা চেক করো —
+          // না হলে check-in করা worker reconnect (network change/app background)
+          // হলেই tracking off হয়ে যায় আর live movement বন্ধ হয়ে যায়।
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          const openSession = await this.prisma.attendanceSession.findFirst({
+            where: {
+              checkOutTime: null,
+              attendance: { userId: user.id, date: today },
+            },
+            orderBy: { checkInTime: 'desc' },
           });
 
-          console.log(
-            `✅ Worker Connected: ${user.fullName} → Project: ${projectMember.project.name}`,
-          );
+          const existing = this.workerStates.get(user.id);
+
+          if (openSession) {
+            // আগে থেকেই checked-in — state resume করো, reset নয়
+            const lat = existing?.lat ?? openSession.inLat ?? 0;
+            const lng = existing?.lng ?? openSession.inLng ?? 0;
+            const zoneResult = await this.checkInsideZone(lat, lng, projectId);
+
+            this.workerStates.set(user.id, {
+              userId: user.id,
+              fullName: user.fullName,
+              avatarUrl: user.avatarUrl,
+              projectId,
+              lat,
+              lng,
+              timestamp: new Date(),
+              isInsideZone: zoneResult.inside,
+              zoneName: zoneResult.zoneName,
+              status: zoneResult.inside ? 'inside' : 'outside',
+              zoneEnteredAt: zoneResult.inside ? new Date() : null,
+              totalZoneSeconds: openSession.zoneSeconds ?? 0,
+              sessionId: openSession.id,
+              trackingActive: true,
+              hasActiveViolation: existing?.hasActiveViolation ?? false,
+              lastLat: null,
+              lastLng: null,
+              lastInsideZone: null,
+            });
+
+            console.log(
+              `🔄 Worker RECONNECTED (tracking resumed): ${user.fullName} → Project: ${projectMember.project.name}`,
+            );
+          } else {
+            // State initialize — tracking off (check-in পর্যন্ত)
+            this.workerStates.set(user.id, {
+              userId: user.id,
+              fullName: user.fullName,
+              avatarUrl: user.avatarUrl,
+              projectId,
+              lat: 0,
+              lng: 0,
+              timestamp: new Date(),
+              isInsideZone: false,
+              zoneName: null,
+              status: 'outside',
+              zoneEnteredAt: null,
+              totalZoneSeconds: 0,
+              sessionId: null,
+              trackingActive: false,
+              hasActiveViolation: false,
+              lastLat: null,
+              lastLng: null,
+              lastInsideZone: null,
+            });
+
+            console.log(
+              `✅ Worker Connected: ${user.fullName} → Project: ${projectMember.project.name}`,
+            );
+          }
         }
 
         client.emit('connected', {

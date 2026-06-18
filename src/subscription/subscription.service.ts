@@ -113,12 +113,14 @@ export class SubscriptionService {
         })
       : null;
 
+    // ⚠️ আগে এখানে 'pending' status-কেও "already active" ধরা হতো।
+    // Checkout শুরু করার সাথে সাথেই tenant 'pending' হয়ে যায় — যদি webhook
+    // fail করে বা admin checkout abandon করে, tenant চিরতরে 'pending'-এ আটকে
+    // থাকতো এবং কোনোদিন নতুন/দ্বিতীয় subscription কেনা যেতো না।
+    // এখন শুধুমাত্র সত্যিকারের active + period চলমান subscription block করবে।
     const alreadyActive =
       existingTenant &&
-      (
-        existingTenant.subscriptionStatus === 'active' ||
-        existingTenant.subscriptionStatus === 'pending'
-      ) &&
+      existingTenant.subscriptionStatus === 'active' &&
       (
         !existingTenant.currentPeriodEnd ||
         new Date(existingTenant.currentPeriodEnd).getTime() > Date.now()
@@ -200,10 +202,11 @@ export class SubscriptionService {
     return { checkoutUrl: session.url };
   }
 
-  async handleWebhook(rawBody: Buffer, signature?: string) {
+  async handleWebhook(rawBody: Buffer | undefined, signature?: string) {
     const secret = process.env.STRIPE_WEBHOOK_SECRET;
     if (!secret) throw new BadRequestException('Stripe webhook secret is missing');
     if (!signature) throw new BadRequestException('Missing Stripe signature');
+    if (!rawBody) throw new BadRequestException('Missing raw request body');
 
     const event = this.stripe.webhooks.constructEvent(rawBody, signature, secret);
 
