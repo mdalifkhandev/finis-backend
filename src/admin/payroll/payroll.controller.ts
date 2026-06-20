@@ -17,6 +17,8 @@ import { UserRole } from '../../generated/prisma/client';
 import {
   PayrollSummaryQueryDto,
   ApprovePayrollDto,
+  BulkApprovePayrollDto,
+  BulkMarkPaidDto,
   ProcessPayrollDto,
   CreatePayrollDto,
   UpdatePayrollDto,
@@ -38,6 +40,24 @@ export class PayrollController {
     @Query('date') date?: string,
     ) {
     return this.payrollService.getPayrollUsers(adminId, userRole, date);
+  }
+
+  /** GET /admin/payroll/approved?month=1&year=2025&projectId=uuid */
+  @Get('approved')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  getApprovedPayrolls(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+    @Query() query: PayrollSummaryQueryDto,
+    @Query('projectId') projectId?: string,
+  ) {
+    return this.payrollService.getApprovedPayrolls(
+      adminId,
+      userRole,
+      query.month,
+      query.year,
+      projectId,
+    );
   }
 
   /** GET /admin/payroll/subscription-status */
@@ -85,6 +105,7 @@ export class PayrollController {
     return this.payrollService.getPayrollSummary(
       adminId,
       userRole,
+      query.date,
       query.month,
       query.year,
       projectId,
@@ -102,6 +123,7 @@ export class PayrollController {
     return this.payrollService.getPayrollOverview(
       adminId,
       userRole,
+      query.date,
       query.month,
       query.year,
     );
@@ -133,6 +155,28 @@ export class PayrollController {
       userRole,
       dto,
     );
+  }
+
+  /** POST /admin/payroll/bulk-approve */
+  @Post('bulk-approve')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  bulkApprovePayrolls(
+    @Body() dto: BulkApprovePayrollDto,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.payrollService.bulkApprovePayrolls(dto, adminId, userRole);
+  }
+
+  /** PATCH /admin/payroll/bulk-paid */
+  @Patch('bulk-paid')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  bulkMarkPaid(
+    @Body() dto: BulkMarkPaidDto,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.payrollService.bulkMarkPayrollsPaid(dto, adminId, userRole);
   }
 
   /** PATCH /admin/payroll/:id/paid */

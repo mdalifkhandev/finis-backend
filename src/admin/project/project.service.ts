@@ -304,6 +304,74 @@ export class ProjectService {
     });
   }
 
+  async getProjectWorkerSummary(userId: string, userRole: string) {
+    if (userRole !== UserRole.admin && userRole !== UserRole.super_admin) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    const companyWhere =
+      userRole === UserRole.super_admin
+        ? {}
+        : { ownerId: userId, isActive: true };
+
+    const companies = await this.prisma.company.findMany({
+      where: companyWhere,
+      select: { id: true },
+    });
+    const companyIds = companies.map((company) => company.id);
+
+    const projects = await this.prisma.project.findMany({
+      where: {
+        ...(companyIds.length > 0 ? { companyId: { in: companyIds } } : { id: { equals: '__no_projects__' } }),
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        endDate: true,
+        status: true,
+        companyId: true,
+        company: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        _count: {
+          select: {
+            teamMembers: true,
+          },
+        },
+      },
+    });
+
+    const workerCounts = await Promise.all(
+      projects.map(async (project) => {
+        const workerCount = await this.prisma.projectMember.count({
+          where: {
+            projectId: project.id,
+            role: 'worker',
+          },
+        });
+
+        return {
+          projectId: project.id,
+          projectName: project.name,
+          endDate: project.endDate,
+          status: project.status,
+          company: project.company,
+          workerCount,
+          teamMemberCount: project._count.teamMembers,
+        };
+      }),
+    );
+
+    return {
+      totalProjects: workerCounts.length,
+      projects: workerCounts,
+    };
+  }
+
 
 
   async getMyProjectNames(userId: string, userRole: string) {

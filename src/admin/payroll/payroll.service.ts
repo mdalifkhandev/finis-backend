@@ -10,6 +10,8 @@ import { UserRole } from '../../generated/prisma/client';
 import {
   CreatePayrollDto,
   ApprovePayrollDto,
+  BulkApprovePayrollDto,
+  BulkMarkPaidDto,
   UpdatePayrollDto,
 } from './dto/payroll.dto';
 
@@ -399,6 +401,42 @@ export class PayrollService {
           },
         });
 
+        const approvedPayrolls = await this.prisma.payroll.findMany({
+          where: {
+            workerId: userId,
+            status: { in: ['approved', 'paid'] },
+            ...(accessibleCompanyIds.length > 0
+              ? { companyId: { in: accessibleCompanyIds } }
+              : {}),
+          },
+          orderBy: { createdAt: 'desc' },
+          include: {
+            project: {
+              select: { id: true, name: true },
+            },
+          },
+        });
+
+        const latestDocument = await this.prisma.document.findFirst({
+          where: {
+            uploadedBy: userId,
+            ...(entry.projects.length > 0
+              ? { projectId: { in: entry.projects.map((p) => p.id) } }
+              : {}),
+          },
+          orderBy: { uploadedAt: 'desc' },
+          select: {
+            id: true,
+            fileName: true,
+            fileUrl: true,
+            fileType: true,
+            fileSizeMb: true,
+            uploadedAt: true,
+            projectId: true,
+            companyId: true,
+          },
+        });
+
         const effectiveRate = this.getEffectiveRate(entry.user, latestPayroll);
 
         // Payroll preview calculate
@@ -439,6 +477,21 @@ export class PayrollService {
             employerCost: preview.employerCost,
           },
           latestPayroll,
+          approvedPayrolls: approvedPayrolls.map((p) => ({
+            id: p.id,
+            project: p.project,
+            regularHours: p.regularHours,
+            overtimeHours: p.overtimeHours,
+            ratePerHour: p.ratePerHour,
+            grossPay: p.grossPay,
+            deductions: p.deductions,
+            netPay: p.netPay,
+            status: p.status,
+            payPeriodStart: p.payPeriodStart,
+            payPeriodEnd: p.payPeriodEnd,
+            processedAt: p.processedAt,
+          })),
+          latestDocument,
         };
       }),
     );
@@ -451,6 +504,9 @@ export class PayrollService {
       date: targetDate,
       totalUsers: filteredUsers.length,
       users: filteredUsers,
+      approvedUsers: filteredUsers.filter((item) =>
+        item.latestPayroll ? ['approved', 'paid'].includes(item.latestPayroll.status) : false,
+      ),
       subscription,
     };
   }
@@ -560,6 +616,7 @@ export class PayrollService {
   async getPayrollSummary(
     adminId: string,
     userRole: string,
+    date?: string,
     month?: string,
     year?: string,
     projectId?: string,
@@ -567,17 +624,30 @@ export class PayrollService {
     const subscription = await this.assertPayrollSubscriptionActive(adminId, userRole);
     const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
     const now = new Date();
-    const m = month ? parseInt(month) - 1 : now.getMonth();
-    const y = year ? parseInt(year) : now.getFullYear();
+    const targetYear = year ? parseInt(year) : now.getFullYear();
+    const targetMonthIndex = month ? parseInt(month) - 1 : now.getMonth();
+    const startDate = date
+      ? new Date(date)
+      : new Date(targetYear, targetMonthIndex, 1);
+    const endDate = date
+      ? new Date(date)
+      : new Date(targetYear, targetMonthIndex + 1, 0);
 
-    const startDate = new Date(y, m, 1);
-    const endDate = new Date(y, m + 1, 0);
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(23, 59, 59, 999);
 
     const payrolls = await this.prisma.payroll.findMany({
       where: {
         ...(accessibleCompanyIds.length > 0 ? { companyId: { in: accessibleCompanyIds } } : {}),
-        payPeriodStart: { gte: startDate },
-        payPeriodEnd: { lte: endDate },
+        OR: [
+          {
+            payPeriodStart: { gte: startDate },
+            payPeriodEnd: { lte: endDate },
+          },
+          {
+            status: 'paid',
+          },
+        ],
         ...(projectId && { projectId }),
       },
       include: {
@@ -628,14 +698,26 @@ export class PayrollService {
         payrollId: p.id,
         project: p.project,
         worker: p.worker,
+        displayRole: p.worker.department ?? 'Worker',
         hours: p.regularHours,
         hoursDisplay: this.formatMinutes(Math.floor(p.regularHours * 60)),
         overtimeHours: p.overtimeHours,
         rate: p.ratePerHour,
         grossPay: p.grossPay,
+        grossPayDisplay: `$${p.grossPay.toLocaleString(undefined, {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 2,
+        })}`,
         deductions: p.deductions,
         netPay: p.netPay,
         status: p.status,
+        statusLabel:
+          p.status === 'approved'
+            ? 'Approved'
+            : p.status === 'paid'
+              ? 'Paid'
+              : 'Pending',
+        canApprove: p.status === 'draft',
         payPeriodStart: p.payPeriodStart,
         payPeriodEnd: p.payPeriodEnd,
         processedAt: p.processedAt,
@@ -669,6 +751,7 @@ export class PayrollService {
     const updatedRegularHours = dto.regularHours ?? payroll.regularHours;
     const updatedOvertimeHours = dto.overtimeHours ?? payroll.overtimeHours;
     const updatedRatePerHour = dto.ratePerHour ?? payroll.ratePerHour;
+    const updatedNetPay = dto.netPay ?? undefined;
 
     const computed = this.calculatePayrollFields(
       updatedRegularHours,
@@ -695,7 +778,7 @@ export class PayrollService {
         ratePerHour: updatedRatePerHour,
         grossPay: computed.grossPay,
         deductions: computed.deductions,
-        netPay: computed.netPay,
+        netPay: updatedNetPay ?? computed.netPay,
         employerCost: computed.employerCost,
       },
       include: {
@@ -834,6 +917,134 @@ export class PayrollService {
     return updated;
   }
 
+  async bulkApprovePayrolls(
+    dto: BulkApprovePayrollDto,
+    adminId: string,
+    userRole: string,
+  ) {
+    await this.assertPayrollSubscriptionActive(adminId, userRole);
+    if (!dto.payrollIds?.length) {
+      throw new BadRequestException('payrollIds are required');
+    }
+
+    const payrolls = await this.prisma.payroll.findMany({
+      where: { id: { in: dto.payrollIds } },
+    });
+
+    if (payrolls.length === 0) {
+      throw new NotFoundException('No payrolls found');
+    }
+
+    let approvedCount = 0;
+    for (const payroll of payrolls) {
+      await this.assertPayrollCompanyAccess(payroll.companyId, adminId, userRole);
+      if (payroll.status !== 'draft') {
+        continue;
+      }
+
+      await this.prisma.payroll.update({
+        where: { id: payroll.id },
+        data: {
+          status: 'approved',
+          processedBy: adminId,
+          processedAt: new Date(),
+        },
+      });
+
+      await this.notificationsService.send({
+        userId: payroll.workerId,
+        title: 'Payroll Approved',
+        body: `Your payroll for the period has been approved. Net pay: ${payroll.netPay}`,
+        type: 'payroll',
+        refId: payroll.id,
+        refType: 'payroll',
+      });
+      approvedCount += 1;
+    }
+
+    return {
+      success: true,
+      approvedCount,
+      payrollIds: dto.payrollIds,
+    };
+  }
+
+  async getApprovedPayrolls(
+    adminId: string,
+    userRole: string,
+    month?: string,
+    year?: string,
+    projectId?: string,
+  ) {
+    await this.assertPayrollSubscriptionActive(adminId, userRole);
+    const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
+    const now = new Date();
+    const m = month ? parseInt(month) - 1 : now.getMonth();
+    const y = year ? parseInt(year) : now.getFullYear();
+    const startDate = new Date(y, m, 1);
+    const endDate = new Date(y, m + 1, 0);
+
+    const payrolls = await this.prisma.payroll.findMany({
+      where: {
+        ...(accessibleCompanyIds.length > 0 ? { companyId: { in: accessibleCompanyIds } } : {}),
+        status: 'approved',
+        payPeriodStart: { gte: startDate },
+        payPeriodEnd: { lte: endDate },
+        ...(projectId && { projectId }),
+      },
+      include: {
+        worker: {
+          select: {
+            id: true,
+            fullName: true,
+            avatarUrl: true,
+            department: true,
+            hourlyRate: true,
+          },
+        },
+        project: {
+          select: { id: true, name: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const totalGrossPay = payrolls.reduce((sum, p) => sum + p.grossPay, 0);
+    const totalNetPay = payrolls.reduce((sum, p) => sum + p.netPay, 0);
+    const approvedCount = payrolls.length;
+
+    return {
+      summary: {
+        total: payrolls.length,
+        approvedCount,
+        totalGrossPay: Math.round(totalGrossPay * 100) / 100,
+        totalNetPay: Math.round(totalNetPay * 100) / 100,
+      },
+      records: payrolls.map((p) => ({
+        payrollId: p.id,
+        worker: p.worker,
+        project: p.project,
+        displayRole: p.worker.department ?? 'Worker',
+        hours: p.regularHours,
+        overtimeHours: p.overtimeHours,
+        rate: p.ratePerHour,
+        grossPay: p.grossPay,
+        grossPayDisplay: `$${p.grossPay.toLocaleString(undefined, {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 2,
+        })}`,
+        deductions: p.deductions,
+        netPay: p.netPay,
+        status: p.status,
+        statusLabel: p.status === 'approved' ? 'Approved' : 'Paid',
+        payPeriodStart: p.payPeriodStart,
+        payPeriodEnd: p.payPeriodEnd,
+        processedAt: p.processedAt,
+        canApprove: p.status === 'draft',
+      })),
+    };
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // 7. MARK AS PAID — approved → paid (manual, status update only)
   // ─────────────────────────────────────────────────────────────────────────
@@ -890,6 +1101,63 @@ export class PayrollService {
     });
 
     return updated;
+  }
+
+  async bulkMarkPayrollsPaid(
+    dto: BulkMarkPaidDto,
+    adminId: string,
+    userRole: string,
+  ) {
+    await this.assertPayrollSubscriptionActive(adminId, userRole);
+    if (!dto.payrollIds?.length) {
+      throw new BadRequestException('payrollIds are required');
+    }
+
+    const payrolls = await this.prisma.payroll.findMany({
+      where: { id: { in: dto.payrollIds } },
+    });
+
+    if (payrolls.length === 0) {
+      throw new NotFoundException('No payrolls found');
+    }
+
+    let paidCount = 0;
+    const skipped: string[] = [];
+
+    for (const payroll of payrolls) {
+      await this.assertPayrollCompanyAccess(payroll.companyId, adminId, userRole);
+      if (payroll.status !== 'approved') {
+        skipped.push(payroll.id);
+        continue;
+      }
+
+      await this.prisma.payroll.update({
+        where: { id: payroll.id },
+        data: {
+          status: 'paid',
+          processedBy: adminId,
+          processedAt: new Date(),
+        },
+      });
+
+      await this.notificationsService.send({
+        userId: payroll.workerId,
+        title: 'Payment Processed 💰',
+        body: `Your payment of ${payroll.netPay} has been processed.`,
+        type: 'payroll',
+        refId: payroll.id,
+        refType: 'payroll',
+      });
+
+      paidCount += 1;
+    }
+
+    return {
+      success: true,
+      paidCount,
+      skipped,
+      payrollIds: dto.payrollIds,
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -965,15 +1233,17 @@ export class PayrollService {
     };
   }
 
-  async getPayrollOverview(adminId: string, userRole: string, month?: string, year?: string) {
+  async getPayrollOverview(adminId: string, userRole: string, date?: string, month?: string, year?: string) {
     const subscription = await this.assertPayrollSubscriptionActive(adminId, userRole);
     const companyIds = await this.getAdminCompanyIds(adminId, userRole);
 
     const now = new Date();
-    const m = month ? parseInt(month) - 1 : now.getMonth();
-    const y = year ? parseInt(year) : now.getFullYear();
-    const startDate = new Date(y, m, 1);
-    const endDate = new Date(y, m + 1, 0);
+    const targetYear = year ? parseInt(year) : now.getFullYear();
+    const targetMonthIndex = month ? parseInt(month) - 1 : now.getMonth();
+    const startDate = date ? new Date(date) : new Date(targetYear, targetMonthIndex, 1);
+    const endDate = date ? new Date(date) : new Date(targetYear, targetMonthIndex + 1, 0);
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(23, 59, 59, 999);
 
     const [payrolls, activeWorkers, inventoryAlerts] = await Promise.all([
       this.prisma.payroll.findMany({

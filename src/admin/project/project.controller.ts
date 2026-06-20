@@ -45,6 +45,16 @@ export class ProjectController {
     return this.projectService.getMyProjects(userId, userRole, status, search);
   }
 
+  /** GET /admin/projects/worker-summary */
+  @Get('worker-summary')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  getProjectWorkerSummary(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.getProjectWorkerSummary(userId, userRole);
+  }
+
 
   /** GET /admin/projects/names */
   @Get('names')

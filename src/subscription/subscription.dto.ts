@@ -1,4 +1,4 @@
-import { IsEmail, IsIn, IsString } from 'class-validator';
+import { IsEmail, IsIn, IsString, IsUUID } from 'class-validator';
 
 export class VerifyCheckoutDto {
   @IsEmail()
@@ -7,7 +7,7 @@ export class VerifyCheckoutDto {
   @IsString()
   password!: string;
 
-  @IsString()
+  @IsUUID()
   planId!: string;
 
   @IsIn(['monthly', 'yearly'])

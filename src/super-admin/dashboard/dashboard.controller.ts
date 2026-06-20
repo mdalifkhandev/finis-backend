@@ -65,4 +65,17 @@ export class SuperAdminDashboardController {
   getAttendanceRecords(@Query() query: AttendanceQueryDto) {
     return this.superAdminDashboardService.getAttendanceRecords(query);
   }
+
+  /**
+   * GET /super-admin/dashboard/recent-buyers
+   * Recent subscription buyers — sorted by latest renewal
+   * Query: ?page=1&limit=10
+   */
+  @Get('dashboard/recent-buyers')
+  getRecentBuyers(@Query() query: PaginationQueryDto) {
+    return this.superAdminDashboardService.getRecentBuyers(
+      query.page,
+      query.limit,
+    );
+  }
 }

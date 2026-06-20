@@ -9,71 +9,74 @@ datasource db {
 }
 
 model SubscriptionPlan {
-  id                   String   @id @default(uuid()) @db.Uuid
-  name                 String
-  priceMonthly         Float    @map("price_monthly")
-  priceYearly          Float?   @map("price_yearly")
-  stripeProductId      String?  @map("stripe_product_id")
-  stripePriceMonthlyId String?  @map("stripe_price_monthly_id")
-  stripePriceYearlyId   String?  @map("stripe_price_yearly_id")
-  maxCompanies         Int?     @map("max_companies")
-  maxProjects          Int?     @map("max_projects")
-  maxUsers             Int?     @map("max_users")
-    hasGeofencing        Boolean  @default(false) @map("has_geofencing")
-  hasAdvancedReporting Boolean  @default(false) @map("has_advanced_reporting")
-  hasCustomReporting   Boolean  @default(false) @map("has_custom_reporting")
-  hasWhiteLabel        Boolean  @default(false) @map("has_white_label")
-  supportLevel         String?  @map("support_level")
-  isActive             Boolean  @default(true) @map("is_active")
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
-  tenants              Tenant[]
+  id                    String                 @id @default(uuid()) @db.Uuid
+  name                  String
+  priceMonthly          Float                  @map("price_monthly")
+  priceYearly           Float?                 @map("price_yearly")
+  stripeProductId       String?                @map("stripe_product_id")
+  stripePriceMonthlyId  String?                @map("stripe_price_monthly_id")
+  stripePriceYearlyId   String?                @map("stripe_price_yearly_id")
+  maxCompanies          Int?                   @map("max_companies")
+  maxProjects           Int?                   @map("max_projects")
+  maxUsers              Int?                   @map("max_users")
+  hasGeofencing         Boolean                @default(false) @map("has_geofencing")
+  hasAdvancedReporting  Boolean                @default(false) @map("has_advanced_reporting")
+  hasCustomReporting    Boolean                @default(false) @map("has_custom_reporting")
+  hasWhiteLabel         Boolean                @default(false) @map("has_white_label")
+  supportLevel          String?                @map("support_level")
+  isActive              Boolean                @default(true) @map("is_active")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  tenants               Tenant[]
+  subscriptionPurchases SubscriptionPurchase[]
 
   @@map("subscription_plans")
 }
 
 model Tenant {
-    id           String           @id @default(uuid()) @db.Uuid
-    name         String
-    domain       String?          @unique
-    planId       String           @map("plan_id") @db.Uuid
-    status       TenantStatus     @default(trial)
-    trialEndsAt  DateTime?        @map("trial_ends_at")
-    billingEmail String?          @map("billing_email")
-    stripeCustomerId     String?  @map("stripe_customer_id")
-    stripeSubscriptionId String?  @map("stripe_subscription_id")
-    stripePriceId        String?  @map("stripe_price_id")
-    subscriptionStatus   String?  @map("subscription_status")
-    currentPeriodStart   DateTime? @map("current_period_start")
-    currentPeriodEnd     DateTime? @map("current_period_end")
-    planInterval         String?  @map("plan_interval")
-    createdAt    DateTime         @default(now()) @map("created_at")
-    updatedAt    DateTime         @updatedAt @map("updated_at")
-    companies    Company[]
-  plan         SubscriptionPlan @relation(fields: [planId], references: [id])
-  users        User[]
+  id                    String                 @id @default(uuid()) @db.Uuid
+  name                  String
+  domain                String?                @unique
+  planId                String                 @map("plan_id") @db.Uuid
+  status                TenantStatus           @default(trial)
+  trialEndsAt           DateTime?              @map("trial_ends_at")
+  billingEmail          String?                @map("billing_email")
+  stripeCustomerId      String?                @map("stripe_customer_id")
+  stripeSubscriptionId  String?                @map("stripe_subscription_id")
+  stripePriceId         String?                @map("stripe_price_id")
+  subscriptionStatus    String?                @map("subscription_status")
+  currentPeriodStart    DateTime?              @map("current_period_start")
+  currentPeriodEnd      DateTime?              @map("current_period_end")
+  planInterval          String?                @map("plan_interval")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  companies             Company[]
+  plan                  SubscriptionPlan       @relation(fields: [planId], references: [id])
+  users                 User[]
+  subscriptionPurchases SubscriptionPurchase[]
 
   @@map("tenants")
 }
 
 model SubscriptionPurchase {
-  id                   String   @id @default(uuid()) @db.Uuid
-  tenantId             String   @map("tenant_id") @db.Uuid
-  userId               String   @map("user_id") @db.Uuid
-  planId               String   @map("plan_id") @db.Uuid
-  planName             String   @map("plan_name")
-  stripeSubscriptionId String?  @map("stripe_subscription_id")
-  stripePriceId        String?  @map("stripe_price_id")
+  id                   String         @id @default(uuid()) @db.Uuid
+  tenantId             String         @map("tenant_id") @db.Uuid
+  userId               String         @map("user_id") @db.Uuid
+  planId               String         @map("plan_id") @db.Uuid
+  planName             String         @map("plan_name")
+  stripeSubscriptionId String?        @map("stripe_subscription_id")
+  stripePriceId        String?        @map("stripe_price_id")
   interval             String
   amount               Float
-  status               String   @default("active")
-  startedAt            DateTime @default(now()) @map("started_at")
-  endedAt              DateTime? @map("ended_at")
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
+  status               PurchaseStatus @default(active)
+  startedAt            DateTime       @default(now()) @map("started_at")
+  endedAt              DateTime?      @map("ended_at")
+  canceledAt           DateTime?      @map("canceled_at")
+  createdAt            DateTime       @default(now()) @map("created_at")
+  updatedAt            DateTime       @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   plan   SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
 
   @@map("subscription_purchases")
@@ -118,6 +121,7 @@ model User {
   sentMessages            Message[]                @relation("MessageSender")
   notifications           Notification[]
   deviceTokens            DeviceToken[]
+  subscriptionPurchases   SubscriptionPurchase[]
   payrolls                Payroll[]
   quotesCreated           Quote[]
   inventoryUsageLogs      InventoryUsageLog[]
@@ -314,21 +318,21 @@ model Project {
 }
 
 model Quote {
-  id          String   @id @default(uuid()) @db.Uuid
-  createdById String   @map("created_by_id") @db.Uuid
-  projectType String   @map("project_type")
-  propertyType String  @map("property_type")
-  unitType    String   @map("unit_type")
-  title       String
-  quantity    Float    @default(1)
-  unit        String?
-  unitPrice   Float    @default(0) @map("unit_price")
-  subtotal    Float    @default(0)
-  notes       String?
-  isCustom    Boolean  @default(false) @map("is_custom")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  id           String   @id @default(uuid()) @db.Uuid
+  createdById  String   @map("created_by_id") @db.Uuid
+  projectType  String   @map("project_type")
+  propertyType String   @map("property_type")
+  unitType     String   @map("unit_type")
+  title        String
+  quantity     Float    @default(1)
+  unit         String?
+  unitPrice    Float    @default(0) @map("unit_price")
+  subtotal     Float    @default(0)
+  notes        String?
+  isCustom     Boolean  @default(false) @map("is_custom")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  createdBy    User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
 
   @@index([projectType, propertyType, unitType])
   @@map("quotes")
@@ -966,6 +970,13 @@ enum SubscriptionStatus {
   active
   inactive
   cancelled
+}
+
+enum PurchaseStatus {
+  active
+  canceled
+  expired
+  switched
 }
 
 enum InvitationStatus {

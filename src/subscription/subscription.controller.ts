@@ -31,7 +31,7 @@ export class SubscriptionController {
     @Req() req: RawBodyRequest<Request>,
     @Headers('stripe-signature') signature?: string,
   ) {
-    return this.subscriptionService.handleWebhook(req.rawBody ?? Buffer.alloc(0), signature);
+    return this.subscriptionService.handleWebhook(req.rawBody, signature);
   }
 }
 

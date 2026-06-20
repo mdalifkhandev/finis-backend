@@ -9,10 +9,32 @@ export class PayrollSummaryQueryDto {
   @IsOptional()
   @IsString()
   year?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date?: string;
 }
 
 // ─── Approve Payroll ──────────────────────────────────────────────────────────
 export class ApprovePayrollDto {
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
+export class BulkApprovePayrollDto {
+  @IsString({ each: true })
+  payrollIds!: string[];
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
+export class BulkMarkPaidDto {
+  @IsString({ each: true })
+  payrollIds!: string[];
+
   @IsOptional()
   @IsString()
   note?: string;
@@ -43,6 +65,15 @@ export class UpdatePayrollDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  netPay?: number;
+
+  @IsOptional()
+  @IsString()
+  documentUrl?: string;
 }
 
 // ─── Process Payroll ──────────────────────────────────────────────────────────

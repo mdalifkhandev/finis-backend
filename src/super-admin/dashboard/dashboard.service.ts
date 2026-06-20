@@ -58,9 +58,18 @@ export class SuperAdminDashboardService {
     return Math.round(((current - previous) / previous) * 100 * 10) / 10;
   }
 
+  private getBilledAmount(
+    plan: { priceMonthly: number; priceYearly: number | null },
+    interval?: string | null,
+  ) {
+    if (interval === 'yearly') return plan.priceYearly ?? plan.priceMonthly;
+    return plan.priceMonthly;
+  }
+
   // ─── MAIN DASHBOARD ───────────────────────────────────────────────────────
   async getSuperAdminDashboard(query: SuperAdminDashboardQueryDto) {
     const { start, end, prevStart, prevEnd } = this.getDateRange(query);
+    const now = new Date();
 
     // ─── Stat Cards ────────────────────────────────────────────────────────
     const [
@@ -76,6 +85,10 @@ export class SuperAdminDashboardService {
       prevActiveProjects,
       prevTotalWorkforce,
       prevPayrollCostRaw,
+      subscriptionPurchases,
+      activeTenants,
+      expiredPausedTenants,
+      totalTenants,
     ] = await Promise.all([
       this.prisma.company.count({
         where: { isActive: true, createdAt: { lte: end } },
@@ -118,6 +131,51 @@ export class SuperAdminDashboardService {
           createdAt: { gte: prevStart, lte: prevEnd },
         },
       }),
+      // SubscriptionPurchase — 'paid' valid status না, সঠিক enum: 'active' | 'canceled' | 'expired' | 'switched'
+      this.prisma.subscriptionPurchase.groupBy({
+        by: ['planId', 'planName', 'interval'],
+        where: {
+          createdAt: { gte: start, lte: end },
+          status: 'active',
+        },
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+      // Active tenants — subscriptionStatus active + period এখনো বাকি
+      this.prisma.tenant.findMany({
+        where: {
+          subscriptionStatus: 'active',
+          currentPeriodEnd: { gt: now },
+        },
+        select: {
+          planInterval: true,
+          plan: {
+            select: {
+              id: true,
+              name: true,
+              priceMonthly: true,
+              priceYearly: true,
+            },
+          },
+        },
+      }),
+      // Expired / Paused tenants — dashboard এ "Expired/Paused" card
+      this.prisma.tenant.count({
+        where: {
+          OR: [
+            { status: 'suspended' },
+            { subscriptionStatus: 'past_due' },
+            { subscriptionStatus: 'cancelled' },
+            // active কিন্তু period শেষ
+            {
+              subscriptionStatus: 'active',
+              currentPeriodEnd: { lt: now },
+            },
+          ],
+        },
+      }),
+      // Total tenants — dashboard এ "Total Tenants" card
+      this.prisma.tenant.count(),
     ]);
 
     const payrollCost = Number(payrollCostRaw._sum.netPay ?? 0);
@@ -132,6 +190,63 @@ export class SuperAdminDashboardService {
       totalGeofenceChecks > 0
         ? Math.round((geofenceViolations / totalGeofenceChecks) * 1000) / 10
         : 0;
+
+    const totalSubscriptionRevenue = subscriptionPurchases.reduce(
+      (sum, purchase) => sum + Number(purchase._sum.amount ?? 0),
+      0,
+    );
+    const totalSubscriptionSales = subscriptionPurchases.reduce(
+      (sum, purchase) => sum + Number(purchase._count._all ?? 0),
+      0,
+    );
+
+    // Monthly / Yearly revenue আলাদা করা — dashboard card-এর জন্য
+    const monthlyRevenue = subscriptionPurchases
+      .filter((p) => p.interval === 'monthly')
+      .reduce((sum, p) => sum + Number(p._sum.amount ?? 0), 0);
+    const yearlyRevenue = subscriptionPurchases
+      .filter((p) => p.interval === 'yearly')
+      .reduce((sum, p) => sum + Number(p._sum.amount ?? 0), 0);
+
+    const revenueByPlanMap = new Map<
+      string,
+      { planId: string; planName: string; salesCount: number; revenue: number; monthlyCount: number; yearlyCount: number }
+    >();
+
+    for (const purchase of subscriptionPurchases) {
+      const key = purchase.planId;
+      const current = revenueByPlanMap.get(key) ?? {
+        planId: purchase.planId,
+        planName: purchase.planName,
+        salesCount: 0,
+        revenue: 0,
+        monthlyCount: 0,
+        yearlyCount: 0,
+      };
+
+      const count = Number(purchase._count._all ?? 0);
+      const revenue = Number(purchase._sum.amount ?? 0);
+      current.salesCount += count;
+      current.revenue += revenue;
+      if (purchase.interval === 'monthly') {
+        current.monthlyCount += count;
+      } else if (purchase.interval === 'yearly') {
+        current.yearlyCount += count;
+      }
+      revenueByPlanMap.set(key, current);
+    }
+
+    const revenueByPlan = [...revenueByPlanMap.values()].sort(
+      (a, b) => b.revenue - a.revenue,
+    );
+    const activeSubscriptionCount = activeTenants.length;
+    const activeSubscriptionAmount = activeTenants.reduce((sum, tenant) => {
+      const billedAmount = this.getBilledAmount(
+        { priceMonthly: tenant.plan.priceMonthly, priceYearly: tenant.plan.priceYearly ?? null },
+        tenant.planInterval,
+      );
+      return sum + Number(billedAmount ?? 0);
+    }, 0);
 
     // ─── Project Completion Forecast (monthly bar chart) ───────────────────
     const currentYear = new Date().getFullYear();
@@ -258,6 +373,27 @@ export class SuperAdminDashboardService {
           value: payrollCost,
           change: this.calcChange(payrollCost, prevPayrollCost),
         },
+      },
+
+      subscriptionOverview: {
+        // Dashboard screenshot card mapping:
+        // TOTAL REVENUE        → totalRevenue
+        // MONTHLY REVENUE      → monthlyRevenue
+        // YEARLY REVENUE       → yearlyRevenue
+        // SOLD SUBSCRIPTIONS   → soldCount
+        // ACTIVE SUBSCRIPTIONS → activeSubscriptions
+        // EXPIRED / PAUSED     → expiredPaused
+        // TOTAL TENANTS        → totalTenants
+        cards: {
+          totalRevenue: Math.round(totalSubscriptionRevenue * 100) / 100,
+          monthlyRevenue: Math.round(monthlyRevenue * 100) / 100,
+          yearlyRevenue: Math.round(yearlyRevenue * 100) / 100,
+          soldCount: totalSubscriptionSales,
+          activeSubscriptions: activeSubscriptionCount,
+          expiredPaused: expiredPausedTenants,
+          totalTenants,
+        },
+        revenueByPlan,
       },
 
       indicators: {
@@ -594,5 +730,74 @@ export class SuperAdminDashboardService {
 
   async getAttendanceRecords(query: AttendanceQueryDto) {
     return this.getAttendanceSummary(query);
+  }
+
+  // ─── RECENT BUYERS (Paginated) ────────────────────────────────────────────
+  /**
+   * GET /super-admin/dashboard/recent-buyers
+   * কারা সম্প্রতি subscription কিনেছে — plan name, amount, interval, date সহ
+   * Screenshot: "Recent Buyers — Sorted by latest renewal"
+   */
+  async getRecentBuyers(page: number = 1, limit: number = 10) {
+    const skip = (page - 1) * limit;
+
+    const [purchases, total] = await Promise.all([
+      this.prisma.subscriptionPurchase.findMany({
+        where: { status: 'active' },
+        skip,
+        take: limit,
+        orderBy: { startedAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              avatarUrl: true,
+            },
+          },
+          plan: {
+            select: {
+              id: true,
+              name: true,
+              priceMonthly: true,
+              priceYearly: true,
+            },
+          },
+          tenant: {
+            select: {
+              id: true,
+              name: true,
+              status: true,
+            },
+          },
+        },
+      }),
+      this.prisma.subscriptionPurchase.count({ where: { status: 'active' } }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data: purchases.map((p) => ({
+        id: p.id,
+        user: p.user,
+        tenant: p.tenant,
+        plan: p.plan,
+        interval: p.interval,
+        amount: p.amount,
+        status: p.status,
+        startedAt: p.startedAt,
+        endedAt: p.endedAt,
+      })),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
   }
 }
