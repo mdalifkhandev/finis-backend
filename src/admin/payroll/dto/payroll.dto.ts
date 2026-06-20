@@ -3,16 +3,16 @@ import { IsString, IsNumber, IsOptional, IsDateString, Min } from 'class-validat
 // ─── Payroll Summary Query ────────────────────────────────────────────────────
 export class PayrollSummaryQueryDto {
   @IsOptional()
+  @IsDateString()
+  date?: string;
+
+  @IsOptional()
   @IsString()
   month?: string;
 
   @IsOptional()
   @IsString()
   year?: string;
-
-  @IsOptional()
-  @IsDateString()
-  date?: string;
 }
 
 // ─── Approve Payroll ──────────────────────────────────────────────────────────

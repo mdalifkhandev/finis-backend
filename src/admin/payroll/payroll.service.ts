@@ -972,6 +972,7 @@ export class PayrollService {
   async getApprovedPayrolls(
     adminId: string,
     userRole: string,
+    date?: string,
     month?: string,
     year?: string,
     projectId?: string,
@@ -979,10 +980,23 @@ export class PayrollService {
     await this.assertPayrollSubscriptionActive(adminId, userRole);
     const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
     const now = new Date();
-    const m = month ? parseInt(month) - 1 : now.getMonth();
-    const y = year ? parseInt(year) : now.getFullYear();
-    const startDate = new Date(y, m, 1);
-    const endDate = new Date(y, m + 1, 0);
+    const hasDate = Boolean(date);
+    const startDate = hasDate
+      ? new Date(date as string)
+      : new Date(
+          year ? parseInt(year) : now.getFullYear(),
+          month ? parseInt(month) - 1 : now.getMonth(),
+          1,
+        );
+    const endDate = hasDate
+      ? new Date(date as string)
+      : new Date(
+          year ? parseInt(year) : now.getFullYear(),
+          month ? parseInt(month) : now.getMonth() + 1,
+          0,
+        );
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(23, 59, 59, 999);
 
     const payrolls = await this.prisma.payroll.findMany({
       where: {

@@ -54,6 +54,7 @@ export class PayrollController {
     return this.payrollService.getApprovedPayrolls(
       adminId,
       userRole,
+      query.date,
       query.month,
       query.year,
       projectId,
