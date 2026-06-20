@@ -40,9 +40,9 @@ export class SubscriptionService {
       plan.stripeProductId
         ? await this.stripe.products.retrieve(plan.stripeProductId)
         : await this.stripe.products.create({
-            name: plan.name,
-            metadata: { planId: plan.id },
-          });
+          name: plan.name,
+          metadata: { planId: plan.id },
+        });
 
     const resolveRecurringPrice = async (
       priceId: string | null | undefined,
@@ -547,6 +547,98 @@ export class SubscriptionService {
     };
   }
 
+  async getSubscriptionSalesTrend(period: 'weekly' | 'monthly' | 'yearly' = 'weekly') {
+    const now = new Date();
+    const bucketCount = period === 'yearly' ? 12 : period === 'monthly' ? 30 : 7;
+    const start = new Date(now);
+
+    if (period === 'yearly') {
+      start.setMonth(0, 1);
+      start.setHours(0, 0, 0, 0);
+    } else if (period === 'monthly') {
+      start.setDate(1);
+      start.setHours(0, 0, 0, 0);
+    } else {
+      start.setDate(now.getDate() - 6);
+      start.setHours(0, 0, 0, 0);
+    }
+
+    const purchases = await this.prisma.subscriptionPurchase.findMany({
+      where: {
+        createdAt: { gte: start, lte: now },
+      },
+      select: {
+        amount: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const buckets = new Map<string, { label: string; revenue: number; salesCount: number; rawDate: Date }>();
+
+    const pushBucket = (key: string, label: string, rawDate: Date) => {
+      if (!buckets.has(key)) {
+        buckets.set(key, { label, revenue: 0, salesCount: 0, rawDate });
+      }
+      return buckets.get(key)!;
+    };
+
+    for (const purchase of purchases) {
+      const d = new Date(purchase.createdAt);
+      if (period === 'yearly') {
+        const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
+        const label = d.toLocaleString('en-US', { month: 'short' });
+        const bucket = pushBucket(key, label, new Date(d.getFullYear(), d.getMonth(), 1));
+        bucket.revenue += Number(purchase.amount ?? 0);
+        bucket.salesCount += 1;
+      } else if (period === 'monthly') {
+        const key = d.toISOString().slice(0, 10);
+        const label = d.getDate().toString();
+        const bucket = pushBucket(key, label, new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+        bucket.revenue += Number(purchase.amount ?? 0);
+        bucket.salesCount += 1;
+      } else {
+        const day = Math.floor((d.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+        const key = `${day}`;
+        const label = d.toLocaleDateString('en-US', { weekday: 'short' });
+        const bucket = pushBucket(key, label, new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+        bucket.revenue += Number(purchase.amount ?? 0);
+        bucket.salesCount += 1;
+      }
+    }
+
+    const labels =
+      period === 'yearly'
+        ? Array.from({ length: 12 }, (_, index) => new Date(now.getFullYear(), index, 1).toLocaleString('en-US', { month: 'short' }))
+        : period === 'monthly'
+          ? Array.from({ length: 30 }, (_, index) => String(index + 1))
+          : Array.from({ length: 7 }, (_, index) => {
+            const date = new Date(start);
+            date.setDate(start.getDate() + index);
+            return date.toLocaleDateString('en-US', { weekday: 'short' });
+          });
+
+    const data = labels.map((label) => {
+      const match = [...buckets.values()].find((item) => item.label === label);
+      return {
+        label,
+        revenue: Math.round((match?.revenue ?? 0) * 100) / 100,
+        salesCount: match?.salesCount ?? 0,
+      };
+    });
+
+    return {
+      period,
+      start,
+      end: now,
+      data,
+      summary: {
+        totalSales: purchases.length,
+        totalRevenue: Math.round(purchases.reduce((sum, p) => sum + Number(p.amount ?? 0), 0) * 100) / 100,
+      },
+    };
+  }
+
   /** Single tenant detail */
   async getTenantById(tenantId: string) {
     const tenant = await this.prisma.tenant.findUnique({
@@ -613,30 +705,29 @@ export class SubscriptionService {
    * super_admin এটা করবে
    */
   async createTenant(dto: CreateTenantDto) {
-    // Plan exists কিনা check
-    const plan = await this.prisma.subscriptionPlan.findUnique({
-      where: { id: dto.planId },
-    });
+    const plan = await this.prisma.subscriptionPlan.findUnique({ where: { id: dto.planId } });
     if (!plan) throw new NotFoundException('Subscription plan not found');
     if (!plan.isActive) throw new BadRequestException('This plan is not active');
 
-    // Email duplicate check
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: dto.adminEmail },
-    });
+    const existingUser = await this.prisma.user.findUnique({ where: { email: dto.adminEmail } });
     if (existingUser) throw new ConflictException('An admin with this email already exists');
 
-    // Domain duplicate check
     if (dto.domain) {
-      const existingTenant = await this.prisma.tenant.findUnique({
-        where: { domain: dto.domain },
-      });
+      const existingTenant = await this.prisma.tenant.findUnique({ where: { domain: dto.domain } });
       if (existingTenant) throw new ConflictException('Domain already taken');
     }
 
-    // Transaction — Tenant + Admin User একসাথে create
+    const interval = (dto as any).planInterval === 'yearly' ? 'yearly' : 'monthly';
+    const billedAmount = this.getBilledAmount(
+      { priceMonthly: plan.priceMonthly, priceYearly: plan.priceYearly ?? null },
+      interval,
+    );
+    const now = new Date();
+    const periodEnd = new Date(now);
+    if (interval === 'yearly') periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+    else periodEnd.setMonth(periodEnd.getMonth() + 1);
+
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Tenant তৈরি
       const tenant = await tx.tenant.create({
         data: {
           name: dto.tenantName,
@@ -644,10 +735,13 @@ export class SubscriptionService {
           billingEmail: dto.billingEmail ?? dto.adminEmail,
           planId: dto.planId,
           status: 'active',
+          subscriptionStatus: 'active',
+          planInterval: interval,
+          currentPeriodStart: now,
+          currentPeriodEnd: periodEnd,
         },
       });
 
-      // 2. Admin user তৈরি
       const passwordHash = await bcrypt.hash(dto.adminPassword, 10);
       const admin = await tx.user.create({
         data: {
@@ -659,14 +753,20 @@ export class SubscriptionService {
           role: UserRole.admin,
           status: 'active',
         },
-        select: {
-          id: true,
-          fullName: true,
-          email: true,
-          phone: true,
-          role: true,
-          status: true,
-          createdAt: true,
+        select: { id: true, fullName: true, email: true, phone: true, role: true, status: true, createdAt: true },
+      });
+
+      // ↓ eitai missing chilo — ei row na thakle revenue/chart kichu dekhabe na
+      await tx.subscriptionPurchase.create({
+        data: {
+          tenantId: tenant.id,
+          userId: admin.id,
+          planId: plan.id,
+          planName: plan.name,
+          interval,
+          amount: billedAmount,
+          status: 'active',
+          startedAt: now,
         },
       });
 
@@ -675,68 +775,69 @@ export class SubscriptionService {
 
     return {
       message: 'Tenant and admin created successfully',
-      tenant: {
-        id: result.tenant.id,
-        name: result.tenant.name,
-        domain: result.tenant.domain,
-        status: result.tenant.status,
-        planId: result.tenant.planId,
-      },
+      tenant: { id: result.tenant.id, name: result.tenant.name, domain: result.tenant.domain, status: result.tenant.status, planId: result.tenant.planId },
       admin: result.admin,
     };
   }
-
   /** Plan change — upgrade / downgrade */
   async updateTenantPlan(tenantId: string, dto: UpdateTenantPlanDto) {
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
-      include: {
-        plan: true,
-        _count: { select: { users: true, companies: true } },
-      },
+      include: { plan: true, _count: { select: { users: true, companies: true } } },
     });
     if (!tenant) throw new NotFoundException('Tenant not found');
 
-    const newPlan = await this.prisma.subscriptionPlan.findUnique({
-      where: { id: dto.planId },
-    });
+    const newPlan = await this.prisma.subscriptionPlan.findUnique({ where: { id: dto.planId } });
     if (!newPlan) throw new NotFoundException('Plan not found');
     if (!newPlan.isActive) throw new BadRequestException('This plan is not active');
 
-    // Downgrade safety check — নতুন plan এর limit এর চেয়ে বেশি ব্যবহার হলে block
-    const projectCount = await this.prisma.project.count({
-      where: { company: { tenantId } },
-    });
-
+    const projectCount = await this.prisma.project.count({ where: { company: { tenantId } } });
     if (newPlan.maxCompanies && tenant._count.companies > newPlan.maxCompanies) {
-      throw new BadRequestException(
-        `Cannot downgrade — tenant has ${tenant._count.companies} companies but new plan allows only ${newPlan.maxCompanies}`,
-      );
+      throw new BadRequestException(`Cannot downgrade — tenant has ${tenant._count.companies} companies but new plan allows only ${newPlan.maxCompanies}`);
     }
     if (newPlan.maxProjects && projectCount > newPlan.maxProjects) {
-      throw new BadRequestException(
-        `Cannot downgrade — tenant has ${projectCount} projects but new plan allows only ${newPlan.maxProjects}`,
-      );
+      throw new BadRequestException(`Cannot downgrade — tenant has ${projectCount} projects but new plan allows only ${newPlan.maxProjects}`);
     }
     if (newPlan.maxUsers && tenant._count.users > newPlan.maxUsers) {
-      throw new BadRequestException(
-        `Cannot downgrade — tenant has ${tenant._count.users} users but new plan allows only ${newPlan.maxUsers}`,
-      );
+      throw new BadRequestException(`Cannot downgrade — tenant has ${tenant._count.users} users but new plan allows only ${newPlan.maxUsers}`);
     }
 
-    const updated = await this.prisma.tenant.update({
-      where: { id: tenantId },
-      data: { planId: dto.planId },
-      include: { plan: true },
+    const interval = tenant.planInterval ?? 'monthly';
+    const billedAmount = this.getBilledAmount(
+      { priceMonthly: newPlan.priceMonthly, priceYearly: newPlan.priceYearly ?? null },
+      interval,
+    );
+    const adminUser = await this.prisma.user.findFirst({ where: { tenantId, role: UserRole.admin } });
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updatedTenant = await tx.tenant.update({
+        where: { id: tenantId },
+        data: { planId: dto.planId },
+        include: { plan: true },
+      });
+
+      // ↓ plan change-ke ekhon ekta "sale" hisebe record kora hocche
+      if (adminUser) {
+        await tx.subscriptionPurchase.create({
+          data: {
+            tenantId,
+            userId: adminUser.id,
+            planId: newPlan.id,
+            planName: newPlan.name,
+            interval,
+            amount: billedAmount,
+            status: 'active',
+            startedAt: new Date(),
+          },
+        });
+      }
+
+      return updatedTenant;
     });
 
     return {
       message: 'Plan updated successfully',
-      tenant: {
-        id: updated.id,
-        name: updated.name,
-        plan: { id: updated.plan.id, name: updated.plan.name },
-      },
+      tenant: { id: updated.id, name: updated.name, plan: { id: updated.plan.id, name: updated.plan.name } },
     };
   }
 
@@ -917,20 +1018,20 @@ export class SubscriptionService {
 
     const tenant = user?.tenantId
       ? await this.prisma.tenant.findUnique({
-          where: { id: user.tenantId },
+        where: { id: user.tenantId },
+        include: {
+          plan: true,
+          _count: { select: { users: true, companies: true } },
+        },
+      })
+      : user?.email
+        ? await this.prisma.tenant.findFirst({
+          where: { billingEmail: user.email },
           include: {
             plan: true,
             _count: { select: { users: true, companies: true } },
           },
         })
-      : user?.email
-        ? await this.prisma.tenant.findFirst({
-            where: { billingEmail: user.email },
-            include: {
-              plan: true,
-              _count: { select: { users: true, companies: true } },
-            },
-          })
         : null;
 
     if (!tenant) {
@@ -956,11 +1057,11 @@ export class SubscriptionService {
       tenantName: tenant.name,
       plan: tenant.plan
         ? {
-            id: tenant.plan.id,
-            name: tenant.plan.name,
-            priceMonthly: tenant.plan.priceMonthly,
-            priceYearly: tenant.plan.priceYearly,
-          }
+          id: tenant.plan.id,
+          name: tenant.plan.name,
+          priceMonthly: tenant.plan.priceMonthly,
+          priceYearly: tenant.plan.priceYearly,
+        }
         : null,
       subscriptionStatus: tenant.subscriptionStatus ?? null,
       currentPeriodStart: tenant.currentPeriodStart,

@@ -182,6 +182,17 @@ export class SubscriptionController {
   }
 
   /**
+   * GET /super-admin/subscriptions/sales-trend?period=weekly|monthly|yearly
+   * Date-wise subscription sales chart data
+   */
+  @Get('sales-trend')
+  getSubscriptionSalesTrend(@Query('period') period?: string) {
+    return this.subscriptionService.getSubscriptionSalesTrend(
+      period === 'monthly' || period === 'yearly' ? period : 'weekly',
+    );
+  }
+
+  /**
    * GET /super-admin/subscriptions/me
    * Current logged-in user's tenant subscription + usage
    */
