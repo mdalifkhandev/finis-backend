@@ -173,6 +173,15 @@ export class SubscriptionController {
   }
 
   /**
+   * GET /super-admin/subscriptions/tenant-management-overview
+   * Tenant management page-এর জন্য subscription dashboard summary
+   */
+  @Get('tenant-management-overview')
+  getTenantManagementOverview() {
+    return this.subscriptionService.getTenantManagementOverview();
+  }
+
+  /**
    * GET /super-admin/subscriptions/me
    * Current logged-in user's tenant subscription + usage
    */

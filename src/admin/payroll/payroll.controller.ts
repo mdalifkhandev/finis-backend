@@ -61,6 +61,25 @@ export class PayrollController {
     );
   }
 
+  /** GET /admin/payroll/approved-summary?month=1&year=2025&projectId=uuid */
+  @Get('approved-summary')
+  @Roles(UserRole.admin, UserRole.super_admin)
+  getApprovedPayrollSummary(
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+    @Query() query: PayrollSummaryQueryDto,
+    @Query('projectId') projectId?: string,
+  ) {
+    return this.payrollService.getApprovedPayrollSummary(
+      adminId,
+      userRole,
+      query.date,
+      query.month,
+      query.year,
+      projectId,
+    );
+  }
+
   /** GET /admin/payroll/subscription-status */
   @Get('subscription-status')
   @Roles(UserRole.admin)

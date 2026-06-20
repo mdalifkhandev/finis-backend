@@ -1026,35 +1026,116 @@ export class PayrollService {
     const totalGrossPay = payrolls.reduce((sum, p) => sum + p.grossPay, 0);
     const totalNetPay = payrolls.reduce((sum, p) => sum + p.netPay, 0);
     const approvedCount = payrolls.length;
+    const totalHours = payrolls.reduce((sum, p) => sum + p.regularHours + p.overtimeHours, 0);
+    const averageHourlyRate = payrolls.length
+      ? payrolls.reduce((sum, p) => sum + p.ratePerHour, 0) / payrolls.length
+      : 0;
+    const totalDeductions = payrolls.reduce((sum, p) => sum + p.deductions, 0);
 
     return {
       summary: {
-        total: payrolls.length,
-        approvedCount,
-        totalGrossPay: Math.round(totalGrossPay * 100) / 100,
-        totalNetPay: Math.round(totalNetPay * 100) / 100,
+        totalWorkers: approvedCount,
+        totalHours: Math.round(totalHours * 100) / 100,
+        totalHoursDisplay: `${Math.floor(totalHours)}h ${Math.round((totalHours % 1) * 60)}m`,
+        averageHourlyRate: Math.round(averageHourlyRate * 100) / 100,
+        grossPay: Math.round(totalGrossPay * 100) / 100,
+        totalDeductions: Math.round(totalDeductions * 100) / 100,
+        totalPay: Math.round(totalNetPay * 100) / 100,
       },
       records: payrolls.map((p) => ({
         payrollId: p.id,
-        worker: p.worker,
+        worker: { id: p.worker.id },
+      })),
+    };
+  }
+
+  async getApprovedPayrollSummary(
+    adminId: string,
+    userRole: string,
+    date?: string,
+    month?: string,
+    year?: string,
+    projectId?: string,
+  ) {
+    await this.assertPayrollSubscriptionActive(adminId, userRole);
+    const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
+    const now = new Date();
+    const hasDate = Boolean(date);
+    const startDate = hasDate
+      ? new Date(date as string)
+      : new Date(
+          year ? parseInt(year) : now.getFullYear(),
+          month ? parseInt(month) - 1 : now.getMonth(),
+          1,
+        );
+    const endDate = hasDate
+      ? new Date(date as string)
+      : new Date(
+          year ? parseInt(year) : now.getFullYear(),
+          month ? parseInt(month) : now.getMonth() + 1,
+          0,
+        );
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(23, 59, 59, 999);
+
+    const payrolls = await this.prisma.payroll.findMany({
+      where: {
+        ...(accessibleCompanyIds.length > 0 ? { companyId: { in: accessibleCompanyIds } } : {}),
+        status: 'approved',
+        payPeriodStart: { gte: startDate },
+        payPeriodEnd: { lte: endDate },
+        ...(projectId && { projectId }),
+      },
+      include: {
+        worker: {
+          select: {
+            id: true,
+            fullName: true,
+            avatarUrl: true,
+            department: true,
+            hourlyRate: true,
+          },
+        },
+        project: {
+          select: { id: true, name: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const totalHours = payrolls.reduce((sum, p) => sum + p.regularHours + p.overtimeHours, 0);
+    const totalGrossPay = payrolls.reduce((sum, p) => sum + p.grossPay, 0);
+    const totalDeductions = payrolls.reduce((sum, p) => sum + p.deductions, 0);
+    const totalNetPay = payrolls.reduce((sum, p) => sum + p.netPay, 0);
+    const averageHourlyRate = payrolls.length
+      ? payrolls.reduce((sum, p) => sum + p.ratePerHour, 0) / payrolls.length
+      : 0;
+
+    return {
+      summary: {
+        totalWorkers: payrolls.length,
+        totalHours: Math.round(totalHours * 100) / 100,
+        totalHoursDisplay: `${Math.floor(totalHours)}h ${Math.round((totalHours % 1) * 60)}m`,
+        averageHourlyRate: Math.round(averageHourlyRate * 100) / 100,
+        grossPay: Math.round(totalGrossPay * 100) / 100,
+        totalDeductions: Math.round(totalDeductions * 100) / 100,
+        totalPay: Math.round(totalNetPay * 100) / 100,
+      },
+      workers: payrolls.map((p) => ({
+        payrollId: p.id,
         project: p.project,
-        displayRole: p.worker.department ?? 'Worker',
-        hours: p.regularHours,
+        worker: p.worker,
+        hours: Math.round((p.regularHours + p.overtimeHours) * 100) / 100,
+        hoursDisplay: `${Math.floor(p.regularHours + p.overtimeHours)}h ${Math.round(((p.regularHours + p.overtimeHours) % 1) * 60)}m`,
         overtimeHours: p.overtimeHours,
         rate: p.ratePerHour,
         grossPay: p.grossPay,
-        grossPayDisplay: `$${p.grossPay.toLocaleString(undefined, {
-          minimumFractionDigits: 0,
-          maximumFractionDigits: 2,
-        })}`,
         deductions: p.deductions,
         netPay: p.netPay,
         status: p.status,
-        statusLabel: p.status === 'approved' ? 'Approved' : 'Paid',
         payPeriodStart: p.payPeriodStart,
         payPeriodEnd: p.payPeriodEnd,
         processedAt: p.processedAt,
-        canApprove: p.status === 'draft',
       })),
     };
   }

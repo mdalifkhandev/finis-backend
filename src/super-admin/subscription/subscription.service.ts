@@ -109,7 +109,7 @@ export class SubscriptionService {
   //  PLAN MANAGEMENT  (super_admin only)
   // ══════════════════════════════════════════════════════════════
 
-  /** সব plan list — stats সহ */
+  /**  plan list — stats  */
   async getPlans() {
     const plans = await this.prisma.subscriptionPlan.findMany({
       orderBy: { priceMonthly: 'asc' },
@@ -415,6 +415,135 @@ export class SubscriptionService {
         };
       }),
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  /**
+   * Tenant-management page summary:
+   * dashboard-er moto subscription analytics + tenant user counts
+   */
+  async getTenantManagementOverview() {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const yearStart = new Date(now.getFullYear(), 0, 1);
+
+    const [
+      totalTenants,
+      activeTenants,
+      expiredPausedTenants,
+      totalUsers,
+      activeUsers,
+      expiredUsers,
+      subscriptionPurchases,
+      recentTenants,
+    ] = await Promise.all([
+      this.prisma.tenant.count(),
+      this.prisma.tenant.count({
+        where: {
+          subscriptionStatus: 'active',
+          currentPeriodEnd: { gt: now },
+        },
+      }),
+      this.prisma.tenant.count({
+        where: {
+          OR: [
+            { status: 'suspended' },
+            { subscriptionStatus: 'past_due' },
+            { subscriptionStatus: 'cancelled' },
+            { subscriptionStatus: 'active', currentPeriodEnd: { lt: now } },
+          ],
+        },
+      }),
+      this.prisma.user.count({ where: { role: { in: [UserRole.admin, UserRole.worker] } } }),
+      this.prisma.user.count({ where: { role: { in: [UserRole.admin, UserRole.worker] }, status: 'active' } }),
+      this.prisma.user.count({ where: { role: { in: [UserRole.admin, UserRole.worker] }, status: 'suspended' } }),
+      this.prisma.subscriptionPurchase.findMany({
+        where: { status: 'active' },
+        orderBy: { startedAt: 'desc' },
+        include: {
+          plan: { select: { id: true, name: true, priceMonthly: true, priceYearly: true } },
+          tenant: { select: { id: true, name: true, status: true } },
+          user: { select: { id: true, fullName: true, email: true } },
+        },
+      }),
+      this.prisma.tenant.findMany({
+        take: 8,
+        orderBy: { updatedAt: 'desc' },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          planInterval: true,
+          subscriptionStatus: true,
+          currentPeriodStart: true,
+          currentPeriodEnd: true,
+          plan: {
+            select: {
+              id: true,
+              name: true,
+              priceMonthly: true,
+              priceYearly: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const monthlyRevenue = subscriptionPurchases
+      .filter((purchase) => purchase.interval === 'monthly')
+      .reduce((sum, purchase) => sum + Number(purchase.amount ?? 0), 0);
+    const yearlyRevenue = subscriptionPurchases
+      .filter((purchase) => purchase.interval === 'yearly')
+      .reduce((sum, purchase) => sum + Number(purchase.amount ?? 0), 0);
+    const totalRevenue = subscriptionPurchases.reduce((sum, purchase) => sum + Number(purchase.amount ?? 0), 0);
+
+    const revenueByPlanMap = new Map<
+      string,
+      { planId: string; planName: string; salesCount: number; revenue: number; monthlyCount: number; yearlyCount: number }
+    >();
+
+    for (const purchase of subscriptionPurchases) {
+      const key = purchase.planId;
+      const current = revenueByPlanMap.get(key) ?? {
+        planId: purchase.planId,
+        planName: purchase.plan.name,
+        salesCount: 0,
+        revenue: 0,
+        monthlyCount: 0,
+        yearlyCount: 0,
+      };
+
+      current.salesCount += 1;
+      current.revenue += Number(purchase.amount ?? 0);
+      if (purchase.interval === 'yearly') current.yearlyCount += 1;
+      else current.monthlyCount += 1;
+      revenueByPlanMap.set(key, current);
+    }
+
+    const recentActiveUsers = recentTenants.reduce((sum, tenant) => {
+      return sum + (tenant.subscriptionStatus === 'active' ? 1 : 0);
+    }, 0);
+
+    return {
+      cards: {
+        totalRevenue: Math.round(totalRevenue * 100) / 100,
+        monthlyRevenue: Math.round(monthlyRevenue * 100) / 100,
+        yearlyRevenue: Math.round(yearlyRevenue * 100) / 100,
+        soldCount: subscriptionPurchases.length,
+        activeSubscriptions: activeTenants,
+        expiredPaused: expiredPausedTenants,
+        totalTenants,
+        totalUsers,
+        activeUsers,
+        expiredUsers,
+      },
+      revenueByPlan: [...revenueByPlanMap.values()].sort((a, b) => b.revenue - a.revenue),
+      recentTenants,
+      recentActiveUsers,
+      period: {
+        monthStart,
+        yearStart,
+      },
     };
   }
 
