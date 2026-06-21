@@ -457,6 +457,7 @@ export class GeofencingGateway
     const session = await this.prisma.attendanceSession.create({
       data: {
         attendanceId: attendance.id,
+        projectId,
         checkInTime: new Date(),
         inLat: lat,
         inLng: lng,
@@ -1067,6 +1068,7 @@ export class GeofencingGateway
     fullName: string;
     avatarUrl: string | null;
     projectId: string;
+    sessionId?: string | null;
     lat: number;
     lng: number;
     isInsideZone: boolean;
@@ -1074,46 +1076,135 @@ export class GeofencingGateway
     status: WorkerStatus;
     trackingActive?: boolean;
   }) {
-    const existing = this.workerStates.get(data.userId);
     const now = new Date();
+    const existing = this.workerStates.get(data.userId);
 
-    if (existing) {
-      existing.fullName = data.fullName;
-      existing.avatarUrl = data.avatarUrl;
-      existing.projectId = data.projectId;
-      existing.lat = data.lat;
-      existing.lng = data.lng;
-      existing.timestamp = now;
-      existing.isInsideZone = data.isInsideZone;
-      existing.zoneName = data.zoneName;
-      existing.status = data.status;
-      existing.trackingActive = data.trackingActive ?? existing.trackingActive;
-      return { state: existing, changed: true };
+    // ── Brand-new state (first call for this worker, e.g. first REST ping
+    // before any websocket connection ever happened) ───────────────────────
+    if (!existing) {
+      const state: WorkerState = {
+        userId: data.userId,
+        fullName: data.fullName,
+        avatarUrl: data.avatarUrl,
+        projectId: data.projectId,
+        lat: data.lat,
+        lng: data.lng,
+        timestamp: now,
+        isInsideZone: data.isInsideZone,
+        zoneName: data.zoneName,
+        status: data.status,
+        zoneEnteredAt: data.isInsideZone ? now : null,
+        totalZoneSeconds: 0,
+        sessionId: data.sessionId ?? null,
+        trackingActive: data.trackingActive ?? true,
+        hasActiveViolation: false,
+        lastLat: null,
+        lastLng: null,
+        lastInsideZone: data.isInsideZone,
+      };
+      this.workerStates.set(data.userId, state);
+      return { state, changed: true };
     }
 
-    const state: WorkerState = {
-      userId: data.userId,
-      fullName: data.fullName,
-      avatarUrl: data.avatarUrl,
-      projectId: data.projectId,
-      lat: data.lat,
-      lng: data.lng,
-      timestamp: now,
-      isInsideZone: data.isInsideZone,
-      zoneName: data.zoneName,
-      status: data.status,
-      zoneEnteredAt: data.isInsideZone ? now : null,
-      totalZoneSeconds: 0,
-      sessionId: null,
-      trackingActive: data.trackingActive ?? true,
-      hasActiveViolation: false,
-      lastLat: null,
-      lastLng: null,
-      lastInsideZone: null,
-    };
+    // ── Existing state — this is the path REST calls (check-in/location/
+    // check-out) hit every time. We must mirror the same enter/exit timer
+    // logic that the websocket `location_update` handler uses, otherwise
+    // zone time accumulated via REST polling is silently lost. ────────────
+    existing.fullName = data.fullName;
+    existing.avatarUrl = data.avatarUrl;
+    existing.projectId = data.projectId;
 
-    this.workerStates.set(data.userId, state);
-    return { state, changed: true };
+    // Link the DB session id as soon as we know it (check-in creates the
+    // session AFTER the first state may already exist from a websocket
+    // connection, so this keeps both in sync).
+    if (data.sessionId) existing.sessionId = data.sessionId;
+    if (data.trackingActive !== undefined) {
+      existing.trackingActive = data.trackingActive;
+    }
+
+    const wasInsideZone = existing.isInsideZone;
+
+    // ── Zone ENTER transition: start the timer ──────────────────────────
+    if (data.isInsideZone && !wasInsideZone) {
+      existing.zoneEnteredAt = now;
+      existing.hasActiveViolation = false;
+    }
+
+    // ── Zone EXIT transition: accumulate elapsed time & persist it ──────
+    else if (!data.isInsideZone && wasInsideZone) {
+      if (existing.zoneEnteredAt) {
+        existing.totalZoneSeconds += Math.floor(
+          (now.getTime() - existing.zoneEnteredAt.getTime()) / 1000,
+        );
+        existing.zoneEnteredAt = null;
+      }
+
+      if (existing.sessionId) {
+        this.prisma.attendanceSession
+          .update({
+            where: { id: existing.sessionId },
+            data: { zoneSeconds: existing.totalZoneSeconds },
+          })
+          .catch((e) =>
+            console.error('upsertWorkerState: zoneSeconds persist failed', e),
+          );
+      }
+    }
+
+    existing.isInsideZone = data.isInsideZone;
+    existing.zoneName = data.zoneName;
+    existing.status = data.status;
+    existing.lat = data.lat;
+    existing.lng = data.lng;
+    existing.timestamp = now;
+
+    return { state: existing, changed: true };
+  }
+
+  /**
+   * বর্তমান মুহূর্তে এই worker zone-এ যত সেকেন্ড আছে তার লাইভ হিসাব —
+   * (ইতিমধ্যে accumulate হওয়া totalZoneSeconds + এখন zone-এর ভেতরে থাকলে
+   * তার চলমান সময়)। Checkout/finalize করার সময় এটাই source of truth,
+   * DB-র stale zoneSeconds নয়।
+   */
+  getLiveZoneSeconds(userId: string): number {
+    const state = this.workerStates.get(userId);
+    if (!state) return 0;
+
+    let seconds = state.totalZoneSeconds;
+    if (state.isInsideZone && state.zoneEnteredAt) {
+      seconds += Math.floor(
+        (Date.now() - state.zoneEnteredAt.getTime()) / 1000,
+      );
+    }
+    return seconds;
+  }
+
+  /**
+   * Check-out বা session বন্ধ করার সময় কল করো — live zone seconds finalize
+   * করে in-memory state রিসেট করে দেয় (tracking off)। চূড়ান্ত zoneSeconds
+   * রিটার্ন করে, যাতে caller সেটা DB-তে session/attendance এর সাথে save
+   * করতে পারে।
+   */
+  closeWorkerSession(userId: string): number {
+    const state = this.workerStates.get(userId);
+    if (!state) return 0;
+
+    const finalZoneSeconds = this.getLiveZoneSeconds(userId);
+
+    state.totalZoneSeconds = finalZoneSeconds;
+    state.zoneEnteredAt = null;
+    state.isInsideZone = false;
+    state.zoneName = null;
+    state.status = 'outside';
+    state.sessionId = null;
+    state.trackingActive = false;
+    state.hasActiveViolation = false;
+    state.lastLat = null;
+    state.lastLng = null;
+    state.lastInsideZone = null;
+
+    return finalZoneSeconds;
   }
 
   emitWorkerLocation(projectId: string, payload: any) {

@@ -313,6 +313,7 @@ model Project {
   teamMembers    ProjectMember[]
   company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
   tasks          Task[]
+  attendanceSessions AttendanceSession[]
 
   @@map("projects")
 }
@@ -482,6 +483,7 @@ model Attendance {
 model AttendanceSession {
   id             String     @id @default(uuid()) @db.Uuid
   attendanceId   String     @map("attendance_id") @db.Uuid
+  projectId      String?    @map("project_id") @db.Uuid
   checkInTime    DateTime   @map("check_in_time")
   checkOutTime   DateTime?  @map("check_out_time")
   hoursWorked    Float?     @map("hours_worked")
@@ -493,6 +495,7 @@ model AttendanceSession {
   outsideSeconds Int?       @default(0) @map("outside_seconds")
   createdAt      DateTime   @default(now()) @map("created_at")
   attendance     Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  project        Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@map("attendance_sessions")
 }

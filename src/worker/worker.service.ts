@@ -289,6 +289,17 @@ export class WorkerService {
             id: true,
             name: true,
             location: true,
+            inventoryItems: {
+              select: {
+                id: true,
+                name: true,
+                category: true,
+                unit: true,
+                currentQty: true,
+                minStockQty: true,
+                location: true,
+              },
+            },
             geofences: {
               where: { isActive: true },
               select: { id: true, zoneName: true, polygonCoords: true },
@@ -314,7 +325,17 @@ export class WorkerService {
         },
         taskInventories: {
           include: {
-            inventory: { select: { id: true, name: true, unit: true, currentQty: true } },
+            inventory: {
+              select: {
+                id: true,
+                name: true,
+                category: true,
+                unit: true,
+                currentQty: true,
+                minStockQty: true,
+                location: true,
+              },
+            },
           },
         },
       },
@@ -458,7 +479,16 @@ export class WorkerService {
     };
   }
 
-  async updateTaskReport(taskId: string, workerId: string, body: any) {
+  async updateTaskReport(
+    taskId: string,
+    workerId: string,
+    body: any,
+    files?: {
+      beforePhoto?: MulterFile[];
+      afterPhoto?: MulterFile[];
+      receipt?: MulterFile[];
+    },
+  ) {
     const task = await this.prisma.task.findUnique({ where: { id: taskId } });
 
     if (!task) throw new NotFoundException('Task not found');
@@ -475,10 +505,16 @@ export class WorkerService {
     const updatedReport = await this.prisma.taskReport.update({
       where: { id: report.id },
       data: {
-        notes: body?.notes ?? report.notes,
-        beforePhotoUrl: body?.beforePhotoUrl ?? report.beforePhotoUrl,
-        afterPhotoUrl: body?.afterPhotoUrl ?? report.afterPhotoUrl,
-        receiptUrl: body?.receiptUrl ?? report.receiptUrl,
+        notes: body?.notes ?? body?.description ?? report.notes,
+        beforePhotoUrl: files?.beforePhoto?.[0]?.filename
+          ? `/uploads/task-reports/${files.beforePhoto[0].filename}`
+          : body?.beforePhotoUrl ?? report.beforePhotoUrl,
+        afterPhotoUrl: files?.afterPhoto?.[0]?.filename
+          ? `/uploads/task-reports/${files.afterPhoto[0].filename}`
+          : body?.afterPhotoUrl ?? report.afterPhotoUrl,
+        receiptUrl: files?.receipt?.[0]?.filename
+          ? `/uploads/task-reports/${files.receipt[0].filename}`
+          : body?.receiptUrl ?? report.receiptUrl,
       },
     });
 
@@ -634,6 +670,14 @@ export class WorkerService {
       select: { fullName: true, avatarUrl: true },
     });
 
+    // Worker আসলেই এই project-এর member কিনা যাচাই করো
+    const membership = await this.prisma.projectMember.findFirst({
+      where: { userId: workerId, projectId: dto.projectId },
+    });
+    if (!membership) {
+      throw new ForbiddenException('You are not a member of this project');
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -649,9 +693,60 @@ export class WorkerService {
       include: { sessions: true },
     });
 
-    // যদি কোনো session এখনো open থাকে (checkout হয়নি) → একই session রিটার্ন করো
+    // যদি কোনো session এখনো open থাকে (checkout হয়নি)
     const openSession = attendance.sessions.find((s) => !s.checkOutTime);
     if (openSession) {
+      // আগে অন্য project-এ check-in করা থাকলে, প্রথমে সেটা check-out করতে হবে —
+      // একই সময়ে দুই project-এর zone count করা যাবে না
+      if (openSession.projectId && openSession.projectId !== dto.projectId) {
+        throw new ConflictException(
+          'You are already checked in to another project today. Please check out first.',
+        );
+      }
+
+      // পুরনো session-এ projectId ফাঁকা থাকলে (migration আগের data) এখন set করে দাও
+      if (!openSession.projectId) {
+        await this.prisma.attendanceSession.update({
+          where: { id: openSession.id },
+          data: { projectId: dto.projectId },
+        });
+      }
+
+      // এই project-এর জন্য zone state resync করো — আগে এই অংশ early-return এর
+      // কারণে স্কিপ হয়ে যেতো, ফলে app restart/duplicate check-in call এর পর
+      // zone tracking আর resume হতো না
+      const zoneResult =
+        dto.lat != null && dto.lng != null
+          ? await this.geofencingGateway.resolveZoneStatus(dto.lat, dto.lng, dto.projectId)
+          : { inside: false, zoneName: null };
+
+      this.geofencingGateway.upsertWorkerState({
+        userId: workerId,
+        fullName: worker?.fullName ?? 'Worker',
+        avatarUrl: worker?.avatarUrl ?? null,
+        projectId: dto.projectId,
+        sessionId: openSession.id,
+        lat: dto.lat ?? 0,
+        lng: dto.lng ?? 0,
+        isInsideZone: zoneResult.inside,
+        zoneName: zoneResult.zoneName,
+        status: zoneResult.inside ? 'inside' : 'outside',
+        trackingActive: true,
+      });
+
+      this.geofencingGateway.emitWorkerLocation(dto.projectId, {
+        workerId,
+        workerName: worker?.fullName,
+        avatarUrl: worker?.avatarUrl ?? null,
+        lat: dto.lat ?? 0,
+        lng: dto.lng ?? 0,
+        isInsideZone: zoneResult.inside,
+        zoneName: zoneResult.zoneName,
+        status: zoneResult.inside ? 'inside' : 'outside',
+        trackingActive: true,
+        timestamp: new Date(),
+      });
+
       return {
         message: 'Already checked in',
         session: openSession,
@@ -659,10 +754,11 @@ export class WorkerService {
       };
     }
 
-    // নতুন session তৈরি করো
+    // নতুন session তৈরি করো — এই project-টা session-এর সাথে মনে রাখো
     const session = await this.prisma.attendanceSession.create({
       data: {
         attendanceId: attendance.id,
+        projectId: dto.projectId,
         checkInTime: new Date(),
         inLat: dto.lat ?? null,
         inLng: dto.lng ?? null,
@@ -681,33 +777,29 @@ export class WorkerService {
       });
     }
 
-    const memberships = await this.prisma.projectMember.findMany({
-      where: { userId: workerId },
-      select: { projectId: true },
+    // শুধু সিলেক্ট করা project-এর geofence(s)-এর বিরুদ্ধেই zone check করো —
+    // অন্য project-গুলো touch করবো না
+    const zoneResult =
+      dto.lat != null && dto.lng != null
+        ? await this.geofencingGateway.resolveZoneStatus(dto.lat, dto.lng, dto.projectId)
+        : { inside: false, zoneName: null };
+
+    const stateResult = this.geofencingGateway.upsertWorkerState({
+      userId: workerId,
+      fullName: worker?.fullName ?? 'Worker',
+      avatarUrl: worker?.avatarUrl ?? null,
+      projectId: dto.projectId,
+      sessionId: session.id,
+      lat: dto.lat ?? 0,
+      lng: dto.lng ?? 0,
+      isInsideZone: zoneResult.inside,
+      zoneName: zoneResult.zoneName,
+      status: zoneResult.inside ? 'inside' : 'outside',
+      trackingActive: true,
     });
 
-    await Promise.all(memberships.map(async ({ projectId }) => {
-      const zoneResult =
-        dto.lat != null && dto.lng != null
-          ? await this.geofencingGateway.resolveZoneStatus(dto.lat, dto.lng, projectId)
-          : { inside: false, zoneName: null };
-
-      const stateResult = this.geofencingGateway.upsertWorkerState({
-        userId: workerId,
-        fullName: worker?.fullName ?? 'Worker',
-        avatarUrl: worker?.avatarUrl ?? null,
-        projectId,
-        lat: dto.lat ?? 0,
-        lng: dto.lng ?? 0,
-        isInsideZone: zoneResult.inside,
-        zoneName: zoneResult.zoneName,
-        status: zoneResult.inside ? 'inside' : 'outside',
-        trackingActive: true,
-      });
-
-      if (!stateResult.changed) return;
-
-      this.geofencingGateway.emitWorkerLocation(projectId, {
+    if (stateResult.changed) {
+      this.geofencingGateway.emitWorkerLocation(dto.projectId, {
         workerId,
         workerName: worker?.fullName,
         avatarUrl: worker?.avatarUrl ?? null,
@@ -719,7 +811,7 @@ export class WorkerService {
         trackingActive: true,
         timestamp: new Date(),
       });
-    }));
+    }
 
     return {
       message: 'Checked in successfully',
@@ -768,15 +860,22 @@ export class WorkerService {
     }
 
     const now = new Date();
-    const sessionZoneSeconds = openSession.zoneSeconds ?? 0;
+
+    // ✅ in-memory live state থেকে সঠিক zoneSeconds নেও — DB-র stale value নয়।
+    // Worker zone-এর ভেতরে থাকতে থাকতেই checkout করতে পারে, তখন এখন পর্যন্ত
+    // চলমান সময়টাও যোগ হওয়া দরকার, যেটা closeWorkerSession() করে দেয়।
+    const liveZoneSeconds = this.geofencingGateway.closeWorkerSession(workerId);
+    const sessionZoneSeconds =
+      liveZoneSeconds > 0 ? liveZoneSeconds : (openSession.zoneSeconds ?? 0);
     const hoursWorked = sessionZoneSeconds / 3600;
 
-    // Session close করো
+    // Session close করো — zoneSeconds-টাও persist করো, আগে এটা miss হতো
     const updatedSession = await this.prisma.attendanceSession.update({
       where: { id: openSession.id },
       data: {
         checkOutTime: now,
         hoursWorked: Math.round(hoursWorked * 100) / 100,
+        zoneSeconds: sessionZoneSeconds,
         outLat: dto.lat ?? null,
         outLng: dto.lng ?? null,
       },
@@ -811,17 +910,25 @@ export class WorkerService {
       });
     }
 
-    const memberships = await this.prisma.projectMember.findMany({
-      where: { userId: workerId },
-      select: { projectId: true },
-    });
+    // শুধু এই session যেই project-এর জন্য খোলা হয়েছিল, সেই project-এর
+    // room-এই broadcast করো — অন্য project-এর admin/manager কিছু দেখবে না
+    let projectId = openSession.projectId;
+    if (!projectId) {
+      const membership = await this.prisma.projectMember.findFirst({
+        where: { userId: workerId },
+        select: { projectId: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      projectId = membership?.projectId ?? null;
+    }
 
-    memberships.forEach(({ projectId }) => {
+    if (projectId) {
       this.geofencingGateway.upsertWorkerState({
         userId: workerId,
         fullName: worker?.fullName ?? 'Worker',
         avatarUrl: worker?.avatarUrl ?? null,
         projectId,
+        sessionId: null,
         lat: dto.lat ?? 0,
         lng: dto.lng ?? 0,
         isInsideZone: false,
@@ -835,7 +942,7 @@ export class WorkerService {
         workerName: worker?.fullName ?? 'Worker',
         stoppedAt: new Date(),
       });
-    });
+    }
 
     return {
       message: 'Checked out successfully',
@@ -1085,21 +1192,64 @@ export class WorkerService {
   }
 
   // ─────────────────────────────────────────────
+  // PROJECTS (for check-in project selector)
+  // ─────────────────────────────────────────────
+
+  async getMyProjects(workerId: string) {
+    const memberships = await this.prisma.projectMember.findMany({
+      where: { userId: workerId },
+      include: {
+        project: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            location: true,
+            geofences: {
+              where: { isActive: true },
+              select: { id: true, zoneName: true },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return memberships
+      .filter((m) => m.project)
+      .map((m) => ({
+        projectId: m.project!.id,
+        projectName: m.project!.name,
+        status: m.project!.status,
+        location: m.project!.location,
+        hasZone: m.project!.geofences.length > 0,
+        zoneName: m.project!.geofences[0]?.zoneName ?? null,
+      }));
+  }
+
+  // ─────────────────────────────────────────────
   // LOCATION UPDATE
   // ─────────────────────────────────────────────
 
   async updateLocation(workerId: string, dto: UpdateLocationDto) {
-    console.log('[WorkerService] updateLocation start', {
-      workerId,
-      lat: dto.lat,
-      lng: dto.lng,
-      geofenceId: dto.geofenceId ?? null,
-      eventType: dto.eventType ?? 'update',
-    });
-
     const worker = await this.prisma.user.findUnique({
       where: { id: workerId },
       select: { fullName: true, avatarUrl: true },
+    });
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // App সাধারণত শুধু lat/lng পাঠায়, geofenceId পাঠায় না — তাই zone
+    // resolve করতে worker আজকে কোন project-এ check-in করেছে সেটা দেখো,
+    // check-in করার সময় সিলেক্ট করা projectId session-এর সাথে already
+    // save করা আছে।
+    const openSession = await this.prisma.attendanceSession.findFirst({
+      where: {
+        checkOutTime: null,
+        attendance: { userId: workerId, date: today },
+      },
+      orderBy: { checkInTime: 'desc' },
     });
 
     const log = await this.prisma.locationLog.create({
@@ -1112,100 +1262,124 @@ export class WorkerService {
       },
     });
 
-    let isInsideZone = false;
-    let zoneName: string | null = null;
-
-    // Geofence violation check
-    if (dto.geofenceId) {
-      const geofence = await this.prisma.geofence.findUnique({
-        where: { id: dto.geofenceId },
-      });
-
-      if (geofence) {
-  const coords = Array.isArray(geofence.polygonCoords)
-    ? (geofence.polygonCoords as { lat: number; lng: number }[])
-    : [];
-
-  const isInside =
-    coords.length >= 3
-      ? this.pointInPolygon(dto.lat, dto.lng, coords)
-      : false;
-
-  isInsideZone = isInside;
-  zoneName = geofence.zoneName;
-
-  if (!isInside) {
-    await this.prisma.geofenceViolation.create({
-      data: {
-        geofenceId: dto.geofenceId,
-        userId: workerId,
-        distanceM: 0,
-        description: `Worker is outside the zone: ${geofence.zoneName}`,
-      },
-    });
-  }
-}
+    if (!openSession) {
+      // Check-in করা নেই → zone time count হবে না, শুধু lat/lng log রাখলাম
+      return {
+        message: 'Location logged. Please check in to start zone time tracking.',
+        log,
+        isInsideZone: false,
+        zoneName: null,
+      };
     }
 
-    const projectIds = new Set<string>();
-
-    if (dto.geofenceId) {
-      const geofence = await this.prisma.geofence.findUnique({
-        where: { id: dto.geofenceId },
+    // পুরনো session-গুলোর projectId ফাঁকা থাকতে পারে (migration-এর আগের
+    // ডাটা) — সেক্ষেত্রে worker-এর latest project membership থেকে backfill
+    let projectId = openSession.projectId;
+    if (!projectId) {
+      const membership = await this.prisma.projectMember.findFirst({
+        where: { userId: workerId },
         select: { projectId: true },
+        orderBy: { createdAt: 'desc' },
       });
-      if (geofence?.projectId) projectIds.add(geofence.projectId);
+      projectId = membership?.projectId ?? null;
+      if (projectId) {
+        await this.prisma.attendanceSession.update({
+          where: { id: openSession.id },
+          data: { projectId },
+        });
+      }
     }
 
-    const memberships = await this.prisma.projectMember.findMany({
-      where: { userId: workerId },
-      select: { projectId: true },
-    });
-    memberships.forEach((m) => projectIds.add(m.projectId));
+    if (!projectId) {
+      return {
+        message: 'Location logged. No project assigned to your account.',
+        log,
+        isInsideZone: false,
+        zoneName: null,
+      };
+    }
 
-    console.log('[WorkerService] updateLocation projectIds', {
-      workerId,
-      projectIds: Array.from(projectIds),
+    // শুধু এই একটা project-এর geofence(s)-এর বিরুদ্ধেই check করো —
+    // অন্য project-গুলোর zone touch করবো না
+    const zoneResult = await this.geofencingGateway.resolveZoneStatus(
+      dto.lat,
+      dto.lng,
+      projectId,
+    );
+    const isInsideZone = zoneResult.inside;
+    const zoneName = zoneResult.zoneName;
+
+    if (!isInsideZone) {
+      const zone = await this.prisma.geofence.findFirst({
+        where: { projectId, isActive: true },
+      });
+      if (zone) {
+        const activeViolation = await this.prisma.geofenceViolation.findFirst({
+          where: { geofenceId: zone.id, userId: workerId, isResolved: false },
+        });
+        if (!activeViolation) {
+          await this.prisma.geofenceViolation.create({
+            data: {
+              geofenceId: zone.id,
+              userId: workerId,
+              distanceM: 0,
+              description: `Worker is outside the zone: ${zone.zoneName}`,
+            },
+          });
+        }
+      }
+    } else {
+      // Zone-এ ফিরে এলে আগের unresolved violation resolve করে দাও
+      await this.prisma.geofenceViolation.updateMany({
+        where: {
+          userId: workerId,
+          isResolved: false,
+          geofence: { projectId },
+        },
+        data: { isResolved: true },
+      });
+    }
+
+    // sessionId link করে দাও — এর ফলে enter/exit transition-এর সময়
+    // zoneSeconds DB-তে সঠিকভাবে persist হবে (আগে এই sessionId link
+    // ছিলোই না, যেটাই ছিল main bug)
+    this.geofencingGateway.upsertWorkerState({
+      userId: workerId,
+      fullName: worker?.fullName ?? 'Worker',
+      avatarUrl: worker?.avatarUrl ?? null,
+      projectId,
+      sessionId: openSession.id,
+      lat: dto.lat,
+      lng: dto.lng,
       isInsideZone,
       zoneName,
+      status: isInsideZone ? 'inside' : 'outside',
+      trackingActive: true,
     });
 
-    for (const projectId of projectIds) {
-      this.geofencingGateway.upsertWorkerState({
-        userId: workerId,
-        fullName: worker?.fullName ?? 'Worker',
-        avatarUrl: worker?.avatarUrl ?? null,
-        projectId,
-        lat: dto.lat,
-        lng: dto.lng,
-        isInsideZone,
-        zoneName,
-        status: isInsideZone ? 'inside' : 'outside',
-      });
+    const liveZoneSeconds = this.geofencingGateway.getLiveZoneSeconds(workerId);
 
-      this.geofencingGateway.emitWorkerLocation(projectId, {
-        workerId,
-        workerName: worker?.fullName,
-        avatarUrl: worker?.avatarUrl ?? null,
-        lat: dto.lat,
-        lng: dto.lng,
-        isInsideZone,
-        zoneName,
-        status: isInsideZone ? 'inside' : 'outside',
-        timestamp: new Date(),
-      });
+    this.geofencingGateway.emitWorkerLocation(projectId, {
+      workerId,
+      workerName: worker?.fullName,
+      avatarUrl: worker?.avatarUrl ?? null,
+      lat: dto.lat,
+      lng: dto.lng,
+      isInsideZone,
+      zoneName,
+      status: isInsideZone ? 'inside' : 'outside',
+      totalZoneSeconds: liveZoneSeconds,
+      timestamp: new Date(),
+    });
 
-      console.log('[WorkerService] emitWorkerLocation', {
-        workerId,
-        projectId,
-        lat: dto.lat,
-        lng: dto.lng,
-        isInsideZone,
-        zoneName,
-      });
-    }
-
-    return { message: 'Location updated', log };
+    return {
+      message: isInsideZone
+        ? `Inside zone: ${zoneName}`
+        : 'Outside zone — time paused',
+      log,
+      isInsideZone,
+      zoneName,
+    };
   }
 
   // ─────────────────────────────────────────────
@@ -1251,7 +1425,21 @@ export class WorkerService {
     const selectedEnd = new Date(selected);
     selectedEnd.setHours(23, 59, 59, 999);
 
-    const [payrolls, attendanceRecord] = await Promise.all([
+    const [worker, payrolls, attendanceRecord] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: workerId },
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          phone: true,
+          avatarUrl: true,
+          employeeId: true,
+          department: true,
+          role: true,
+          status: true,
+        },
+      }),
       // sei diner moddhe payPeriodStart theke payPeriodEnd er moddhe pore emon payroll
       this.prisma.payroll.findMany({
         where: {
@@ -1274,6 +1462,10 @@ export class WorkerService {
       }),
     ]);
 
+    if (!worker) {
+      throw new NotFoundException('Worker not found');
+    }
+
     // admin side er motoi — sessions theke manually calculate koro
     // attendance.totalHours e open session er time count hoy na
     const sessions = attendanceRecord?.sessions ?? [];
@@ -1286,47 +1478,50 @@ export class WorkerService {
     const totalDeductions = payrolls.reduce((sum, p) => sum + p.deductions, 0);
     const totalNetPay = payrolls.reduce((sum, p) => sum + p.netPay, 0);
 
-    // per project breakdown
-    const projectBreakdown = payrolls
-      .filter((p) => p.project)
-      .map((p) => ({
-        projectId: p.project!.id,
-        projectName: p.project!.name,
-        grossPay: Math.round(p.grossPay * 100) / 100,
-        netPay: Math.round(p.netPay * 100) / 100,
-        regularHours: p.regularHours,
-        overtimeHours: p.overtimeHours,
-        status: p.status,
-      }));
+    const projectMap = new Map<
+      string,
+      {
+      id: string;
+      name: string;
+      companyId: string;
+      companyName: string;
+      ratePerHour: number;
+    }
+  >();
 
-    const transactions = payrolls.map((p) => ({
-      id: p.id,
-      title: p.project?.name ?? p.company.name,
-      company: p.company,
-      project: p.project ?? null,
-      paidAt: p.processedAt ?? p.createdAt,
-      amount: Math.round(p.netPay * 100) / 100,
-      status: p.status,
-      regularHours: p.regularHours,
-      overtimeHours: p.overtimeHours,
-      ratePerHour: p.ratePerHour,
-      grossPay: Math.round(p.grossPay * 100) / 100,
-      deductions: Math.round(p.deductions * 100) / 100,
-      netPay: Math.round(p.netPay * 100) / 100,
-    }));
+    payrolls.forEach((p) => {
+      if (!p.project) return;
+      if (!projectMap.has(p.project.id)) {
+        projectMap.set(p.project.id, {
+          id: p.project.id,
+          name: p.project.name,
+          companyId: p.company.id,
+          companyName: p.company.name,
+          ratePerHour: p.ratePerHour,
+        });
+      }
+    });
 
     return {
       date: selected,
-      summary: {
-        totalHours: this.formatHoursAndMinutes(totalZoneHours),
-        totalZoneHours: this.formatHoursAndMinutes(totalZoneHours),
-        totalGrossPay: Math.round(totalGrossPay * 100) / 100,
-        totalDeductions: Math.round(totalDeductions * 100) / 100,
-        totalNetPay: Math.round(totalNetPay * 100) / 100,
-        sessionsCount: attendanceRecord?.sessions?.length ?? 0,
+      worker: {
+        id: worker.id,
+        fullName: worker.fullName,
+        email: worker.email,
+        phone: worker.phone,
+        avatarUrl: worker.avatarUrl,
+        employeeId: worker.employeeId,
+        department: worker.department,
+        role: worker.role,
+        status: worker.status,
       },
-      projectBreakdown,
-      transactions,
+      projects: Array.from(projectMap.values()),
+      summary: {
+        totalHours: Math.round(totalZoneHours * 100) / 100,
+        totalHoursDisplay: this.formatHoursAndMinutes(totalZoneHours),
+        totalPay: Math.round(totalNetPay * 100) / 100,
+        totalDeductions: Math.round(totalDeductions * 100) / 100,
+      },
     };
   }
 

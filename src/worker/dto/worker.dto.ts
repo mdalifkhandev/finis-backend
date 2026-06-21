@@ -47,6 +47,9 @@ export class UpdateTaskInventoryDto {
 // ── ATTENDANCE ────────────────────────────────────────────────────────────────
 
 export class CheckInDto {
+  @IsString()
+  projectId!: string;
+
   @IsOptional()
   @IsNumber()
   lat?: number;

@@ -638,20 +638,57 @@ export class SuperAdminDashboardService {
     const end = new Date(date);
     end.setHours(23, 59, 59, 999);
 
+    const sessionDateWhere = {
+      checkInTime: { gte: start, lte: end },
+    };
+
     const [total, present, late, absent, activeCheckIns, records] = await Promise.all([
-      this.prisma.attendance.count({ where: { date: { gte: start, lte: end } } }),
-      this.prisma.attendance.count({ where: { date: { gte: start, lte: end }, status: 'present' } }),
-      this.prisma.attendance.count({ where: { date: { gte: start, lte: end }, status: 'late' } }),
-      this.prisma.attendance.count({ where: { date: { gte: start, lte: end }, status: 'absent' } }),
       this.prisma.attendance.count({
         where: {
-          date: { gte: start, lte: end },
-          status: 'present',
-          sessions: { some: { checkOutTime: null } },
+          OR: [
+            { date: { gte: start, lte: end } },
+            { sessions: { some: sessionDateWhere } },
+          ],
+        },
+      }),
+      this.prisma.attendance.count({
+        where: {
+          OR: [
+            { date: { gte: start, lte: end }, status: { in: ['present', 'late'] } },
+            { sessions: { some: sessionDateWhere } },
+          ],
+        },
+      }),
+      this.prisma.attendance.count({
+        where: {
+          OR: [
+            { date: { gte: start, lte: end }, status: 'late' },
+            { sessions: { some: sessionDateWhere } },
+          ],
+        },
+      }),
+      this.prisma.attendance.count({
+        where: {
+          OR: [
+            { date: { gte: start, lte: end }, status: 'absent' },
+          ],
+        },
+      }),
+      this.prisma.attendance.count({
+        where: {
+          OR: [
+            { date: { gte: start, lte: end }, sessions: { some: sessionDateWhere } },
+            { sessions: { some: sessionDateWhere } },
+          ],
         },
       }),
       this.prisma.attendance.findMany({
-        where: { date: { gte: start, lte: end } },
+        where: {
+          OR: [
+            { date: { gte: start, lte: end } },
+            { sessions: { some: sessionDateWhere } },
+          ],
+        },
         skip: (page - 1) * limit,
         take: limit,
         orderBy: { updatedAt: 'desc' },

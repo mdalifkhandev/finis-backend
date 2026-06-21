@@ -138,12 +138,28 @@ export class WorkerController {
    * Task report update (no DTO validation)
    */
   @Put('tasks/:id/report')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'beforePhoto', maxCount: 1 },
+        { name: 'afterPhoto', maxCount: 1 },
+        { name: 'receipt', maxCount: 1 },
+      ],
+      { storage: taskReportStorage },
+    ),
+  )
   updateTaskReport(
     @Param('id', ParseUUIDPipe) taskId: string,
     @CurrentUser('id') workerId: string,
     @Body() body: any,
+    @UploadedFiles()
+    files?: {
+      beforePhoto?: MulterFile[];
+      afterPhoto?: MulterFile[];
+      receipt?: MulterFile[];
+    },
   ) {
-    return this.workerService.updateTaskReport(taskId, workerId, body);
+    return this.workerService.updateTaskReport(taskId, workerId, body, files);
   }
 
   /**
@@ -194,6 +210,16 @@ export class WorkerController {
   // ATTENDANCE
 
   /**
+   * GET /worker/projects
+   * Worker যেসব project-এর member, সেগুলোর তালিকা — check-in করার সময়
+   * dropdown থেকে project select করার জন্য
+   */
+  @Get('projects')
+  getMyProjects(@CurrentUser('id') workerId: string) {
+    return this.workerService.getMyProjects(workerId);
+  }
+
+  /**
    * GET /worker/attendance/today
    * today's attendance status (clocked_in / clocked_out / not_recorded)
    */
@@ -204,7 +230,8 @@ export class WorkerController {
 
   /**
    * POST /worker/attendance/check-in
-   * Check in (optional: lat/lng for location)
+   * Check in — body-তে projectId পাঠাতে হবে (worker dropdown থেকে select
+   * করবে কোন project-এ আজ কাজ করছে), optionally lat/lng
    */
   @Post('attendance/check-in')
   checkIn(@CurrentUser('id') workerId: string, @Body() dto: CheckInDto) {

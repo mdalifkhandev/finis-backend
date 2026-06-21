@@ -1040,7 +1040,8 @@ export class PayrollService {
         averageHourlyRate: Math.round(averageHourlyRate * 100) / 100,
         grossPay: Math.round(totalGrossPay * 100) / 100,
         totalDeductions: Math.round(totalDeductions * 100) / 100,
-        totalPay: Math.round(totalNetPay * 100) / 100,
+        totalPay: Math.round(totalGrossPay * 100) / 100,
+        netPay: Math.round(totalNetPay * 100) / 100,
       },
       records: payrolls.map((p) => ({
         payrollId: p.id,
@@ -1119,7 +1120,8 @@ export class PayrollService {
         averageHourlyRate: Math.round(averageHourlyRate * 100) / 100,
         grossPay: Math.round(totalGrossPay * 100) / 100,
         totalDeductions: Math.round(totalDeductions * 100) / 100,
-        totalPay: Math.round(totalNetPay * 100) / 100,
+        totalPay: Math.round(totalGrossPay * 100) / 100,
+        netPay: Math.round(totalNetPay * 100) / 100,
       },
       workers: payrolls.map((p) => ({
         payrollId: p.id,
