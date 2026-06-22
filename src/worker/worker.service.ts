@@ -132,6 +132,7 @@ export class WorkerService {
 
     const todayEnd = new Date(today);
     todayEnd.setHours(23, 59, 59, 999);
+    const workerTaskFilter = this.workerTaskWhere(workerId);
 
     // today's assigned tasks
     const [
@@ -143,12 +144,16 @@ export class WorkerService {
       // today tasks (due today or in_progress)
       this.prisma.task.findMany({
         where: {
-          ...this.workerTaskWhere(workerId),
+          AND: [
+            workerTaskFilter,
+            {
           OR: [
             { dueDate: { gte: today, lte: todayEnd } },
             { status: 'in_progress' },
             { status: 'pending' },
             { status: 'review' },
+          ],
+            },
           ],
         },
         select: {
@@ -157,6 +162,12 @@ export class WorkerService {
           priority: true,
           status: true,
           dueDate: true,
+          assignedTo: true,
+          taskAssignees: {
+            select: {
+              userId: true,
+            },
+          },
           project: { select: { id: true, name: true } },
           floor: { select: { id: true, name: true } },
           room: { select: { id: true, name: true } },
@@ -169,7 +180,7 @@ export class WorkerService {
       // today completed tasks
       this.prisma.task.count({
         where: {
-          ...this.workerTaskWhere(workerId),
+          AND: [workerTaskFilter],
           status: 'completed',
           updatedAt: { gte: today, lte: todayEnd },
         },
@@ -254,7 +265,10 @@ export class WorkerService {
     }
 
     const where: any = {
-      assignedTo: workerId,
+      OR: [
+        { assignedTo: workerId },
+        { taskAssignees: { some: { userId: workerId } } },
+      ],
       ...(andConditions.length > 0 && { AND: andConditions }),
     };
 
@@ -309,6 +323,12 @@ export class WorkerService {
         floor: { select: { id: true, name: true, floorNumber: true } },
         room: { select: { id: true, name: true, type: true } },
         creator: { select: { id: true, fullName: true, avatarUrl: true } },
+        assignee: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        taskAssignees: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          },
+        },
         reports: {
           orderBy: { submittedAt: 'desc' },
           take: 5,
@@ -349,7 +369,17 @@ export class WorkerService {
   }
 
   async startTask(taskId: string, workerId: string) {
-    const task = await this.prisma.task.findUnique({ where: { id: taskId } });
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        assignee: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        taskAssignees: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          },
+        },
+      },
+    });
 
     if (!task) throw new NotFoundException('Task not found');
     if (!this.isWorkerAssigned(task, workerId))
@@ -388,7 +418,17 @@ export class WorkerService {
       receipt?: MulterFile[];
     },
   ) {
-    const task = await this.prisma.task.findUnique({ where: { id: taskId } });
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        assignee: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        taskAssignees: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          },
+        },
+      },
+    });
 
     if (!task) throw new NotFoundException('Task not found');
     if (!this.isWorkerAssigned(task, workerId))
@@ -489,7 +529,17 @@ export class WorkerService {
       receipt?: MulterFile[];
     },
   ) {
-    const task = await this.prisma.task.findUnique({ where: { id: taskId } });
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        assignee: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        taskAssignees: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          },
+        },
+      },
+    });
 
     if (!task) throw new NotFoundException('Task not found');
     if (!this.isWorkerAssigned(task, workerId))
@@ -533,7 +583,15 @@ export class WorkerService {
   async getTaskInventoryItems(taskId: string, workerId: string) {
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
-      include: { project: { include: { company: true } } },
+      include: {
+        project: { include: { company: true } },
+        assignee: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        taskAssignees: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          },
+        },
+      },
     });
     if (!task) throw new NotFoundException('Task not found');
     if (!this.isWorkerAssigned(task, workerId))
@@ -568,7 +626,15 @@ export class WorkerService {
   ) {
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
-      include: { project: { select: { id: true, name: true } } },
+      include: {
+        project: { select: { id: true, name: true } },
+        assignee: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        taskAssignees: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          },
+        },
+      },
     });
 
     if (!task) throw new NotFoundException('Task not found');
@@ -1419,13 +1485,12 @@ export class WorkerService {
   // ─────────────────────────────────────────────
 
   async getMyPayroll(workerId: string, date?: string) {
-    // selected date er start & end
     const selected = date ? new Date(date) : new Date();
     selected.setHours(0, 0, 0, 0);
     const selectedEnd = new Date(selected);
     selectedEnd.setHours(23, 59, 59, 999);
 
-    const [worker, payrolls, attendanceRecord] = await Promise.all([
+    const [worker, payrolls, allTimePayrolls] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: workerId },
         select: {
@@ -1440,12 +1505,16 @@ export class WorkerService {
           status: true,
         },
       }),
-      // sei diner moddhe payPeriodStart theke payPeriodEnd er moddhe pore emon payroll
       this.prisma.payroll.findMany({
         where: {
           workerId,
-          payPeriodStart: { lte: selectedEnd },
-          payPeriodEnd: { gte: selected },
+          status: 'paid',
+          OR: [
+            { payPeriodStart: { gte: selected, lte: selectedEnd } },
+            { payPeriodEnd: { gte: selected, lte: selectedEnd } },
+            { processedAt: { gte: selected, lte: selectedEnd } },
+            { createdAt: { gte: selected, lte: selectedEnd } },
+          ],
         },
         include: {
           company: { select: { id: true, name: true, logoUrl: true } },
@@ -1453,11 +1522,18 @@ export class WorkerService {
         },
         orderBy: { createdAt: 'desc' },
       }),
-      // sei diner attendance (total hours)
-      this.prisma.attendance.findUnique({
-        where: { userId_date: { userId: workerId, date: selected } },
-        include: {
-          sessions: { orderBy: { checkInTime: 'asc' } },
+      this.prisma.payroll.findMany({
+        where: {
+          workerId,
+          status: 'paid',
+        },
+        select: {
+          grossPay: true,
+          deductions: true,
+          netPay: true,
+          regularHours: true,
+          overtimeHours: true,
+          ratePerHour: true,
         },
       }),
     ]);
@@ -1466,41 +1542,75 @@ export class WorkerService {
       throw new NotFoundException('Worker not found');
     }
 
-    // admin side er motoi — sessions theke manually calculate koro
-    // attendance.totalHours e open session er time count hoy na
-    const sessions = attendanceRecord?.sessions ?? [];
-    // Only zone time counts here. Check-in / check-out duration must not affect payroll.
-    const totalZoneHours = sessions.reduce(
-      (sum, s) => sum + (s.zoneSeconds ?? 0) / 3600,
+    const lifetimeTotalHours = allTimePayrolls.reduce(
+      (sum, p) => sum + (p.regularHours ?? 0) + (p.overtimeHours ?? 0),
       0,
     );
-    const totalGrossPay = payrolls.reduce((sum, p) => sum + p.grossPay, 0);
-    const totalDeductions = payrolls.reduce((sum, p) => sum + p.deductions, 0);
-    const totalNetPay = payrolls.reduce((sum, p) => sum + p.netPay, 0);
+    const lifetimeGrossPay = allTimePayrolls.reduce((sum, p) => sum + p.grossPay, 0);
+    const lifetimeDeductions = allTimePayrolls.reduce((sum, p) => sum + p.deductions, 0);
+    const lifetimePay = allTimePayrolls.reduce((sum, p) => sum + p.netPay, 0);
+    const lifetimeAverageHourlyRate = allTimePayrolls.length
+      ? Math.round((allTimePayrolls.reduce((sum, p) => sum + p.ratePerHour, 0) / allTimePayrolls.length) * 100) / 100
+      : 0;
 
     const projectMap = new Map<
       string,
       {
-      id: string;
-      name: string;
-      companyId: string;
-      companyName: string;
-      ratePerHour: number;
-    }
-  >();
+        projectId: string | null;
+        projectName: string | null;
+        companyId: string;
+        companyName: string;
+        ratePerHourTotal: number;
+        ratePerHourCount: number;
+        totalHours: number;
+        grossPay: number;
+        deductions: number;
+        totalPay: number;
+      }
+    >();
 
     payrolls.forEach((p) => {
-      if (!p.project) return;
-      if (!projectMap.has(p.project.id)) {
-        projectMap.set(p.project.id, {
-          id: p.project.id,
-          name: p.project.name,
-          companyId: p.company.id,
-          companyName: p.company.name,
-          ratePerHour: p.ratePerHour,
-        });
-      }
+      const key = p.project?.id ?? p.company.id;
+      const current = projectMap.get(key) ?? {
+        projectId: p.project?.id ?? null,
+        projectName: p.project?.name ?? null,
+        companyId: p.company.id,
+        companyName: p.company.name,
+        ratePerHourTotal: 0,
+        ratePerHourCount: 0,
+        totalHours: 0,
+        grossPay: 0,
+        deductions: 0,
+        totalPay: 0,
+      };
+
+      const regularHours = p.regularHours ?? 0;
+      const overtimeHours = p.overtimeHours ?? 0;
+      const hours = regularHours + overtimeHours;
+      current.ratePerHourTotal += p.ratePerHour;
+      current.ratePerHourCount += 1;
+      current.totalHours += hours;
+      current.grossPay += p.grossPay;
+      current.deductions += p.deductions;
+      current.totalPay += p.netPay;
+
+      projectMap.set(key, current);
     });
+
+    const projects = Array.from(projectMap.values()).map((project) => ({
+      projectId: project.projectId,
+      projectName: project.projectName,
+      companyId: project.companyId,
+      companyName: project.companyName,
+      totalHours: Math.round(project.totalHours * 100) / 100,
+      totalHoursDisplay: this.formatHoursAndMinutes(project.totalHours),
+      grossPay: Math.round(project.grossPay * 100) / 100,
+      totalDeductions: Math.round(project.deductions * 100) / 100,
+      totalPay: Math.round(project.totalPay * 100) / 100,
+      averageHourlyRate: project.ratePerHourCount
+        ? Math.round((project.ratePerHourTotal / project.ratePerHourCount) * 100) / 100
+        : 0,
+    }));
 
     return {
       date: selected,
@@ -1515,12 +1625,14 @@ export class WorkerService {
         role: worker.role,
         status: worker.status,
       },
-      projects: Array.from(projectMap.values()),
-      summary: {
-        totalHours: Math.round(totalZoneHours * 100) / 100,
-        totalHoursDisplay: this.formatHoursAndMinutes(totalZoneHours),
-        totalPay: Math.round(totalNetPay * 100) / 100,
-        totalDeductions: Math.round(totalDeductions * 100) / 100,
+      projects,
+      lifetimeSummary: {
+        totalHours: Math.round(lifetimeTotalHours * 100) / 100,
+        totalHoursDisplay: this.formatHoursAndMinutes(lifetimeTotalHours),
+        totalPay: Math.round(lifetimePay * 100) / 100,
+        totalDeductions: Math.round(lifetimeDeductions * 100) / 100,
+        grossPay: Math.round(lifetimeGrossPay * 100) / 100,
+        averageHourlyRate: lifetimeAverageHourlyRate,
       },
     };
   }

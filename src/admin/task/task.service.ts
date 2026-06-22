@@ -366,7 +366,15 @@ export class TaskService {
     if (!task.assignedTo) {
       await this.prisma.task.update({
         where: { id: taskId },
-        data: { assignedTo: userIds[0] }, 
+        data: {
+          assignedTo: userIds[0],
+          status: 'in_progress',
+        },
+      });
+    } else if (task.status === 'pending') {
+      await this.prisma.task.update({
+        where: { id: taskId },
+        data: { status: 'in_progress' },
       });
     }
 
@@ -379,6 +387,7 @@ export class TaskService {
             user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
           },
         },
+        project: { select: { id: true, name: true } },
       },
     });
 
