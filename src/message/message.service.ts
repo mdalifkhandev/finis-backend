@@ -579,24 +579,25 @@ export class MessageService {
 
     const page = Math.max(1, Number(query.page ?? 1));
     const limit = Math.max(1, Number(query.limit ?? 20));
-    const skip = (page - 1) * limit;
 
-    const [messages, total] = await Promise.all([
-      this.prisma.message.findMany({
-        where: { threadId },
-        orderBy: { sentAt: 'desc' },
-        skip,
-        take: limit,
-        include: {
-          sender: {
-            select: { id: true, fullName: true, avatarUrl: true, role: true },
-          },
+    const total = await this.prisma.message.count({
+      where: { threadId },
+    });
+
+    const start = Math.max(total - page * limit, 0);
+    const take = Math.min(limit, total - start);
+
+    const messages = await this.prisma.message.findMany({
+      where: { threadId },
+      orderBy: { sentAt: 'asc' },
+      skip: start,
+      take,
+      include: {
+        sender: {
+          select: { id: true, fullName: true, avatarUrl: true, role: true },
         },
-      }),
-      this.prisma.message.count({
-        where: { threadId },
-      }),
-    ]);
+      },
+    });
 
     // Read mark করা
     await this.prisma.message.updateMany({
