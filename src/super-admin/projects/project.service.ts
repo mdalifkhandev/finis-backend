@@ -389,6 +389,9 @@ export class SuperAdminProjectService {
     if (!file) {
       throw new BadRequestException('file is required');
     }
+    if (!fileUrl) {
+      throw new BadRequestException('S3 upload failed');
+    }
 
     const fileSizeMb = file.size / (1024 * 1024);
 
@@ -398,7 +401,7 @@ export class SuperAdminProjectService {
         projectId,
         uploadedBy: userId as string,
         fileName: file.originalname,
-        fileUrl: fileUrl ?? `/uploads/documents/${file.filename}`,
+        fileUrl,
         fileType: file.mimetype,
         fileSizeMb: Math.round(fileSizeMb * 100) / 100,
       },

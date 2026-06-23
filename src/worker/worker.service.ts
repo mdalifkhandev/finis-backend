@@ -478,13 +478,13 @@ export class WorkerService {
         workerId,
         notes: dto.notes ?? null,
         beforePhotoUrl: files?.beforePhoto?.[0]?.filename
-          ? `/uploads/task-reports/${files.beforePhoto[0].filename}`
+          ? files.beforePhoto[0].filename
           : dto.beforePhotoUrl ?? null,
         afterPhotoUrl: files?.afterPhoto?.[0]?.filename
-          ? `/uploads/task-reports/${files.afterPhoto[0].filename}`
+          ? files.afterPhoto[0].filename
           : dto.afterPhotoUrl ?? null,
         receiptUrl: files?.receipt?.[0]?.filename
-          ? `/uploads/task-reports/${files.receipt[0].filename}`
+          ? files.receipt[0].filename
           : dto.receiptUrl ?? null,
         reviewDecision: 'pending',
       },
@@ -556,13 +556,13 @@ export class WorkerService {
       data: {
         notes: body?.notes ?? body?.description ?? report.notes,
         beforePhotoUrl: files?.beforePhoto?.[0]?.filename
-          ? `/uploads/task-reports/${files.beforePhoto[0].filename}`
+          ? files.beforePhoto[0].filename
           : body?.beforePhotoUrl ?? report.beforePhotoUrl,
         afterPhotoUrl: files?.afterPhoto?.[0]?.filename
-          ? `/uploads/task-reports/${files.afterPhoto[0].filename}`
+          ? files.afterPhoto[0].filename
           : body?.afterPhotoUrl ?? report.afterPhotoUrl,
         receiptUrl: files?.receipt?.[0]?.filename
-          ? `/uploads/task-reports/${files.receipt[0].filename}`
+          ? files.receipt[0].filename
           : body?.receiptUrl ?? report.receiptUrl,
       },
     });
@@ -849,6 +849,17 @@ export class WorkerService {
         ? await this.geofencingGateway.resolveZoneStatus(dto.lat, dto.lng, dto.projectId)
         : { inside: false, zoneName: null };
 
+    await this.prisma.locationLog.create({
+      data: {
+        userId: workerId,
+        geofenceId: null,
+        lat: dto.lat ?? 0,
+        lng: dto.lng ?? 0,
+        eventType: 'check_in',
+        isInsideZone: zoneResult.inside,
+      },
+    });
+
     const stateResult = this.geofencingGateway.upsertWorkerState({
       userId: workerId,
       fullName: worker?.fullName ?? 'Worker',
@@ -943,6 +954,17 @@ export class WorkerService {
         zoneSeconds: sessionZoneSeconds,
         outLat: dto.lat ?? null,
         outLng: dto.lng ?? null,
+      },
+    });
+
+    await this.prisma.locationLog.create({
+      data: {
+        userId: workerId,
+        geofenceId: null,
+        lat: dto.lat ?? 0,
+        lng: dto.lng ?? 0,
+        eventType: 'exit',
+        isInsideZone: false,
       },
     });
 
@@ -1063,6 +1085,107 @@ export class WorkerService {
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
+
+  async getWeeklyAttendanceSummary(workerId: string) {
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+
+    const start = new Date(end);
+    start.setDate(start.getDate() - 6);
+    start.setHours(0, 0, 0, 0);
+
+    const attendances = await this.prisma.attendance.findMany({
+      where: {
+        userId: workerId,
+        date: {
+          gte: start,
+          lte: end,
+        },
+      },
+      include: {
+        sessions: {
+          include: {
+            project: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { date: 'asc' },
+    });
+
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(start);
+      day.setDate(start.getDate() + index);
+      day.setHours(0, 0, 0, 0);
+      return {
+        date: day.toISOString().slice(0, 10),
+        dayLabel: day.toLocaleDateString('en-US', { weekday: 'short' }),
+        totalHours: 0,
+        totalHoursDisplay: '0h 0m',
+        sessionCount: 0,
+        projects: [] as Array<{ projectId: string | null; projectName: string | null; hours: number }>,
+      };
+    });
+
+    const dayMap = new Map(days.map((day) => [day.date, day]));
+
+    for (const attendance of attendances) {
+      const key = attendance.date.toISOString().slice(0, 10);
+      const day = dayMap.get(key);
+      if (!day) continue;
+
+      const sessions = attendance.sessions.filter((session) => session.checkOutTime);
+      day.sessionCount += sessions.length;
+
+      for (const session of sessions) {
+        const hours = session.hoursWorked ?? ((session.zoneSeconds ?? 0) / 3600);
+        day.totalHours += hours;
+
+        const projectId = session.projectId ?? null;
+        const projectName = session.project?.name ?? null;
+        const existing = day.projects.find((project) => project.projectId === projectId);
+
+        if (existing) {
+          existing.hours += hours;
+        } else {
+          day.projects.push({
+            projectId,
+            projectName,
+            hours,
+          });
+        }
+      }
+    }
+
+    const normalizedDays = days.map((day) => {
+      const roundedHours = Math.round(day.totalHours * 100) / 100;
+      return {
+        ...day,
+        totalHours: roundedHours,
+        totalHoursDisplay: this.formatHoursAndMinutes(roundedHours),
+        projects: day.projects.map((project) => ({
+          ...project,
+          hours: Math.round(project.hours * 100) / 100,
+        })),
+      };
+    });
+
+    const totalHours = normalizedDays.reduce((sum, day) => sum + day.totalHours, 0);
+
+    return {
+      dateRange: {
+        start: start.toISOString(),
+        end: end.toISOString(),
+      },
+      totalHours: Math.round(totalHours * 100) / 100,
+      totalHoursDisplay: this.formatHoursAndMinutes(totalHours),
+      days: normalizedDays,
+    };
+  }
   // ─────────────────────────────────────────────
   // LEAVE REQUESTS
   // ─────────────────────────────────────────────
@@ -1181,9 +1304,7 @@ export class WorkerService {
         phone: dto.phone,
         dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
         address: dto.address,
-        avatarUrl: avatarFile
-          ? `/uploads/avatars/${avatarFile.filename}`
-          : dto.avatarUrl,
+        avatarUrl: avatarFile ? avatarFile.filename : dto.avatarUrl,
       },
       select: {
         id: true,

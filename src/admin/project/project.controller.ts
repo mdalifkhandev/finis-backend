@@ -9,13 +9,18 @@ import {
   Param,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { ProjectService } from './project.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { UserRole } from '../../generated/prisma/client';
+import { S3Service } from '../../s3/s3.service';
 import {
   CreateProjectDto,
   UpdateProjectDto,
@@ -31,7 +36,10 @@ import {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
 export class ProjectController {
-  constructor(private projectService: ProjectService) { }
+  constructor(
+    private projectService: ProjectService,
+    private readonly s3Service: S3Service,
+  ) { }
   // ─── PROJECTS ──────────────────────────────────────────────────────────────
 
   /** GET /admin/projects */
@@ -101,6 +109,32 @@ export class ProjectController {
     @CurrentUser('role') userRole: string,
   ) {
     return this.projectService.getProjectDocuments(id, userId, userRole);
+  }
+
+  /** POST /admin/projects/:id/documents
+   *  Uploads a project document and stores the file in S3
+   */
+  @Post(':id/documents')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  async uploadProjectDocument(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    const fileUrl = file ? await this.s3Service.uploadFile(file, 'project-documents') : undefined;
+    return this.projectService.uploadProjectDocument(id, userId, userRole, file, fileUrl);
+  }
+
+  /** DELETE /admin/projects/:id/documents/:docId */
+  @Delete(':id/documents/:docId')
+  deleteProjectDocument(
+    @Param('id') id: string,
+    @Param('docId') docId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.deleteProjectDocument(id, docId, userId, userRole);
   }
 
   /** PUT /admin/projects/:id — Edit Project screen */
@@ -248,6 +282,18 @@ export class ProjectController {
     @CurrentUser('role') userRole: string,
   ) {
     return this.projectService.getProjectAnalysis(id, userId, userRole);
+  }
+
+  /** GET /admin/projects/:id/approvals
+   *  Returns: approval summary and recent task report reviews
+   */
+  @Get(':id/approvals')
+  getProjectApprovals(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.getProjectApprovals(id, userId, userRole);
   }
 
   // ─── TEAM ──────────────────────────────────────────────────────────────────

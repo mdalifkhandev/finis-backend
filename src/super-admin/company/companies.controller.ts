@@ -1,44 +1,37 @@
-  import {
-    Controller,
-    Get,
-    Post,
-    Put,
-    Delete,
-    Patch,
-    Body,
-    BadRequestException,
-    Param,
-    Query,
-    UseGuards,
-    UseInterceptors,
-    UploadedFile,
-    ParseUUIDPipe,
-  } from '@nestjs/common';
-  import { FileInterceptor } from '@nestjs/platform-express';
-  import { diskStorage } from 'multer';
-  import { extname } from 'path';
-  import { v4 as uuidv4 } from 'uuid';
-  import { SuperAdminCompaniesService } from './companies.service';
-  import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
-  import { RolesGuard } from '../../auth/guards/roles.guard';
-  import { Roles } from '../../auth/decorators/roles.decorator';
-  import { UserRole } from '../../generated/prisma/client';
-  import {
-    GetCompaniesQueryDto,
-    CreateCompanyDto,
-    UpdateCompanyDto,
-    ContactCompanyDto,
-    PaginationQueryDto,
-  } from './dto/companies.dto';
-
-  const logoStorage = diskStorage({
-    destination: './uploads/logos',
-    filename: (_, file, cb) =>
-      cb(null, `${uuidv4()}${extname(file.originalname)}`),
-  });
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Patch,
+  Body,
+  BadRequestException,
+  Param,
+  Query,
+  UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  ParseUUIDPipe,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { SuperAdminCompaniesService } from './companies.service';
+import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
+import { RolesGuard } from '../../auth/guards/roles.guard';
+import { Roles } from '../../auth/decorators/roles.decorator';
+import { UserRole } from '../../generated/prisma/client';
+import {
+  GetCompaniesQueryDto,
+  CreateCompanyDto,
+  UpdateCompanyDto,
+  ContactCompanyDto,
+  PaginationQueryDto,
+} from './dto/companies.dto';
+import { S3Service } from '../../s3/s3.service';
 
   const imageLogoFileFilter = (_: unknown, file: any, cb: (error: Error | null, acceptFile: boolean) => void) => {
-    const extension = extname(file.originalname).toLowerCase();
+    const extension = file.originalname.toLowerCase().match(/\.[^.]+$/)?.[0] ?? '';
     const isImageMimeType = typeof file.mimetype === 'string' && file.mimetype.startsWith('image/');
     const isAllowedExtension = ['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(extension);
 
@@ -50,17 +43,14 @@
     cb(null, true);
   };
 
-  const docStorage = diskStorage({
-    destination: './uploads/documents',
-    filename: (_, file, cb) =>
-      cb(null, `${uuidv4()}${extname(file.originalname)}`),
-  });
-
-  @Controller('super-admin/companies')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.super_admin)
-  export class SuperAdminCompaniesController {
-    constructor(private readonly companiesService: SuperAdminCompaniesService) { }
+@Controller('super-admin/companies')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.super_admin)
+export class SuperAdminCompaniesController {
+  constructor(
+    private readonly companiesService: SuperAdminCompaniesService,
+    private readonly s3Service: S3Service,
+  ) {}
 
     // Upload document
 
@@ -85,88 +75,99 @@
     // image: ADD NEW COMPANY modal
     // FIX: pass @CurrentUser('id') as adminId so ownerId defaults to the admin
     //      when no explicit ownerId is provided in the body
-    @Post()
-    @UseInterceptors(FileInterceptor('logo', { storage: logoStorage, fileFilter: imageLogoFileFilter }))
-    createCompany(
-      @Body() dto: CreateCompanyDto,
-      @UploadedFile() file?: Express.Multer.File,
-    ) {
-      return this.companiesService.createCompany(dto, file?.filename);
-    }
+  @Post()
+  @UseInterceptors(FileInterceptor('logo', { storage: memoryStorage(), fileFilter: imageLogoFileFilter }))
+  async createCompany(
+    @Body() dto: CreateCompanyDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    const logoUrl = file ? await this.s3Service.uploadFile(file, 'company-logos') : undefined;
+    return this.companiesService.createCompany(dto, logoUrl);
+  }
 
 
-    @Post(':id/contact')
-    sendCompanyContact(
-      @Param('id', ParseUUIDPipe) companyId: string,
-      @Body() dto: ContactCompanyDto,
-    ) {
-      return this.companiesService.contactCompany(companyId, dto);
-    }
+  @Post(':id/contact')
+  sendCompanyContact(
+    @Param('id', ParseUUIDPipe) companyId: string,
+    @Body() dto: ContactCompanyDto,
+  ) {
+    return this.companiesService.contactCompany(companyId, dto);
+  }
     // ─── PROFILE ──────────────────────────────────────────────────────────────
     // image: Overview tab — About Company + stats + Direct Contact + chart + certifications
-    @Get(':id')
-    getCompanyProfile(@Param('id', ParseUUIDPipe) companyId: string) {
-      return this.companiesService.getCompanyProfile(companyId);
-    }
+  @Get(':id')
+  getCompanyProfile(@Param('id', ParseUUIDPipe) companyId: string) {
+    return this.companiesService.getCompanyProfile(companyId);
+  }
 
     // ─── UPDATE ───────────────────────────────────────────────────────────────
     // image: EDIT COMPANY PROFILE modal
-    @Put(':id')
-    @UseInterceptors(FileInterceptor('logo', { storage: logoStorage, fileFilter: imageLogoFileFilter }))
-    updateCompany(
-      @Param('id', ParseUUIDPipe) companyId: string,
-      @Body() dto: UpdateCompanyDto,
-      @UploadedFile() file?: Express.Multer.File,
-    ) {
-      return this.companiesService.updateCompany(companyId, dto, file?.filename);
-    }
+  @Put(':id')
+  @UseInterceptors(FileInterceptor('logo', { storage: memoryStorage(), fileFilter: imageLogoFileFilter }))
+  async updateCompany(
+    @Param('id', ParseUUIDPipe) companyId: string,
+    @Body() dto: UpdateCompanyDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    const logoUrl = file ? await this.s3Service.uploadFile(file, 'company-logos') : undefined;
+    return this.companiesService.updateCompany(companyId, dto, logoUrl);
+  }
 
     // ─── SOFT DELETE ──────────────────────────────────────────────────────────
-    @Delete(':id')
-    deleteCompany(@Param('id', ParseUUIDPipe) companyId: string) {
-      return this.companiesService.deleteCompany(companyId);
-    }
+  @Delete(':id')
+  deleteCompany(@Param('id', ParseUUIDPipe) companyId: string) {
+    return this.companiesService.deleteCompany(companyId);
+  }
 
     // ─── TOGGLE STATUS ────────────────────────────────────────────────────────
-    @Patch(':id/toggle-status')
-    toggleStatus(@Param('id', ParseUUIDPipe) companyId: string) {
-      return this.companiesService.toggleCompanyStatus(companyId);
-    }
+  @Patch(':id/toggle-status')
+  toggleStatus(@Param('id', ParseUUIDPipe) companyId: string) {
+    return this.companiesService.toggleCompanyStatus(companyId);
+  }
 
     // ─── TABS ─────────────────────────────────────────────────────────────────
 
     // image: "Projects 3" tab
-    @Get(':id/projects')
-    getCompanyProjects(
-      @Param('id', ParseUUIDPipe) companyId: string,
-      @Query() query: PaginationQueryDto,
-    ) {
-      return this.companiesService.getCompanyProjects(companyId, query);
-    }
+  @Get(':id/projects')
+  getCompanyProjects(
+    @Param('id', ParseUUIDPipe) companyId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.companiesService.getCompanyProjects(companyId, query);
+  }
 
 
     // Performance tab (image: Completion % + Budget Adherence line chart)
-    @Get(':id/performance')
-    getCompanyPerformance(@Param('id', ParseUUIDPipe) companyId: string) {
-      return this.companiesService.getCompanyPerformance(companyId);
-    }
+  @Get(':id/performance')
+  getCompanyPerformance(@Param('id', ParseUUIDPipe) companyId: string) {
+    return this.companiesService.getCompanyPerformance(companyId);
+  }
 
     // Documents tab
-    @Get(':id/documents')
-    getCompanyDocuments(
-      @Param('id', ParseUUIDPipe) companyId: string,
-      @Query() query: PaginationQueryDto,
-    ) {
-      return this.companiesService.getCompanyDocuments(companyId, query);
-    }
+  @Get(':id/documents')
+  getCompanyDocuments(
+    @Param('id', ParseUUIDPipe) companyId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.companiesService.getCompanyDocuments(companyId, query);
+  }
 
     // Upload document
-    @Post(':id/documents')
-    @UseInterceptors(FileInterceptor('file', { storage: docStorage }))
-    uploadCompanyDocument(
-      @Param('id', ParseUUIDPipe) companyId: string,
-      @UploadedFile() file?: Express.Multer.File,
-    ) {
-      return this.companiesService.uploadCompanyDocument(companyId, file);
-    }
+  @Post(':id/documents')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  async uploadCompanyDocument(
+    @Param('id', ParseUUIDPipe) companyId: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    const fileUrl = file ? await this.s3Service.uploadFile(file, 'company-documents') : undefined;
+    return this.companiesService.uploadCompanyDocument(companyId, file, fileUrl);
   }
+
+  @Delete(':id/documents/:documentId')
+  async deleteCompanyDocument(
+    @Param('id', ParseUUIDPipe) companyId: string,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+  ) {
+    return this.companiesService.deleteCompanyDocument(companyId, documentId);
+  }
+}

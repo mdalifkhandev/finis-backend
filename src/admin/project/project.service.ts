@@ -781,6 +781,101 @@ export class ProjectService {
     return { checklist };
   }
 
+  // ─── PROJECT APPROVALS ─────────────────────────────────────────────────────
+  async getProjectApprovals(projectId: string, userId: string, userRole: string) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+
+    const [summary, recentReports, relatedTasks] = await Promise.all([
+      this.prisma.taskReport.groupBy({
+        by: ['reviewDecision'],
+        where: { task: { projectId } },
+        _count: { reviewDecision: true },
+      }),
+      this.prisma.taskReport.findMany({
+        where: { task: { projectId } },
+        orderBy: { submittedAt: 'desc' },
+        take: 12,
+        select: {
+          id: true,
+          taskId: true,
+          workerId: true,
+          notes: true,
+          beforePhotoUrl: true,
+          afterPhotoUrl: true,
+          receiptUrl: true,
+          reviewDecision: true,
+          reviewDescription: true,
+          submittedAt: true,
+          reviewedAt: true,
+        },
+      }),
+      this.prisma.task.findMany({
+        where: { projectId },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          floor: { select: { id: true, name: true, floorNumber: true } },
+          room: { select: { id: true, name: true } },
+          taskAssignees: {
+            select: {
+              user: { select: { id: true, fullName: true, avatarUrl: true } },
+            },
+            take: 1,
+          },
+        },
+      }),
+    ]);
+
+    const summaryMap = summary.reduce<Record<string, number>>((acc, item) => {
+      acc[item.reviewDecision] = item._count.reviewDecision;
+      return acc;
+    }, {});
+
+    const pending = summaryMap.pending ?? 0;
+    const approved = summaryMap.approved ?? 0;
+    const rejected = summaryMap.rejected ?? 0;
+    const total = pending + approved + rejected;
+    const taskMap = new Map(relatedTasks.map((task) => [task.id, task]));
+
+    return {
+      summary: {
+        total,
+        pending,
+        approved,
+        rejected,
+      },
+      recentApprovals: recentReports.map((report) => ({
+        id: report.id,
+        taskId: report.taskId,
+        taskTitle: taskMap.get(report.taskId)?.title ?? 'Task',
+        taskStatus: taskMap.get(report.taskId)?.status ?? 'pending',
+        floor: taskMap.get(report.taskId)?.floor
+          ? {
+              id: taskMap.get(report.taskId)!.floor!.id,
+              name: taskMap.get(report.taskId)!.floor!.name,
+              floorNumber: taskMap.get(report.taskId)!.floor!.floorNumber,
+            }
+          : null,
+        room: taskMap.get(report.taskId)?.room
+          ? {
+              id: taskMap.get(report.taskId)!.room!.id,
+              name: taskMap.get(report.taskId)!.room!.name,
+            }
+          : null,
+        worker: taskMap.get(report.taskId)?.taskAssignees[0]?.user ?? null,
+        reviewDecision: report.reviewDecision,
+        reviewDescription: report.reviewDescription,
+        notes: report.notes,
+        beforePhotoUrl: report.beforePhotoUrl,
+        afterPhotoUrl: report.afterPhotoUrl,
+        receiptUrl: report.receiptUrl,
+        submittedAt: report.submittedAt,
+        reviewedAt: report.reviewedAt,
+      })),
+    };
+  }
+
   // ─── FLOORS CRUD ───────────────────────────────────────────────────────────
   async addFloor(projectId: string, dto: AddFloorDto, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
@@ -1050,6 +1145,79 @@ export class ProjectService {
       uploadedAt: document.uploadedAt,
       uploadedBy: document.uploadedByUser,
     }));
+  }
+
+  async uploadProjectDocument(
+    projectId: string,
+    userId: string,
+    userRole: string,
+    file?: { originalname: string; filename: string; size: number; mimetype: string },
+    fileUrl?: string,
+  ) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+
+    if (!file) {
+      throw new BadRequestException('file is required');
+    }
+    if (!fileUrl) {
+      throw new BadRequestException('S3 upload failed');
+    }
+
+    const fileSizeMb = file.size / (1024 * 1024);
+
+    const document = await this.prisma.document.create({
+      data: {
+        projectId,
+        uploadedBy: userId,
+        fileName: file.originalname,
+        fileUrl,
+        fileType: file.mimetype,
+        fileSizeMb: Math.round(fileSizeMb * 100) / 100,
+      },
+      include: {
+        uploadedByUser: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    return {
+      message: 'Document uploaded successfully',
+      document: {
+        id: document.id,
+        fileName: document.fileName,
+        fileUrl: document.fileUrl,
+        fileType: document.fileType,
+        fileSizeMb: document.fileSizeMb,
+        uploadedAt: document.uploadedAt,
+        uploadedBy: document.uploadedByUser,
+      },
+    };
+  }
+
+  async deleteProjectDocument(projectId: string, docId: string, userId: string, userRole: string) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+
+    const document = await this.prisma.document.findFirst({
+      where: { id: docId, projectId },
+    });
+
+    if (!document) {
+      throw new NotFoundException('Document not found');
+    }
+
+    await this.prisma.document.delete({
+      where: { id: docId },
+    });
+
+    return {
+      message: 'Document deleted successfully',
+    };
   }
 
   async getManagerWorkersCount(projectId: string, managerId: string, userId: string, userRole: string) {

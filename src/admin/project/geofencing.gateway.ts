@@ -130,6 +130,10 @@ export class GeofencingGateway
   private connectedUsers = new Map<string, string>();
   // userId → WorkerState
   private workerStates = new Map<string, WorkerState>();
+
+  public getWorkerState(userId: string) {
+    return this.workerStates.get(userId) ?? null;
+  }
   // userId → socketId
   private userSockets = new Map<string, string>();
 
@@ -989,7 +993,7 @@ export class GeofencingGateway
     geofenceId: string | null,
     lat: number,
     lng: number,
-    eventType: 'enter' | 'exit',
+    eventType: 'check_in' | 'out_of_zone' | 'check_out' | 'enter' | 'exit',
     isInsideZone: boolean,
   ) {
     try {

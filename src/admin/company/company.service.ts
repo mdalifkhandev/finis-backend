@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { S3Service } from '../../s3/s3.service';
 import { CreateCompanyDto, UpdateCompanyDto, CreateContactDto, UpdateContactDto, PaginationQueryDto } from './dto/company.dto';
 
 
@@ -16,6 +17,7 @@ export class CompanyService {
     private prisma: PrismaService,
     private config: ConfigService,
     private notificationsService: NotificationsService,
+    private s3Service: S3Service,
   ) { }
 
   private async getAccessibleCompanyIds(userId: string, userRole: string) {
@@ -177,13 +179,45 @@ export class CompanyService {
 
   async getCompanyProfile(companyId: string, adminId: string, userRole: string = 'admin') {
     await this.verifyCompanyAccess(companyId, adminId, userRole);
-    return this.prisma.company.findUnique({
+    const company: any = await this.prisma.company.findUnique({
       where: { id: companyId },
       include: {
         _count: { select: { projects: true, members: true } },
         certifications: true,
+        members: {
+          orderBy: { joinedAt: 'asc' },
+          include: {
+            user: {
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                phone: true,
+                avatarUrl: true,
+                role: true,
+              },
+            },
+          },
+        },
       },
     });
+
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
+    return {
+      ...company,
+      contacts: company.members.map((member) => ({
+        id: member.user.id,
+        fullName: member.user.fullName,
+        role: member.role,
+        email: member.user.email,
+        phone: member.user.phone,
+        avatarUrl: member.user.avatarUrl,
+        isPrimary: member.user.id === company.ownerId,
+      })),
+    };
   }
 
   // ─── CREATE COMPANY ───────────────────────────────────────────────────────
@@ -311,13 +345,16 @@ export class CompanyService {
 
   async uploadDocument(companyId: string, adminId: string, file: Express.Multer.File, userRole: string = 'admin', fileUrl?: string) {
     await this.verifyCompanyAccess(companyId, adminId, userRole);
+    if (!fileUrl) {
+      throw new BadRequestException('S3 upload failed');
+    }
     const fileSizeMb = file.size / (1024 * 1024);
     return this.prisma.document.create({
       data: {
         companyId,
         uploadedBy: adminId,
         fileName: file.originalname,
-        fileUrl: fileUrl ?? `/uploads/documents/${file.filename}`,
+        fileUrl,
         fileType: file.mimetype,
         fileSizeMb: Math.round(fileSizeMb * 100) / 100,
       },
@@ -326,9 +363,17 @@ export class CompanyService {
 
   async deleteDocument(companyId: string, documentId: string, adminId: string, userRole: string = 'admin') {
     await this.verifyCompanyAccess(companyId, adminId, userRole);
-    const doc = await this.prisma.document.findUnique({ where: { id: documentId }, select: { companyId: true } });
+    const doc = await this.prisma.document.findUnique({
+      where: { id: documentId },
+      select: { companyId: true, fileUrl: true },
+    });
     if (!doc) throw new NotFoundException('Document not found');
     if (doc.companyId !== companyId) throw new ForbiddenException('Document does not belong to this company');
+
+    if (doc.fileUrl) {
+      await this.s3Service.deleteFile(doc.fileUrl);
+    }
+
     await this.prisma.document.delete({ where: { id: documentId } });
     return { message: 'Document deleted successfully' };
   }

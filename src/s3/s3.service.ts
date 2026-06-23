@@ -48,7 +48,9 @@ export class S3Service {
 
     async deleteFile(fileUrl: string): Promise<void> {
         try {
-            const key = fileUrl.split('.amazonaws.com/')[1];
+            const key = fileUrl.includes('.amazonaws.com/')
+                ? fileUrl.split('.amazonaws.com/')[1]
+                : fileUrl.replace(/^\/+/, '');
             if (!key) return;
 
             await this.s3.send(

@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MailService } from '../../auth/mail.service';
+import { S3Service } from '../../s3/s3.service';
 import {
   GetCompaniesQueryDto,
   CreateCompanyDto,
@@ -20,6 +21,7 @@ export class SuperAdminCompaniesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
+    private readonly s3Service: S3Service,
   ) { }
 
   // ─── HELPER: build a { gte, lte } date range for a given period ───────────
@@ -288,25 +290,76 @@ export class SuperAdminCompaniesService {
 
   // ─── GET COMPANY PROFILE (image: overview tab) ─────────────────────────────
   async getCompanyProfile(companyId: string) {
-
     const companyMembers = await this.prisma.companyMember.findMany({
       where: { companyId },
-      select: { userId: true }
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phone: true,
+            avatarUrl: true,
+            role: true,
+          },
+        },
+      },
     });
 
     const projectMembers = await this.prisma.projectMember.findMany({
       where: {
-        project: { companyId }
+        project: { companyId },
       },
-      select: { userId: true }
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phone: true,
+            avatarUrl: true,
+            role: true,
+          },
+        },
+      },
     });
 
-    const uniqueUsers = new Set([
-      ...companyMembers.map(m => m.userId),
-      ...projectMembers.map(m => m.userId),
-    ]);
+    const contactMap = new Map<string, {
+      id: string;
+      fullName: string;
+      role: string;
+      email: string | null;
+      phone: string | null;
+      avatarUrl: string | null;
+      isPrimary: boolean;
+    }>();
 
-    const totalMembers = uniqueUsers.size;
+    for (const member of companyMembers) {
+      contactMap.set(member.user.id, {
+        id: member.user.id,
+        fullName: member.user.fullName,
+        role: member.role,
+        email: member.user.email,
+        phone: member.user.phone,
+        avatarUrl: member.user.avatarUrl,
+        isPrimary: false,
+      });
+    }
+
+    for (const member of projectMembers) {
+      if (!contactMap.has(member.user.id)) {
+        contactMap.set(member.user.id, {
+          id: member.user.id,
+          fullName: member.user.fullName,
+          role: member.user.role,
+          email: member.user.email,
+          phone: member.user.phone,
+          avatarUrl: member.user.avatarUrl,
+          isPrimary: false,
+        });
+      }
+    }
+
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
       include: {
@@ -325,17 +378,6 @@ export class SuperAdminCompaniesService {
             name: true,
             status: true,
             plan: { select: { id: true, name: true } },
-          },
-        },
-        contacts: {
-          orderBy: [{ isPrimary: 'desc' }, { fullName: 'asc' }],
-          select: {
-            id: true,
-            fullName: true,
-            role: true,
-            email: true,
-            phone: true,
-            isPrimary: true,
           },
         },
         _count: {
@@ -397,14 +439,19 @@ export class SuperAdminCompaniesService {
         : 100;
 
     // Direct contact (image: Phone, Email, Website, Address section)
-    const primaryContact = company.contacts.find((c) => c.isPrimary);
+    const contacts = Array.from(contactMap.values()).sort((a, b) => {
+      if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
+      return a.fullName.localeCompare(b.fullName);
+    });
+    const primaryContact = contacts[0] ?? null;
 
     return {
       ...company,
+      contacts,
       stats: {
-        totalMembers,
+        totalMembers: contactMap.size,
         annualRevenue: company.revenue ?? 0,
-        totalEmployees: `${totalMembers}+`,
+        totalEmployees: `${contactMap.size}+`,
         projectsCompleted,
         safetyRating: `${safetyRating}%`,
       },
@@ -492,7 +539,7 @@ export class SuperAdminCompaniesService {
       orderBy: { startDate: 'asc' },
     });
 
-    const [taskReports, totalTasks, completedTasks, totalExpenses] = await Promise.all([
+    const [taskReports, totalTasks, completedTasks] = await Promise.all([
       this.prisma.taskReport.findMany({
         where: { task: { project: { companyId } } },
         select: {
@@ -539,7 +586,7 @@ export class SuperAdminCompaniesService {
             (sum, project) => sum + (project.progress ?? 0),
             0,
           ) / currentMonthProjects.length
-        : averageCompletionRate;
+        : 0;
 
     const previousMonthCompletion =
       previousMonthProjects.length > 0
@@ -547,7 +594,7 @@ export class SuperAdminCompaniesService {
             (sum, project) => sum + (project.progress ?? 0),
             0,
           ) / previousMonthProjects.length
-        : averageCompletionRate;
+        : 0;
 
     const approvedReports = taskReports.filter(
       (report) => report.reviewDecision === 'approved',
@@ -581,7 +628,7 @@ export class SuperAdminCompaniesService {
                 0,
               ) / monthProjects.length,
             )
-          : averageCompletionRate;
+          : 0;
 
       const monthCompliance =
         monthReports.length > 0
@@ -590,7 +637,7 @@ export class SuperAdminCompaniesService {
                 monthReports.length) *
                 100,
             )
-          : safetyCompliance;
+          : 0;
 
       return {
         label: this.getMonthLabel(date),
@@ -697,11 +744,15 @@ export class SuperAdminCompaniesService {
   async uploadCompanyDocument(
     companyId: string,
     file?: { originalname: string; filename: string; size: number; mimetype: string },
+    fileUrl?: string,
   ) {
     const company = await this.findOrFail(companyId);
 
     if (!file) {
       throw new BadRequestException('file is required');
+    }
+    if (!fileUrl) {
+      throw new BadRequestException('S3 upload failed');
     }
 
     const uploadedFile = file;
@@ -712,7 +763,7 @@ export class SuperAdminCompaniesService {
         companyId,
         uploadedBy: company.ownerId,
         fileName: uploadedFile.originalname,
-        fileUrl: `/uploads/documents/${uploadedFile.filename}`,
+        fileUrl,
         fileType: uploadedFile.mimetype,
         fileSizeMb: Math.round(fileSizeMb * 100) / 100,
       },
@@ -727,6 +778,38 @@ export class SuperAdminCompaniesService {
         uploadedByUser: { select: { id: true, fullName: true } },
       },
     });
+  }
+
+  async deleteCompanyDocument(companyId: string, documentId: string) {
+    await this.findOrFail(companyId);
+
+    const document = await this.prisma.document.findFirst({
+      where: {
+        id: documentId,
+        companyId,
+      },
+      select: {
+        id: true,
+        fileUrl: true,
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException('Document not found');
+    }
+
+    if (document.fileUrl) {
+      await this.s3Service.deleteFile(document.fileUrl);
+    }
+
+    await this.prisma.document.delete({
+      where: { id: documentId },
+    });
+
+    return {
+      success: true,
+      message: 'Document deleted successfully',
+    };
   }
 
   async contactCompany(companyId: string, dto: ContactCompanyDto) {
@@ -771,7 +854,7 @@ export class SuperAdminCompaniesService {
         address: dto.address,
         revenue: dto.revenue,
         projectLevel: dto.companySize ?? null,
-        logoUrl: logoFilename ? `/uploads/logos/${logoFilename}` : null,
+        logoUrl: logoFilename ?? null,
       },
     });
 
@@ -814,7 +897,7 @@ export class SuperAdminCompaniesService {
         ...(dto.revenue !== undefined && { revenue: dto.revenue }),
         ...(dto.companySize !== undefined && { projectLevel: dto.companySize }),
         ...(dto.isActive !== undefined && { isActive: dto.isActive }),
-        ...(logoFilename && { logoUrl: `/uploads/logos/${logoFilename}` }),
+        ...(logoFilename && { logoUrl: logoFilename }),
       },
     });
 

@@ -881,6 +881,9 @@ enum NotificationType {
 }
 
 enum LocationEventType {
+  check_in
+  out_of_zone
+  check_out
   enter
   exit
   update

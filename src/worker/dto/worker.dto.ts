@@ -151,5 +151,5 @@ export class UpdateLocationDto {
 
   @IsOptional()
   @IsEnum(['enter', 'exit', 'update'])
-  eventType?: 'enter' | 'exit' | 'update';
+  eventType?: 'check_in' | 'out_of_zone' | 'check_out' | 'enter' | 'exit' | 'update';
 }

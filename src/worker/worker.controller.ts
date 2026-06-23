@@ -253,6 +253,15 @@ export class WorkerController {
     return this.workerService.getAttendanceHistory(workerId, +page, +limit);
   }
 
+  /**
+   * GET /worker/attendance/weekly-summary
+   * Last 7 days' total work hours per day
+   */
+  @Get('attendance/weekly-summary')
+  getWeeklyAttendanceSummary(@CurrentUser('id') workerId: string) {
+    return this.workerService.getWeeklyAttendanceSummary(workerId);
+  }
+
   // LEAVE REQUESTS
 
   /**
@@ -310,7 +319,8 @@ export class WorkerController {
     @Body() dto: UpdateProfileDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const avatarFile = file ? { ...file, filename: await this.s3Service.uploadFile(file, 'avatars') } : undefined;
+    const uploadedUrl = file ? await this.s3Service.uploadFile(file, 'avatars') : undefined;
+    const avatarFile = uploadedUrl ? { ...file!, filename: uploadedUrl } : undefined;
     return this.workerService.updateProfile(workerId, dto, avatarFile as any);
   }
 
