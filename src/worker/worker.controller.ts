@@ -15,9 +15,7 @@ import {
   ParseUUIDPipe,
 } from '@nestjs/common';
 import { FileInterceptor, FileFieldsInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
-import { v4 as uuidv4 } from 'uuid';
+import { memoryStorage } from 'multer';
 import { WorkerService } from './worker.service';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -34,23 +32,16 @@ import {
   UpdateLocationDto,
   UpdateTaskInventoryDto,
 } from './dto/worker.dto';
-
-
-const avatarStorage = diskStorage({
-  destination: './uploads/avatars',
-  filename: (_, file, cb) => cb(null, `${uuidv4()}${extname(file.originalname)}`),
-});
-
-const taskReportStorage = diskStorage({
-  destination: './uploads/task-reports',
-  filename: (_, file, cb) => cb(null, `${uuidv4()}${extname(file.originalname)}`),
-});
+import { S3Service } from '../s3/s3.service';
 
 @Controller('worker')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('worker', 'manager', 'admin', 'super_admin')
 export class WorkerController {
-  constructor(private readonly workerService: WorkerService) {}
+  constructor(
+    private readonly workerService: WorkerService,
+    private readonly s3Service: S3Service,
+  ) {}
 
   // DASHBOARD
 
@@ -116,10 +107,10 @@ export class WorkerController {
         { name: 'afterPhoto', maxCount: 1 },
         { name: 'receipt', maxCount: 1 },
       ],
-      { storage: taskReportStorage },
+      { storage: memoryStorage() },
     ),
   )
-  submitTaskReport(
+  async submitTaskReport(
     @Param('id', ParseUUIDPipe) taskId: string,
     @CurrentUser('id') workerId: string,
     @Body() dto: SubmitTaskReportDto,
@@ -130,7 +121,8 @@ export class WorkerController {
       receipt?: Express.Multer.File[];
     },
   ) {
-    return this.workerService.submitTaskReport(taskId, workerId, dto, files);
+    const uploadedFiles = await this.uploadTaskReportFiles(files);
+    return this.workerService.submitTaskReport(taskId, workerId, dto, uploadedFiles);
   }
 
   /**
@@ -145,10 +137,10 @@ export class WorkerController {
         { name: 'afterPhoto', maxCount: 1 },
         { name: 'receipt', maxCount: 1 },
       ],
-      { storage: taskReportStorage },
+      { storage: memoryStorage() },
     ),
   )
-  updateTaskReport(
+  async updateTaskReport(
     @Param('id', ParseUUIDPipe) taskId: string,
     @CurrentUser('id') workerId: string,
     @Body() body: any,
@@ -159,7 +151,8 @@ export class WorkerController {
       receipt?: Express.Multer.File[];
     },
   ) {
-    return this.workerService.updateTaskReport(taskId, workerId, body, files);
+    const uploadedFiles = await this.uploadTaskReportFiles(files);
+    return this.workerService.updateTaskReport(taskId, workerId, body, uploadedFiles);
   }
 
   /**
@@ -311,13 +304,14 @@ export class WorkerController {
    * Profile update (name, phone, DOB, address, avatar)
    */
   @Put('profile')
-  @UseInterceptors(FileInterceptor('avatarUrl', { storage: avatarStorage }))
-  updateProfile(
+  @UseInterceptors(FileInterceptor('avatarUrl', { storage: memoryStorage() }))
+  async updateProfile(
     @CurrentUser('id') workerId: string,
     @Body() dto: UpdateProfileDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.workerService.updateProfile(workerId, dto, file);
+    const avatarFile = file ? { ...file, filename: await this.s3Service.uploadFile(file, 'avatars') } : undefined;
+    return this.workerService.updateProfile(workerId, dto, avatarFile as any);
   }
 
   /**
@@ -358,6 +352,22 @@ export class WorkerController {
     @Body() dto: UpdateLocationDto,
   ) {
     return this.workerService.updateLocation(workerId, dto);
+  }
+
+  private async uploadTaskReportFiles(files?: {
+    beforePhoto?: Express.Multer.File[];
+    afterPhoto?: Express.Multer.File[];
+    receipt?: Express.Multer.File[];
+  }) {
+    const beforePhoto = files?.beforePhoto?.[0];
+    const afterPhoto = files?.afterPhoto?.[0];
+    const receipt = files?.receipt?.[0];
+
+    return {
+      beforePhoto: beforePhoto ? [{ ...beforePhoto, filename: await this.s3Service.uploadFile(beforePhoto, 'task-reports') }] : undefined,
+      afterPhoto: afterPhoto ? [{ ...afterPhoto, filename: await this.s3Service.uploadFile(afterPhoto, 'task-reports') }] : undefined,
+      receipt: receipt ? [{ ...receipt, filename: await this.s3Service.uploadFile(receipt, 'task-reports') }] : undefined,
+    };
   }
 
   // NOTIFICATIONS

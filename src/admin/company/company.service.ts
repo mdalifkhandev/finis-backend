@@ -187,11 +187,8 @@ export class CompanyService {
   }
 
   // ─── CREATE COMPANY ───────────────────────────────────────────────────────
-  async createCompany(dto: CreateCompanyDto, adminId: string, logoFilename?: string) {
+  async createCompany(dto: CreateCompanyDto, adminId: string, logoUrl?: string) {
     await this.checkCompanyLimit(adminId);
-
-
-    const logoUrl = logoFilename ? `/uploads/logos/${logoFilename}` : undefined;
 
     const company = await this.prisma.company.create({
       data: {
@@ -221,11 +218,10 @@ export class CompanyService {
     return company;
   }
 
-  async updateCompany(companyId: string, dto: UpdateCompanyDto, adminId: string, logoFilename?: string, userRole: string = 'admin') {
+  async updateCompany(companyId: string, dto: UpdateCompanyDto, adminId: string, logoUrl?: string, userRole: string = 'admin') {
     await this.verifyCompanyAccess(companyId, adminId, userRole);
 
     const { logoUrl: _, ...restDto } = dto; // body এর logoUrl বাদ দাও
-    const logoUrl = logoFilename ? `/uploads/logos/${logoFilename}` : undefined;
 
     return this.prisma.company.update({
       where: { id: companyId },
@@ -313,7 +309,7 @@ export class CompanyService {
     });
   }
 
-  async uploadDocument(companyId: string, adminId: string, file: Express.Multer.File, userRole: string = 'admin') {
+  async uploadDocument(companyId: string, adminId: string, file: Express.Multer.File, userRole: string = 'admin', fileUrl?: string) {
     await this.verifyCompanyAccess(companyId, adminId, userRole);
     const fileSizeMb = file.size / (1024 * 1024);
     return this.prisma.document.create({
@@ -321,7 +317,7 @@ export class CompanyService {
         companyId,
         uploadedBy: adminId,
         fileName: file.originalname,
-        fileUrl: `/uploads/documents/${file.filename}`,
+        fileUrl: fileUrl ?? `/uploads/documents/${file.filename}`,
         fileType: file.mimetype,
         fileSizeMb: Math.round(fileSizeMb * 100) / 100,
       },

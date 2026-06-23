@@ -13,9 +13,8 @@ import {
   Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
+import { memoryStorage } from 'multer';
 import { extname } from 'path';
-import { v4 as uuidv4 } from 'uuid';
 import { CompanyService } from './company.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -29,11 +28,7 @@ import {
   UpdateContactDto,
   PaginationQueryDto,
 } from './dto/company.dto';
-
-const logoStorage = diskStorage({
-  destination: './uploads/logos',
-  filename: (_, file, cb) => cb(null, `${uuidv4()}${extname(file.originalname)}`),
-});
+import { S3Service } from '../../s3/s3.service';
 
 const imageLogoFileFilter = (_: unknown, file: any, cb: (error: Error | null, acceptFile: boolean) => void) => {
   const extension = extname(file.originalname).toLowerCase();
@@ -48,16 +43,14 @@ const imageLogoFileFilter = (_: unknown, file: any, cb: (error: Error | null, ac
   cb(null, true);
 };
 
-const docStorage = diskStorage({
-  destination: './uploads/documents',
-  filename: (_, file, cb) => cb(null, `${uuidv4()}${extname(file.originalname)}`),
-});
-
 @Controller('admin/companies')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.admin, UserRole.manager)
 export class CompanyController {
-  constructor(private companyService: CompanyService) { }
+  constructor(
+    private companyService: CompanyService,
+    private s3Service: S3Service,
+  ) { }
 
   // ─── COMPANIES ────────────────────────────────────────────────────────────
 
@@ -73,13 +66,14 @@ export class CompanyController {
 
   /** POST /admin/companies — create company */
   @Post()
-  @UseInterceptors(FileInterceptor('logo', { storage: logoStorage, fileFilter: imageLogoFileFilter }))
-  createCompany(
+  @UseInterceptors(FileInterceptor('logo', { storage: memoryStorage(), fileFilter: imageLogoFileFilter }))
+  async createCompany(
     @Body() dto: CreateCompanyDto,
     @CurrentUser('id') adminId: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.companyService.createCompany(dto, adminId, file?.filename);
+    const logoUrl = file ? await this.s3Service.uploadFile(file, 'company-logos') : undefined;
+    return this.companyService.createCompany(dto, adminId, logoUrl);
   }
 
   /** GET /admin/companies/:id — company profile */
@@ -94,15 +88,16 @@ export class CompanyController {
 
   /** PUT /admin/companies/:id — update company */
   @Put(':id')
-  @UseInterceptors(FileInterceptor('logo', { storage: logoStorage, fileFilter: imageLogoFileFilter }))
-  updateCompany(
+  @UseInterceptors(FileInterceptor('logo', { storage: memoryStorage(), fileFilter: imageLogoFileFilter }))
+  async updateCompany(
     @Param('id') companyId: string,
     @Body() dto: UpdateCompanyDto,
     @CurrentUser('id') adminId: string,
     @CurrentUser('role') userRole: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.companyService.updateCompany(companyId, dto, adminId, file?.filename, userRole);
+    const logoUrl = file ? await this.s3Service.uploadFile(file, 'company-logos') : undefined;
+    return this.companyService.updateCompany(companyId, dto, adminId, logoUrl, userRole);
   }
 
   /** DELETE /admin/companies/:id — deactivate company */
@@ -155,14 +150,15 @@ export class CompanyController {
 
   /** POST /admin/companies/:id/documents — upload document */
   @Post(':id/documents')
-  @UseInterceptors(FileInterceptor('file', { storage: docStorage }))
-  uploadDocument(
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  async uploadDocument(
     @Param('id') companyId: string,
     @CurrentUser('id') adminId: string,
     @CurrentUser('role') userRole: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    return this.companyService.uploadDocument(companyId, adminId, file, userRole);
+    const fileUrl = file ? await this.s3Service.uploadFile(file, 'company-documents') : undefined;
+    return this.companyService.uploadDocument(companyId, adminId, file, userRole, fileUrl);
   }
 
   /** DELETE /admin/companies/:id/documents/:docId */

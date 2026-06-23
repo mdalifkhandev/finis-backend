@@ -12,9 +12,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
-import { v4 as uuidv4 } from 'uuid';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
@@ -22,18 +20,16 @@ import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { UserRole } from '../../generated/prisma/client';
 import { SuperAdminProjectService } from './project.service';
 import { ApproveRejectReportDto } from './dto/project.dto';
-
-const docStorage = diskStorage({
-  destination: './uploads/documents',
-  filename: (_, file, cb) =>
-    cb(null, `${uuidv4()}${extname(file.originalname)}`),
-});
+import { S3Service } from '../../s3/s3.service';
 
 @Controller('super-admin/projects')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.super_admin)
 export class SuperAdminProjectController {
-  constructor(private superAdminProjectService: SuperAdminProjectService) {}
+  constructor(
+    private superAdminProjectService: SuperAdminProjectService,
+    private s3Service: S3Service,
+  ) {}
 
   // ─── PROJECT STATS (Image 1 — Total/Active/Completed/Delayed with % change) ──
 
@@ -143,13 +139,14 @@ export class SuperAdminProjectController {
    * Form-data: file
    */
   @Post(':id/documents')
-  @UseInterceptors(FileInterceptor('file', { storage: docStorage }))
-  uploadDocument(
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  async uploadDocument(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.superAdminProjectService.uploadDocument(id, file, userId);
+    const fileUrl = file ? await this.s3Service.uploadFile(file, 'project-documents') : undefined;
+    return this.superAdminProjectService.uploadDocument(id, file, userId, fileUrl);
   }
 
   /**

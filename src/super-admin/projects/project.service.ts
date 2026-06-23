@@ -381,6 +381,7 @@ export class SuperAdminProjectService {
     projectId: string,
     file?: { originalname: string; filename: string; size: number; mimetype: string },
     userId?: string,
+    fileUrl?: string,
   ) {
     const project = await this.prisma.project.findUnique({ where: { id: projectId } });
     if (!project) throw new NotFoundException('Project not found');
@@ -397,7 +398,7 @@ export class SuperAdminProjectService {
         projectId,
         uploadedBy: userId as string,
         fileName: file.originalname,
-        fileUrl: `/uploads/documents/${file.filename}`,
+        fileUrl: fileUrl ?? `/uploads/documents/${file.filename}`,
         fileType: file.mimetype,
         fileSizeMb: Math.round(fileSizeMb * 100) / 100,
       },
