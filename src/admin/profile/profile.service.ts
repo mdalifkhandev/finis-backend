@@ -6,14 +6,16 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
+import { S3Service } from '../../s3/s3.service';
 import { UpdateProfileDto, ChangePasswordDto } from './dto/profile.dto';
-import type { File as MulterFile } from 'multer';
 
 @Injectable()
 export class ProfileService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private s3: S3Service,
+  ) { }
 
-  // ─── GET PROFILE ──────────────────────────────────────────────────────────
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -40,15 +42,30 @@ export class ProfileService {
     return user;
   }
 
-  // ─── UPDATE PROFILE ───────────────────────────────────────────────────────
   async updateProfile(
     userId: string,
     dto: UpdateProfileDto,
-    avatarFile?: MulterFile,
+    avatarFile?: Express.Multer.File,
     removeAvatar = false,
   ) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
+
+    let avatarUrl: string | null | undefined = undefined;
+
+    if (avatarFile) {
+      // পুরানো avatar S3 থেকে delete করো
+      if (user.avatarUrl) {
+        await this.s3.deleteFile(user.avatarUrl);
+      }
+      // নতুন file S3 তে upload করো
+      avatarUrl = await this.s3.uploadFile(avatarFile, 'avatars');
+    } else if (removeAvatar) {
+      if (user.avatarUrl) {
+        await this.s3.deleteFile(user.avatarUrl);
+      }
+      avatarUrl = null;
+    }
 
     return this.prisma.user.update({
       where: { id: userId },
@@ -56,9 +73,8 @@ export class ProfileService {
         ...(dto.fullName && { fullName: dto.fullName }),
         ...(dto.phone && { phone: dto.phone }),
         ...(dto.dateOfBirth && { dateOfBirth: new Date(dto.dateOfBirth) }),
-        ...(dto.gender && { bio: dto.gender }), // store gender in bio or add field
-        ...(avatarFile && { avatarUrl: `/uploads/avatars/${avatarFile.filename}` }),
-        ...(removeAvatar && !avatarFile && { avatarUrl: null }),
+        ...(dto.gender && { bio: dto.gender }),
+        ...(avatarUrl !== undefined && { avatarUrl }),
       },
       select: {
         id: true,
@@ -72,7 +88,6 @@ export class ProfileService {
     });
   }
 
-  // ─── CHANGE PASSWORD ──────────────────────────────────────────────────────
   async changePassword(userId: string, dto: ChangePasswordDto) {
     if (dto.newPassword !== dto.confirmPassword) {
       throw new BadRequestException('New password and confirm password do not match');
@@ -97,5 +112,4 @@ export class ProfileService {
 
     return { message: 'Password changed successfully' };
   }
-
 }

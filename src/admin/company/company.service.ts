@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { CreateCompanyDto, UpdateCompanyDto, CreateContactDto, UpdateContactDto, PaginationQueryDto } from './dto/company.dto';
-import { File as MulterFile } from 'multer';
+
 
 @Injectable()
 export class CompanyService {
@@ -313,7 +313,7 @@ export class CompanyService {
     });
   }
 
-  async uploadDocument(companyId: string, adminId: string, file: MulterFile, userRole: string = 'admin') {
+  async uploadDocument(companyId: string, adminId: string, file: Express.Multer.File, userRole: string = 'admin') {
     await this.verifyCompanyAccess(companyId, adminId, userRole);
     const fileSizeMb = file.size / (1024 * 1024);
     return this.prisma.document.create({

@@ -34,7 +34,7 @@ import {
   UpdateLocationDto,
   UpdateTaskInventoryDto,
 } from './dto/worker.dto';
-import type { File as MulterFile } from 'multer';
+
 
 const avatarStorage = diskStorage({
   destination: './uploads/avatars',
@@ -125,9 +125,9 @@ export class WorkerController {
     @Body() dto: SubmitTaskReportDto,
     @UploadedFiles()
     files?: {
-      beforePhoto?: MulterFile[];
-      afterPhoto?: MulterFile[];
-      receipt?: MulterFile[];
+      beforePhoto?: Express.Multer.File[];
+      afterPhoto?: Express.Multer.File[];
+      receipt?: Express.Multer.File[];
     },
   ) {
     return this.workerService.submitTaskReport(taskId, workerId, dto, files);
@@ -154,9 +154,9 @@ export class WorkerController {
     @Body() body: any,
     @UploadedFiles()
     files?: {
-      beforePhoto?: MulterFile[];
-      afterPhoto?: MulterFile[];
-      receipt?: MulterFile[];
+      beforePhoto?: Express.Multer.File[];
+      afterPhoto?: Express.Multer.File[];
+      receipt?: Express.Multer.File[];
     },
   ) {
     return this.workerService.updateTaskReport(taskId, workerId, body, files);
@@ -315,7 +315,7 @@ export class WorkerController {
   updateProfile(
     @CurrentUser('id') workerId: string,
     @Body() dto: UpdateProfileDto,
-    @UploadedFile() file?: MulterFile,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
     return this.workerService.updateProfile(workerId, dto, file);
   }

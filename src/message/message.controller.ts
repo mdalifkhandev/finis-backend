@@ -14,9 +14,7 @@ import {
   UploadedFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage } from 'multer';
 import { MessageService } from './message.service';
 import {
   CreateDirectThreadDto,
@@ -31,6 +29,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { MessageGateway } from './message.gateway';
+import { S3Service } from '../s3/s3.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('messages')
@@ -38,19 +37,8 @@ export class MessageController {
   constructor(
     private readonly messageService: MessageService,
     private readonly messageGateway: MessageGateway,
+    private readonly s3Service: S3Service,
   ) {}
-
-  private getStoredFileUrl(file: { filename: string }) {
-    return `/uploads/${file.filename}`;
-  }
-
-  private ensureUploadDir() {
-    const uploadDir = join(process.cwd(), 'uploads');
-    if (!existsSync(uploadDir)) {
-      mkdirSync(uploadDir, { recursive: true });
-    }
-    return uploadDir;
-  }
 
   // ═════════════════════════════════════════════
   // CONTACTS
@@ -188,35 +176,21 @@ export class MessageController {
   @Post('upload')
   @Roles('admin', 'manager', 'worker', 'super_admin')
   @UseInterceptors(FileInterceptor('file', {
-    storage: diskStorage({
-      destination: (_req, _file, cb) => {
-        const uploadDir = join(process.cwd(), 'uploads');
-        if (!existsSync(uploadDir)) {
-          mkdirSync(uploadDir, { recursive: true });
-        }
-        cb(null, uploadDir);
-      },
-      filename: (_req, file, cb) => {
-        const safeBase = file.originalname
-          .replace(/\.[^/.]+$/, '')
-          .replace(/[^a-zA-Z0-9_-]/g, '_')
-          .slice(0, 50);
-        const suffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-        cb(null, `${safeBase}-${suffix}${extname(file.originalname)}`);
-      },
-    }),
+    storage: memoryStorage(),
     limits: { fileSize: 20 * 1024 * 1024 },
   }))
-  uploadFile(
-    @UploadedFile() file: { filename: string; originalname: string; mimetype: string } | undefined,
+  async uploadFile(
+    @UploadedFile() file: Express.Multer.File | undefined,
   ) {
     if (!file) {
       return { message: 'No file uploaded' };
     }
 
+    const url = await this.s3Service.uploadFile(file, 'messages');
+
     return {
       data: {
-        url: this.getStoredFileUrl(file),
+        url,
         originalName: file.originalname,
         mimeType: file.mimetype,
       },

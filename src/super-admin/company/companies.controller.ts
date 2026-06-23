@@ -16,7 +16,6 @@
   } from '@nestjs/common';
   import { FileInterceptor } from '@nestjs/platform-express';
   import { diskStorage } from 'multer';
-  import type { File as MulterFile } from 'multer';
   import { extname } from 'path';
   import { v4 as uuidv4 } from 'uuid';
   import { SuperAdminCompaniesService } from './companies.service';
@@ -90,7 +89,7 @@
     @UseInterceptors(FileInterceptor('logo', { storage: logoStorage, fileFilter: imageLogoFileFilter }))
     createCompany(
       @Body() dto: CreateCompanyDto,
-      @UploadedFile() file?: MulterFile,
+      @UploadedFile() file?: Express.Multer.File,
     ) {
       return this.companiesService.createCompany(dto, file?.filename);
     }
@@ -117,7 +116,7 @@
     updateCompany(
       @Param('id', ParseUUIDPipe) companyId: string,
       @Body() dto: UpdateCompanyDto,
-      @UploadedFile() file?: MulterFile,
+      @UploadedFile() file?: Express.Multer.File,
     ) {
       return this.companiesService.updateCompany(companyId, dto, file?.filename);
     }
@@ -166,7 +165,7 @@
     @UseInterceptors(FileInterceptor('file', { storage: docStorage }))
     uploadCompanyDocument(
       @Param('id', ParseUUIDPipe) companyId: string,
-      @UploadedFile() file?: MulterFile,
+      @UploadedFile() file?: Express.Multer.File,
     ) {
       return this.companiesService.uploadCompanyDocument(companyId, file);
     }

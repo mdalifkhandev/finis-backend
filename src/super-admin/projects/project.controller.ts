@@ -13,7 +13,6 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
-import type { File as MulterFile } from 'multer';
 import { extname } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
@@ -148,7 +147,7 @@ export class SuperAdminProjectController {
   uploadDocument(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    @UploadedFile() file?: MulterFile,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
     return this.superAdminProjectService.uploadDocument(id, file, userId);
   }

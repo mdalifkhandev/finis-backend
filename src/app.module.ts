@@ -8,15 +8,18 @@ import { MessageModule } from './message/message.module';
 import { WorkerModule } from './worker/worker.module';
 import { JwtModule } from '@nestjs/jwt';
 import { MulterModule } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { SuperAdminModule } from './super-admin/super-admin.module';
 import { PublicUserModule } from './public-user/public-user.module';
 import { ManagerModule } from './manager/manager.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PublicPlansModule } from './public-plans/public-plans.module';
 import { SubscriptionModule } from './subscription/subscription.module';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     AuthModule,
     AdminModule,
@@ -34,7 +37,7 @@ import { SubscriptionModule } from './subscription/subscription.module';
       signOptions: { expiresIn: '7d' },
     }),
     MulterModule.register({
-      dest: './uploads',
+      storage: memoryStorage(),
       limits: { fileSize: 20 * 1024 * 1024 },
     }),
   ],

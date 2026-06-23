@@ -14,7 +14,6 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
-import type { File as MulterFile } from 'multer';
 import { extname } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { CompanyService } from './company.service';
@@ -78,7 +77,7 @@ export class CompanyController {
   createCompany(
     @Body() dto: CreateCompanyDto,
     @CurrentUser('id') adminId: string,
-    @UploadedFile() file?: MulterFile,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
     return this.companyService.createCompany(dto, adminId, file?.filename);
   }
@@ -101,7 +100,7 @@ export class CompanyController {
     @Body() dto: UpdateCompanyDto,
     @CurrentUser('id') adminId: string,
     @CurrentUser('role') userRole: string,
-    @UploadedFile() file?: MulterFile,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
     return this.companyService.updateCompany(companyId, dto, adminId, file?.filename, userRole);
   }
@@ -161,7 +160,7 @@ export class CompanyController {
     @Param('id') companyId: string,
     @CurrentUser('id') adminId: string,
     @CurrentUser('role') userRole: string,
-    @UploadedFile() file: MulterFile,
+    @UploadedFile() file: Express.Multer.File,
   ) {
     return this.companyService.uploadDocument(companyId, adminId, file, userRole);
   }

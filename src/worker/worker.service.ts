@@ -9,7 +9,6 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeofencingGateway } from '../admin/project/geofencing.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
-import type { File as MulterFile } from 'multer';
 import {
   SubmitTaskReportDto,
   CheckInDto,
@@ -413,9 +412,9 @@ export class WorkerService {
     workerId: string,
     dto: SubmitTaskReportDto,
     files?: {
-      beforePhoto?: MulterFile[];
-      afterPhoto?: MulterFile[];
-      receipt?: MulterFile[];
+      beforePhoto?: Express.Multer.File[];
+      afterPhoto?: Express.Multer.File[];
+      receipt?: Express.Multer.File[];
     },
   ) {
     const task = await this.prisma.task.findUnique({
@@ -524,9 +523,9 @@ export class WorkerService {
     workerId: string,
     body: any,
     files?: {
-      beforePhoto?: MulterFile[];
-      afterPhoto?: MulterFile[];
-      receipt?: MulterFile[];
+      beforePhoto?: Express.Multer.File[];
+      afterPhoto?: Express.Multer.File[];
+      receipt?: Express.Multer.File[];
     },
   ) {
     const task = await this.prisma.task.findUnique({
@@ -1174,7 +1173,7 @@ export class WorkerService {
     return user;
   }
 
-  async updateProfile(workerId: string, dto: UpdateProfileDto, avatarFile?: MulterFile) {
+  async updateProfile(workerId: string, dto: UpdateProfileDto, avatarFile?: Express.Multer.File) {
     return this.prisma.user.update({
       where: { id: workerId },
       data: {
