@@ -77,7 +77,15 @@ export class ThreadQueryDto {
   search?: string;
 }
 
-export class MessageQueryDto {}
+export class MessageQueryDto {
+  @IsOptional()
+  @IsString()
+  page?: string;
+
+  @IsOptional()
+  @IsString()
+  limit?: string;
+}
 
 // ─────────────────────────────────────────────
 // SUPPORT DTOs

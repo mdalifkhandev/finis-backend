@@ -577,15 +577,26 @@ export class MessageService {
     });
     if (!isParticipant) throw new ForbiddenException('You are not a participant of this thread');
 
-    const messages = await this.prisma.message.findMany({
-      where: { threadId },
-      orderBy: { sentAt: 'asc' },
-      include: {
-        sender: {
-          select: { id: true, fullName: true, avatarUrl: true, role: true },
+    const page = Math.max(1, Number(query.page ?? 1));
+    const limit = Math.max(1, Number(query.limit ?? 20));
+    const skip = (page - 1) * limit;
+
+    const [messages, total] = await Promise.all([
+      this.prisma.message.findMany({
+        where: { threadId },
+        orderBy: { sentAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          sender: {
+            select: { id: true, fullName: true, avatarUrl: true, role: true },
+          },
         },
-      },
-    });
+      }),
+      this.prisma.message.count({
+        where: { threadId },
+      }),
+    ]);
 
     // Read mark করা
     await this.prisma.message.updateMany({
@@ -595,7 +606,13 @@ export class MessageService {
 
     return {
       data: messages,
-      meta: { total: messages.length },
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        hasMore: page * limit < total,
+      },
     };
   }
 

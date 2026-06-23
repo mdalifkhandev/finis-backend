@@ -1252,9 +1252,26 @@ export class ProjectService {
   async getLocationLogs(projectId: string, userId: string, userRole: string, page = 1, limit = 20) {
     await this.verifyProjectAccess(projectId, userId, userRole);
     const skip = (page - 1) * limit;
+
+    const projectMembers = await this.prisma.projectMember.findMany({
+      where: { projectId },
+      select: { userId: true },
+    });
+
+    const projectUserIds = projectMembers.map((member) => member.userId);
+
+    const where = projectUserIds.length > 0
+      ? {
+          OR: [
+            { geofence: { projectId } },
+            { userId: { in: projectUserIds } },
+          ],
+        }
+      : { geofence: { projectId } };
+
     const [logs, total] = await Promise.all([
       this.prisma.locationLog.findMany({
-        where: { geofence: { projectId } },
+        where,
         include: {
           user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
           geofence: { select: { id: true, zoneName: true } },
@@ -1263,7 +1280,7 @@ export class ProjectService {
         skip,
         take: limit,
       }),
-      this.prisma.locationLog.count({ where: { geofence: { projectId } } }),
+      this.prisma.locationLog.count({ where }),
     ]);
     return {
       data: logs.map((log) => ({
