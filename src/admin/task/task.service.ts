@@ -245,13 +245,27 @@ export class TaskService {
         amount: true,
         status: true,
         date: true,
+        receiptUrl: true,
         taskId: true,
         worker: { select: { id: true, fullName: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    return { ...this.toTaskResponse(task), expenses };
+    return {
+      ...this.toTaskResponse(task),
+      expenses: expenses.map((expense) => ({
+        id: expense.id,
+        description: expense.description,
+        category: expense.category,
+        amount: expense.amount,
+        status: expense.status,
+        date: expense.date,
+        receiptUrl: expense.receiptUrl,
+        taskId: expense.taskId,
+        reporter: expense.worker,
+      })),
+    };
   }
 
   // ── UPDATE TASK ────────────────────────────────────────────────
@@ -496,6 +510,24 @@ export class TaskService {
       await this.prisma.task.update({
         where: { id: taskId },
         data: { status: 'completed' },
+      });
+
+      await this.prisma.expense.updateMany({
+        where: { taskId },
+        data: {
+          status: 'approved',
+          reviewedBy: userId,
+          reviewedAt: new Date(),
+        },
+      });
+    } else if (dto.reviewDecision === 'rejected') {
+      await this.prisma.expense.updateMany({
+        where: { taskId, status: 'pending' },
+        data: {
+          status: 'rejected',
+          reviewedBy: userId,
+          reviewedAt: new Date(),
+        },
       });
     }
 
