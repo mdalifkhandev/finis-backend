@@ -138,19 +138,25 @@ export class ProjectService {
       select: { tenantId: true },
     });
 
-    if (!admin?.tenantId) return; // পুরনো account — limit নেই
+    if (!admin?.tenantId) {
+      throw new ForbiddenException('Please purchase a subscription before creating a project.');
+    }
 
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: admin.tenantId },
       include: { plan: { select: { maxProjects: true } } },
     });
 
-    if (!tenant) return;
+    if (!tenant) {
+      throw new ForbiddenException('Your subscription could not be verified.');
+    }
 
     if (tenant.status === 'suspended')
       throw new ForbiddenException('Your account is suspended. Please contact support.');
     if (tenant.status === 'cancelled')
       throw new ForbiddenException('Your subscription has been cancelled.');
+    if (tenant.status === 'trial')
+      throw new ForbiddenException('Please activate a subscription before creating a project.');
 
     const max = tenant.plan.maxProjects;
     if (max === null || max === undefined) return; // unlimited
@@ -173,19 +179,25 @@ export class ProjectService {
       select: { tenantId: true },
     });
 
-    if (!admin?.tenantId) return; // পুরনো account — limit নেই
+    if (!admin?.tenantId) {
+      throw new ForbiddenException('Please purchase a subscription before adding users.');
+    }
 
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: admin.tenantId },
       include: { plan: { select: { maxUsers: true } }, _count: { select: { users: true } } },
     });
 
-    if (!tenant) return;
+    if (!tenant) {
+      throw new ForbiddenException('Your subscription could not be verified.');
+    }
 
     if (tenant.status === 'suspended')
       throw new ForbiddenException('Your account is suspended. Please contact support.');
     if (tenant.status === 'cancelled')
       throw new ForbiddenException('Your subscription has been cancelled.');
+    if (tenant.status === 'trial')
+      throw new ForbiddenException('Please activate a subscription before adding users.');
 
     const max = tenant.plan.maxUsers;
     if (max === null || max === undefined) return; // unlimited
@@ -203,14 +215,25 @@ export class ProjectService {
       select: { tenantId: true },
     });
 
-    if (!admin?.tenantId) return; // পুরনো account — limit নেই
+    if (!admin?.tenantId) {
+      throw new ForbiddenException('Please purchase a subscription to use geofencing.');
+    }
 
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: admin.tenantId },
       include: { plan: { select: { hasGeofencing: true } } },
     });
 
-    if (!tenant) return;
+    if (!tenant) {
+      throw new ForbiddenException('Your subscription could not be verified.');
+    }
+
+    if (tenant.status === 'suspended')
+      throw new ForbiddenException('Your account is suspended. Please contact support.');
+    if (tenant.status === 'cancelled')
+      throw new ForbiddenException('Your subscription has been cancelled.');
+    if (tenant.status === 'trial')
+      throw new ForbiddenException('Please activate a subscription to use geofencing.');
 
     if (!tenant.plan.hasGeofencing) {
       throw new ForbiddenException(

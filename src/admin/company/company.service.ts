@@ -85,14 +85,18 @@ export class CompanyService {
       select: { tenantId: true },
     });
 
-    if (!admin?.tenantId) return;
+    if (!admin?.tenantId) {
+      throw new ForbiddenException('Please purchase a subscription before creating a company.');
+    }
 
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: admin.tenantId },
       include: { plan: { select: { maxCompanies: true } } },
     });
 
-    if (!tenant) return;
+    if (!tenant) {
+      throw new ForbiddenException('Your subscription could not be verified.');
+    }
 
     if (tenant.status === 'suspended')
       throw new ForbiddenException('Your account is suspended. Please contact support.');

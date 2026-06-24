@@ -552,6 +552,83 @@ export class WorkerService {
 
     if (!report) throw new NotFoundException('Task report not found');
 
+    const inventoryUsed = (() => {
+      const raw = body?.inventoryUsed ?? body?.inventory_used;
+      if (!raw) return [];
+      if (Array.isArray(raw)) return raw;
+      if (typeof raw === 'string') {
+        try {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    })() as Array<{ inventoryId: string; qtyUsed: number; reason?: string }>;
+
+    if (inventoryUsed.length > 0) {
+      for (const item of inventoryUsed) {
+        const inv = await this.prisma.inventoryItem.findUnique({
+          where: { id: item.inventoryId },
+        });
+        if (!inv) throw new NotFoundException(`Inventory item not found: ${item.inventoryId}`);
+
+        const currentTaskInventory = await this.prisma.taskInventory.findFirst({
+          where: { taskId, inventoryId: item.inventoryId },
+        });
+
+        const previousQty = currentTaskInventory?.qtyUsed ?? 0;
+        const nextQty = Number(item.qtyUsed) || 0;
+        const stockDelta = nextQty - previousQty;
+
+        if (stockDelta > 0 && inv.currentQty < stockDelta) {
+          throw new BadRequestException(
+            `Not enough stock for: ${inv.name}. Available: ${inv.currentQty}, requested additional: ${stockDelta}`,
+          );
+        }
+
+        await this.prisma.$transaction(async (tx) => {
+          const updatedInventory = await tx.inventoryItem.update({
+            where: { id: item.inventoryId },
+            data: {
+              currentQty:
+                stockDelta > 0
+                  ? { decrement: stockDelta }
+                  : { increment: Math.abs(stockDelta) },
+            },
+          });
+
+          await tx.inventoryUsageLog.create({
+            data: {
+              inventoryId: item.inventoryId,
+              userId: workerId,
+              projectId: task.projectId,
+              qtyChange: -stockDelta,
+              reason: item.reason ?? `Updated task inventory for ${task.title}`,
+            },
+          });
+
+          if (currentTaskInventory) {
+            await tx.taskInventory.update({
+              where: { id: currentTaskInventory.id },
+              data: { qtyUsed: nextQty },
+            });
+          } else {
+            await tx.taskInventory.create({
+              data: {
+                taskId,
+                inventoryId: item.inventoryId,
+                qtyUsed: nextQty,
+              },
+            });
+          }
+
+          return updatedInventory;
+        });
+      }
+    }
+
     const updatedReport = await this.prisma.taskReport.update({
       where: { id: report.id },
       data: {
@@ -568,13 +645,8 @@ export class WorkerService {
       },
     });
 
-    await this.prisma.task.update({
-      where: { id: taskId },
-      data: { status: 'completed' },
-    });
-
     return {
-      message: 'Task report updated successfully. Task completed.',
+      message: 'Task report updated successfully. Task remains pending review.',
       report: updatedReport,
     };
   }

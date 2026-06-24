@@ -7,11 +7,23 @@ import {
   IsArray,
   IsEnum,
   IsDateString,
+  ValidateNested,
+  IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { LocationEventType } from '../../generated/prisma/client';
 
 // ── TASK ──────────────────────────────────────────────────────────────────────
+
+export class InventoryUsedItemDto {
+  @IsUUID('4')
+  inventoryId!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  qtyUsed!: number;
+}
 
 export class SubmitTaskReportDto {
   @IsOptional()
@@ -32,7 +44,9 @@ export class SubmitTaskReportDto {
 
   @IsOptional()
   @IsArray()
-  inventoryUsed?: { inventoryId: string; qtyUsed: number }[];
+  @ValidateNested({ each: true })
+  @Type(() => InventoryUsedItemDto)
+  inventoryUsed?: InventoryUsedItemDto[];
 }
 
 export class UpdateTaskInventoryDto {

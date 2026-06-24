@@ -229,7 +229,10 @@ export class PayrollService {
 
     const ctx = await this.getTenantSubscriptionContext(adminId);
     if (!ctx.tenantId) {
-      return ctx;
+      throw new ForbiddenException('Please purchase a subscription before using payroll.');
+    }
+    if (ctx.subscriptionStatus == null) {
+      throw new ForbiddenException('Please activate a subscription before using payroll.');
     }
     if (ctx.subscriptionStatus !== 'active' || ctx.isExpired) {
       throw new ForbiddenException('Active subscription required for payroll');
