@@ -23,7 +23,7 @@ import {
 
 @Controller('super_admin/expense-management')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.super_admin, UserRole.admin)
+@Roles(UserRole.super_admin, UserRole.admin, UserRole.manager)
 export class ExpenseManagementController {
   constructor(private expenseManagementService: ExpenseManagementService) {}
 

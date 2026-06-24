@@ -8,7 +8,11 @@ import {
   Param,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { TaskService } from './task.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -98,13 +102,15 @@ export class TaskController {
 
   /** PUT /admin/tasks/:id — Manager পারবে */
   @Put(':id')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
   updateTask(
     @Param('id') id: string,
     @Body() dto: UpdateTaskDto,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.taskService.updateTask(id, dto, userId, userRole);
+    return this.taskService.updateTask(id, dto, userId, userRole, file);
   }
 
   /** PUT /admin/tasks/:id/reports/:reportId/review — Manager approve/reject করবে */

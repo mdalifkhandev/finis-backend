@@ -670,14 +670,67 @@ export class PayrollService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const totalHours = payrolls.reduce(
+    const dayKey = (value: Date) => new Date(value).toISOString().slice(0, 10);
+    const summaryMap = new Map<
+      string,
+      (typeof payrolls)[number] & {
+        regularHours: number;
+        overtimeHours: number;
+        grossPay: number;
+        deductions: number;
+        netPay: number;
+      }
+    >();
+
+    for (const payroll of payrolls) {
+      const key = [
+        payroll.companyId,
+        payroll.workerId,
+        payroll.projectId ?? 'no-project',
+        dayKey(payroll.payPeriodStart),
+      ].join(':');
+
+      const existing = summaryMap.get(key);
+      if (!existing) {
+        summaryMap.set(key, {
+          ...payroll,
+          regularHours: payroll.regularHours,
+          overtimeHours: payroll.overtimeHours,
+          grossPay: payroll.grossPay,
+          deductions: payroll.deductions,
+          netPay: payroll.netPay,
+        });
+        continue;
+      }
+
+      existing.regularHours += payroll.regularHours;
+      existing.overtimeHours += payroll.overtimeHours;
+      existing.grossPay += payroll.grossPay;
+      existing.deductions += payroll.deductions;
+      existing.netPay += payroll.netPay;
+      if (existing.status !== 'draft') {
+        existing.status = payroll.status === 'draft' ? 'draft' : existing.status;
+      }
+      if (payroll.status === 'draft') {
+        existing.status = 'draft';
+      } else if (existing.status !== 'draft' && payroll.status === 'approved') {
+        existing.status = 'approved';
+      }
+      if (payroll.status === 'paid' && existing.status !== 'draft' && existing.status !== 'approved') {
+        existing.status = 'paid';
+      }
+    }
+
+    const groupedPayrolls = [...summaryMap.values()];
+
+    const totalHours = groupedPayrolls.reduce(
       (s, p) => s + p.regularHours + p.overtimeHours,
       0,
     );
-    const totalPay = payrolls.reduce((s, p) => s + p.grossPay, 0);
-    const pending = payrolls.filter((p) => p.status === 'draft').length;
-    const processing = payrolls.filter((p) => p.status === 'approved').length;
-    const paid = payrolls.filter((p) => p.status === 'paid').length;
+    const totalPay = groupedPayrolls.reduce((s, p) => s + p.grossPay, 0);
+    const pending = groupedPayrolls.filter((p) => p.status === 'draft').length;
+    const processing = groupedPayrolls.filter((p) => p.status === 'approved').length;
+    const paid = groupedPayrolls.filter((p) => p.status === 'paid').length;
 
     const inventoryAlerts = await this.prisma.inventoryItem.count({
       where: {
@@ -697,13 +750,13 @@ export class PayrollService {
         paid,
         inventoryAlerts,
       },
-      workers: payrolls.map((p) => ({
+      workers: groupedPayrolls.map((p) => ({
         payrollId: p.id,
         project: p.project,
         worker: p.worker,
         displayRole: p.worker.department ?? 'Worker',
-        hours: p.regularHours,
-        hoursDisplay: this.formatMinutes(Math.floor(p.regularHours * 60)),
+        hours: Math.round((p.regularHours + p.overtimeHours) * 100) / 100,
+        hoursDisplay: this.formatMinutes(Math.floor((p.regularHours + p.overtimeHours) * 60)),
         overtimeHours: p.overtimeHours,
         rate: p.ratePerHour,
         grossPay: p.grossPay,
@@ -1487,14 +1540,13 @@ export class PayrollService {
         where: {
           workerId,
           companyId,
-          status: 'draft',
           payPeriodStart: { gte: dayStart, lte: dayEnd },
         },
+        orderBy: { createdAt: 'desc' },
       });
 
-      if (existing) {
-        // আগে আছে → শুধু hours ও calculated fields update করো
-        // Admin যদি manually edit করে approved/paid করে রাখে সেটা touch করব না
+      if (existing && existing.status === 'draft') {
+        // আগে draft আছে → সেটা update করো
         await this.prisma.payroll.update({
           where: { id: existing.id },
           data: {
@@ -1511,7 +1563,7 @@ export class PayrollService {
           `📝 Payroll updated: worker=${workerId} hours=${workedData.displayTime}`,
         );
       } else {
-        // নতুন draft payroll create করো
+        // approved/paid থাকলে নতুন draft payroll create করো
         await this.prisma.payroll.create({
           data: {
             companyId,

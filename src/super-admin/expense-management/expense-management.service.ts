@@ -15,15 +15,49 @@ export class ExpenseManagementService {
   // ─── Access filter ────────────────────────────────────────────────────────
   private getAccessFilter(userId: string, userRole: string) {
     if (userRole === UserRole.super_admin) return {};
-    // Admin শুধু নিজের company র expenses দেখবে
-    return {
-      worker: {
-        companyMembers: {
-          some: {
-            company: { ownerId: userId },
+    if (userRole === UserRole.admin) {
+      return {
+        worker: {
+          companyMembers: {
+            some: {
+              company: { ownerId: userId },
+            },
           },
         },
-      },
+      };
+    }
+
+    return {
+      OR: [
+        {
+          worker: {
+            companyMembers: {
+              some: {
+                company: {
+                  members: {
+                    some: {
+                      userId,
+                      role: 'manager',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          project: {
+            company: {
+              members: {
+                some: {
+                  userId,
+                  role: 'manager',
+                },
+              },
+            },
+          },
+        },
+      ],
     };
   }
 
@@ -39,7 +73,7 @@ export class ExpenseManagementService {
         companyMembers: {
           select: {
             company: {
-              select: { ownerId: true },
+              select: { id: true, ownerId: true },
             },
           },
         },
@@ -50,12 +84,51 @@ export class ExpenseManagementService {
       throw new NotFoundException('Worker not found');
     }
 
-    const isInOwnCompany = worker.companyMembers.some((member) => member.company.ownerId === userId);
-    if (!isInOwnCompany) {
+    const allowedCompanyIds = worker.companyMembers
+      .filter((member) =>
+        userRole === UserRole.admin
+          ? member.company.ownerId === userId
+          : member.company.id &&
+            member.company.ownerId === userId,
+      )
+      .map((member) => member.company.id);
+
+    if (allowedCompanyIds.length === 0 && userRole !== UserRole.manager) {
       throw new ForbiddenException('You can only create expenses for your own company workers');
     }
 
-    if (dto.projectId) {
+    if (userRole === UserRole.manager) {
+      const managerCompanies = await this.prisma.companyMember.findMany({
+        where: { userId, role: 'manager' },
+        select: { companyId: true },
+      });
+      const managerCompanyIds = managerCompanies.map((m) => m.companyId);
+
+      const workerInManagerCompany = await this.prisma.companyMember.findFirst({
+        where: {
+          userId: dto.workerId,
+          companyId: { in: managerCompanyIds },
+        },
+      });
+
+      if (!workerInManagerCompany) {
+        throw new ForbiddenException('You can only create expenses for workers in your company');
+      }
+
+      if (dto.projectId) {
+        const project = await this.prisma.project.findFirst({
+          where: {
+            id: dto.projectId,
+            companyId: { in: managerCompanyIds },
+          },
+          select: { id: true },
+        });
+
+        if (!project) {
+          throw new ForbiddenException('Project not found or not accessible to your company');
+        }
+      }
+    } else if (dto.projectId) {
       const project = await this.prisma.project.findFirst({
         where: {
           id: dto.projectId,
@@ -66,6 +139,20 @@ export class ExpenseManagementService {
 
       if (!project) {
         throw new ForbiddenException('Project not found or not owned by your company');
+      }
+    }
+
+    if (dto.taskId) {
+      const task = await this.prisma.task.findFirst({
+        where: {
+          id: dto.taskId,
+          ...(dto.projectId ? { projectId: dto.projectId } : {}),
+        },
+        select: { id: true, projectId: true },
+      });
+
+      if (!task) {
+        throw new ForbiddenException('Task not found or does not belong to the selected project');
       }
     }
   }
@@ -92,6 +179,7 @@ export class ExpenseManagementService {
       data: {
         workerId: dto.workerId,
         projectId: dto.projectId ?? null,
+        taskId: dto.taskId ?? null,
         description: dto.description,
         category: dto.category,
         amount: dto.amount,
@@ -112,6 +200,12 @@ export class ExpenseManagementService {
           select: {
             id: true,
             name: true,
+          },
+        },
+        task: {
+          select: {
+            id: true,
+            title: true,
           },
         },
       },
@@ -254,6 +348,13 @@ export class ExpenseManagementService {
     });
 
     if (!expense) throw new NotFoundException('Expense not found');
+    const accessFilter = this.getAccessFilter(userId, userRole);
+    const permitted = userRole === UserRole.super_admin
+      ? true
+      : await this.prisma.expense.findFirst({ where: { id: expenseId, ...accessFilter }, select: { id: true } });
+    if (userRole !== UserRole.super_admin && !permitted) {
+      throw new ForbiddenException('Access denied');
+    }
 
     // Project এর tasks আনো (Linked Task dropdown এর জন্য)
     const tasks = expense.projectId
@@ -329,10 +430,10 @@ export class ExpenseManagementService {
     userId: string,
     userRole: string,
   ) {
-    const expense = await this.prisma.expense.findUnique({
+    const existingExpense = await this.prisma.expense.findUnique({
       where: { id: expenseId },
     });
-    if (!expense) throw new NotFoundException('Expense not found');
+    if (!existingExpense) throw new NotFoundException('Expense not found');
 
     if (dto.projectId) {
       const project = await this.prisma.project.findUnique({
@@ -341,14 +442,66 @@ export class ExpenseManagementService {
       if (!project) throw new NotFoundException('Project not found');
     }
 
+    const hasLinkChange =
+      dto.projectId !== undefined ||
+      dto.taskId !== undefined;
+
+    if (!hasLinkChange) {
+      return existingExpense;
+    }
+
+    const linkProjectId = dto.projectId ?? existingExpense.projectId ?? null;
+    const linkTaskId = dto.taskId ?? existingExpense.taskId ?? null;
+
+    if (linkTaskId) {
+      const task = await this.prisma.task.findUnique({
+        where: { id: linkTaskId },
+        select: { id: true, projectId: true },
+      });
+
+      if (!task) throw new NotFoundException('Task not found');
+      if (linkProjectId && task.projectId !== linkProjectId) {
+        throw new BadRequestException('Task does not belong to the selected project');
+      }
+    }
+
+    const linkedExpense = await this.prisma.expense.findFirst({
+      where: {
+        workerId: existingExpense.workerId,
+        description: existingExpense.description,
+        amount: existingExpense.amount,
+        date: existingExpense.date,
+        ...(linkProjectId ? { projectId: linkProjectId } : {}),
+        ...(linkTaskId ? { taskId: linkTaskId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (linkedExpense && linkedExpense.id !== existingExpense.id) {
+      return this.prisma.expense.update({
+        where: { id: linkedExpense.id },
+        data: {
+          ...(dto.projectId !== undefined && { projectId: dto.projectId }),
+          ...(dto.taskId !== undefined && { taskId: dto.taskId }),
+        },
+        include: {
+          worker: { select: { id: true, fullName: true } },
+          project: { select: { id: true, name: true } },
+          task: { select: { id: true, title: true } },
+        },
+      });
+    }
+
     return this.prisma.expense.update({
       where: { id: expenseId },
       data: {
         ...(dto.projectId !== undefined && { projectId: dto.projectId }),
+        ...(dto.taskId !== undefined && { taskId: dto.taskId }),
       },
       include: {
-        worker:  { select: { id: true, fullName: true } },
+        worker: { select: { id: true, fullName: true } },
         project: { select: { id: true, name: true } },
+        task: { select: { id: true, title: true } },
       },
     });
   }

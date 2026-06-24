@@ -51,6 +51,10 @@ export class CreateExpenseDto {
   @IsUUID()
   projectId?: string;
 
+  @IsOptional()
+  @IsUUID()
+  taskId?: string;
+
   @IsString()
   description!: string;
 

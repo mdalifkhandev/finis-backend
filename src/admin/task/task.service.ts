@@ -232,7 +232,12 @@ export class TaskService {
 
     // task expenses
     const expenses = await this.prisma.expense.findMany({
-      where: { projectId: task.projectId },
+      where: {
+        OR: [
+          { taskId: task.id },
+          { projectId: task.projectId, taskId: null },
+        ],
+      },
       select: {
         id: true,
         description: true,
@@ -240,24 +245,72 @@ export class TaskService {
         amount: true,
         status: true,
         date: true,
+        taskId: true,
         worker: { select: { id: true, fullName: true } },
       },
+      orderBy: { createdAt: 'desc' },
     });
 
     return { ...this.toTaskResponse(task), expenses };
   }
 
   // ── UPDATE TASK ────────────────────────────────────────────────
-  async updateTask(taskId: string, dto: UpdateTaskDto, userId: string, userRole: string) {
+  async updateTask(
+    taskId: string,
+    dto: UpdateTaskDto,
+    userId: string,
+    userRole: string,
+    file?: Express.Multer.File,
+  ) {
     await this.verifyTaskAccess(taskId, userId, userRole);
 
-    return this.prisma.task.update({
+    const updatedTask = await this.prisma.task.update({
       where: { id: taskId },
       data: {
         ...dto,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
       },
     });
+
+    let createdExpense: any = null;
+    const hasExpensePayload = Boolean(dto.expenseDescription?.trim() || file?.filename);
+    if (hasExpensePayload) {
+      const task = await this.prisma.task.findUnique({
+        where: { id: taskId },
+        select: { projectId: true },
+      });
+
+      if (task) {
+        createdExpense = await this.prisma.expense.create({
+          data: {
+            workerId: userId,
+            projectId: task.projectId,
+            taskId,
+            description: dto.expenseDescription?.trim() || 'Task expense',
+            category: 'other',
+            amount: dto.expenseAmount ?? 0,
+            receiptUrl: file?.filename ?? null,
+            date: new Date(),
+            status: 'pending',
+          },
+          select: {
+            id: true,
+            description: true,
+            category: true,
+            amount: true,
+            receiptUrl: true,
+            status: true,
+            date: true,
+            taskId: true,
+          },
+        });
+      }
+    }
+
+    return {
+      ...updatedTask,
+      ...(createdExpense ? { expense: createdExpense } : {}),
+    };
   }
 
   // ── UPDATE STATUS ──────────────────────────────────────────────

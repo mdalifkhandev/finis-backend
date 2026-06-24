@@ -40,6 +40,8 @@ export class UpdateTaskDto {
   dueDate?: string;
   estimatedHours?: number;
   actualHours?: number;
+  expenseDescription?: string;
+  expenseAmount?: number;
 }
 
 export class UpdateTaskStatusDto {
