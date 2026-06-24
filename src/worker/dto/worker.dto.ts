@@ -9,6 +9,7 @@ import {
   IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { LocationEventType } from '../../generated/prisma/client';
 
 // ── TASK ──────────────────────────────────────────────────────────────────────
 
@@ -150,6 +151,6 @@ export class UpdateLocationDto {
   geofenceId?: string;
 
   @IsOptional()
-  @IsEnum(['enter', 'exit', 'update'])
-  eventType?: 'check_in' | 'out_of_zone' | 'check_out' | 'enter' | 'exit' | 'update';
+  @IsEnum(LocationEventType)
+  eventType?: LocationEventType;
 }

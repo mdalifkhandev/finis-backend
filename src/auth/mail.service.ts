@@ -24,9 +24,6 @@ export class MailService {
   }
 
   async sendInviteEmail(email: string, token: string, role: string) {
-    const appUrl = this.config.get('APP_URL');
-    const inviteLink = `${appUrl}/auth/accept-invite?token=${token}`;
-
     try {
       await this.transporter.sendMail({
         from: this.getFromAddress(),
@@ -36,12 +33,9 @@ export class MailService {
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <h2 style="color: #1a3c5e;">Welcome to Finis</h2>
             <p>You have been invited as <strong>${role}</strong>.</p>
-            <p>Click the button below to set up your account:</p>
-            <a href="${inviteLink}" 
-               style="background:#1a3c5e;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;margin:16px 0;">
-              Accept Invitation
-            </a>
-            <p style="color:#666;">This link expires in 7 days.</p>
+            <p>Your invitation is ready. Use the account setup flow in the app to continue.</p>
+            <p style="color:#666;">Invitation token: ${token}</p>
+            <p style="color:#666;">This invitation expires in 7 days.</p>
             <p style="color:#999;font-size:12px;">If you didn't expect this, ignore this email.</p>
           </div>
         `,
@@ -53,9 +47,6 @@ export class MailService {
   }
 
   async sendCredentialsEmail(email: string, password: string, role: string) {
-    const appUrl = this.config.get('APP_URL');
-    const loginLink = `${appUrl}/auth/login`;
-
     try {
       await this.transporter.sendMail({
         from: this.getFromAddress(),
@@ -70,7 +61,6 @@ export class MailService {
               <div><strong>Email:</strong> ${email}</div>
               <div><strong>Password:</strong> ${password}</div>
             </div>
-            <a href="${loginLink}" style="background:#1a3c5e;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;margin:16px 0;">Login</a>
             <p style="color:#666;">You can change your password after logging in.</p>
           </div>
         `,

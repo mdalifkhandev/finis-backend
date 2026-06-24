@@ -321,9 +321,9 @@ export class ProjectService {
     const companyIds = companies.map((company) => company.id);
 
     const projects = await this.prisma.project.findMany({
-      where: {
-        ...(companyIds.length > 0 ? { companyId: { in: companyIds } } : { id: { equals: '__no_projects__' } }),
-      },
+      where: companyIds.length > 0
+        ? { companyId: { in: companyIds } }
+        : { id: { in: [] } },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -1457,6 +1457,7 @@ export class ProjectService {
         lat: log.lat,
         lng: log.lng,
         eventType: log.eventType,
+        durationSeconds: log.durationSeconds ?? null,
         zoneName: log.geofence?.zoneName ?? null,
         loggedAt: log.loggedAt,
       })),

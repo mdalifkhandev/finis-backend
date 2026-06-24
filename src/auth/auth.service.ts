@@ -210,7 +210,7 @@ export class AuthService {
         fullName: dto.email ? dto.email.split('@')[0] : 'Invited User',
         passwordHash,
         role: dto.role,
-        status: 'pending',
+        status: dto.role === UserRole.super_admin ? 'active' : 'pending',
       },
     });
 

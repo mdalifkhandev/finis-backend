@@ -38,7 +38,7 @@ CREATE TYPE "PayrollPeriod" AS ENUM ('weekly', 'biweekly', 'monthly');
 CREATE TYPE "NotificationType" AS ENUM ('task', 'report', 'payroll', 'inventory', 'message', 'geofence', 'expense', 'attendance', 'general');
 
 -- CreateEnum
-CREATE TYPE "LocationEventType" AS ENUM ('enter', 'exit', 'update');
+CREATE TYPE "LocationEventType" AS ENUM ('check_in', 'in_zone', 'out_of_zone', 'check_out', 'enter', 'exit', 'update');
 
 -- CreateEnum
 CREATE TYPE "MediaType" AS ENUM ('image', 'video', 'document', 'audio');
@@ -80,6 +80,9 @@ CREATE TYPE "TenantStatus" AS ENUM ('active', 'suspended', 'cancelled', 'trial')
 CREATE TYPE "SubscriptionStatus" AS ENUM ('active', 'inactive', 'cancelled');
 
 -- CreateEnum
+CREATE TYPE "PurchaseStatus" AS ENUM ('active', 'canceled', 'expired', 'switched');
+
+-- CreateEnum
 CREATE TYPE "InvitationStatus" AS ENUM ('pending', 'accepted', 'expired', 'cancelled');
 
 -- CreateEnum
@@ -91,10 +94,12 @@ CREATE TABLE "subscription_plans" (
     "name" TEXT NOT NULL,
     "price_monthly" DOUBLE PRECISION NOT NULL,
     "price_yearly" DOUBLE PRECISION,
+    "stripe_product_id" TEXT,
+    "stripe_price_monthly_id" TEXT,
+    "stripe_price_yearly_id" TEXT,
     "max_companies" INTEGER,
     "max_projects" INTEGER,
     "max_users" INTEGER,
-    "storage_gb" INTEGER,
     "has_geofencing" BOOLEAN NOT NULL DEFAULT false,
     "has_advanced_reporting" BOOLEAN NOT NULL DEFAULT false,
     "has_custom_reporting" BOOLEAN NOT NULL DEFAULT false,
@@ -116,10 +121,38 @@ CREATE TABLE "tenants" (
     "status" "TenantStatus" NOT NULL DEFAULT 'trial',
     "trial_ends_at" TIMESTAMP(3),
     "billing_email" TEXT,
+    "stripe_customer_id" TEXT,
+    "stripe_subscription_id" TEXT,
+    "stripe_price_id" TEXT,
+    "subscription_status" TEXT,
+    "current_period_start" TIMESTAMP(3),
+    "current_period_end" TIMESTAMP(3),
+    "plan_interval" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "tenants_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "subscription_purchases" (
+    "id" UUID NOT NULL,
+    "tenant_id" UUID NOT NULL,
+    "user_id" UUID NOT NULL,
+    "plan_id" UUID NOT NULL,
+    "plan_name" TEXT NOT NULL,
+    "stripe_subscription_id" TEXT,
+    "stripe_price_id" TEXT,
+    "interval" TEXT NOT NULL,
+    "amount" DOUBLE PRECISION NOT NULL,
+    "status" "PurchaseStatus" NOT NULL DEFAULT 'active',
+    "started_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "ended_at" TIMESTAMP(3),
+    "canceled_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "subscription_purchases_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -133,6 +166,7 @@ CREATE TABLE "users" (
     "avatar_url" TEXT,
     "role" "UserRole" NOT NULL DEFAULT 'worker',
     "status" "UserStatus" NOT NULL DEFAULT 'active',
+    "last_active_at" TIMESTAMP(3),
     "employee_id" TEXT,
     "department" TEXT,
     "date_of_birth" DATE,
@@ -310,6 +344,26 @@ CREATE TABLE "projects" (
 );
 
 -- CreateTable
+CREATE TABLE "quotes" (
+    "id" UUID NOT NULL,
+    "created_by_id" UUID NOT NULL,
+    "project_type" TEXT NOT NULL,
+    "property_type" TEXT NOT NULL,
+    "unit_type" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "quantity" DOUBLE PRECISION NOT NULL DEFAULT 1,
+    "unit" TEXT,
+    "unit_price" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "subtotal" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "notes" TEXT,
+    "is_custom" BOOLEAN NOT NULL DEFAULT false,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "quotes_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "project_members" (
     "id" UUID NOT NULL,
     "project_id" UUID NOT NULL,
@@ -435,6 +489,7 @@ CREATE TABLE "attendances" (
 CREATE TABLE "attendance_sessions" (
     "id" UUID NOT NULL,
     "attendance_id" UUID NOT NULL,
+    "project_id" UUID,
     "check_in_time" TIMESTAMP(3) NOT NULL,
     "check_out_time" TIMESTAMP(3),
     "hours_worked" DOUBLE PRECISION,
@@ -619,6 +674,7 @@ CREATE TABLE "location_logs" (
     "lng" DOUBLE PRECISION NOT NULL,
     "event_type" "LocationEventType" NOT NULL,
     "logged_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "duration_seconds" INTEGER,
     "is_inside_zone" BOOLEAN DEFAULT false,
 
     CONSTRAINT "location_logs_pkey" PRIMARY KEY ("id")
@@ -705,6 +761,17 @@ CREATE TABLE "notifications" (
     CONSTRAINT "notifications_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "device_tokens" (
+    "id" UUID NOT NULL,
+    "user_id" UUID NOT NULL,
+    "token" TEXT NOT NULL,
+    "platform" TEXT,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "device_tokens_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "tenants_domain_key" ON "tenants"("domain");
 
@@ -727,6 +794,9 @@ CREATE UNIQUE INDEX "invitations_token_key" ON "invitations"("token");
 CREATE UNIQUE INDEX "company_members_company_id_user_id_key" ON "company_members"("company_id", "user_id");
 
 -- CreateIndex
+CREATE INDEX "quotes_project_type_property_type_unit_type_idx" ON "quotes"("project_type", "property_type", "unit_type");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "project_members_project_id_user_id_key" ON "project_members"("project_id", "user_id");
 
 -- CreateIndex
@@ -744,8 +814,20 @@ CREATE UNIQUE INDEX "payroll_configs_company_id_key" ON "payroll_configs"("compa
 -- CreateIndex
 CREATE UNIQUE INDEX "thread_participants_thread_id_user_id_key" ON "thread_participants"("thread_id", "user_id");
 
+-- CreateIndex
+CREATE UNIQUE INDEX "device_tokens_token_key" ON "device_tokens"("token");
+
 -- AddForeignKey
 ALTER TABLE "tenants" ADD CONSTRAINT "tenants_plan_id_fkey" FOREIGN KEY ("plan_id") REFERENCES "subscription_plans"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "subscription_purchases" ADD CONSTRAINT "subscription_purchases_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "subscription_purchases" ADD CONSTRAINT "subscription_purchases_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "subscription_purchases" ADD CONSTRAINT "subscription_purchases_plan_id_fkey" FOREIGN KEY ("plan_id") REFERENCES "subscription_plans"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "users" ADD CONSTRAINT "users_tenant_id_fkey" FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -791,6 +873,9 @@ ALTER TABLE "contacts" ADD CONSTRAINT "contacts_company_id_fkey" FOREIGN KEY ("c
 
 -- AddForeignKey
 ALTER TABLE "projects" ADD CONSTRAINT "projects_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "quotes" ADD CONSTRAINT "quotes_created_by_id_fkey" FOREIGN KEY ("created_by_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "project_members" ADD CONSTRAINT "project_members_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "projects"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -842,6 +927,9 @@ ALTER TABLE "attendances" ADD CONSTRAINT "attendances_user_id_fkey" FOREIGN KEY 
 
 -- AddForeignKey
 ALTER TABLE "attendance_sessions" ADD CONSTRAINT "attendance_sessions_attendance_id_fkey" FOREIGN KEY ("attendance_id") REFERENCES "attendances"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "attendance_sessions" ADD CONSTRAINT "attendance_sessions_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "projects"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "time_adjustment_requests" ADD CONSTRAINT "time_adjustment_requests_worker_id_fkey" FOREIGN KEY ("worker_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -914,3 +1002,6 @@ ALTER TABLE "messages" ADD CONSTRAINT "messages_thread_id_fkey" FOREIGN KEY ("th
 
 -- AddForeignKey
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "device_tokens" ADD CONSTRAINT "device_tokens_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;

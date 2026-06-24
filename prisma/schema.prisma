@@ -138,6 +138,7 @@ model User {
   workScheduleAssignments WorkScheduleAssignment[]
   managedWorkers          WorkerManagerMap[]       @relation("ManagerWorkers")
   myManager               WorkerManagerMap?        @relation("WorkerManager")
+  supportRequestsCreated   SupportRequest[]
 
   @@map("users")
 }
@@ -680,6 +681,7 @@ model LocationLog {
   lng          Float
   eventType    LocationEventType @map("event_type")
   loggedAt     DateTime          @default(now()) @map("logged_at")
+  durationSeconds Int?           @map("duration_seconds")
   isInsideZone Boolean?          @default(false) @map("is_inside_zone")
   geofence     Geofence?         @relation(fields: [geofenceId], references: [id])
   user         User              @relation(fields: [userId], references: [id])
@@ -715,6 +717,36 @@ model Document {
   uploadedByUser User     @relation(fields: [uploadedBy], references: [id])
 
   @@map("documents")
+}
+
+model PublicContentPage {
+  id          String   @id @default(uuid()) @db.Uuid
+  slug        String   @unique
+  title       String
+  subtitle    String?
+  body        Json?
+  sections    Json?
+  isPublished Boolean  @default(true) @map("is_published")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("public_content_pages")
+}
+
+model SupportRequest {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  email       String?
+  role        String?
+  subject     String
+  message     String
+  status      String   @default("open")
+  createdById String?  @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@map("support_requests")
 }
 
 model MessageThread {
@@ -882,6 +914,7 @@ enum NotificationType {
 
 enum LocationEventType {
   check_in
+  in_zone
   out_of_zone
   check_out
   enter

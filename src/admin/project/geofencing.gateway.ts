@@ -12,6 +12,7 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { PayrollService } from '../payroll/payroll.service';
+import { LocationEventType } from '../../generated/prisma/client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ interface WorkerState {
   lastLat: number | null;
   lastLng: number | null;
   lastInsideZone: boolean | null;
+  lastOutsideLogId: string | null;
 }
 
 // ─── Geo Helpers ──────────────────────────────────────────────────────────────
@@ -267,6 +269,7 @@ export class GeofencingGateway
               lastLat: null,
               lastLng: null,
               lastInsideZone: null,
+              lastOutsideLogId: null,
             });
 
             console.log(
@@ -293,6 +296,7 @@ export class GeofencingGateway
               lastLat: null,
               lastLng: null,
               lastInsideZone: null,
+              lastOutsideLogId: null,
             });
 
             console.log(
@@ -651,14 +655,22 @@ export class GeofencingGateway
       state.status = 'inside';
       state.hasActiveViolation = false;
 
-      // enter log
-      await this.createLocationLog(user.id, currentZone?.id ?? null, lat, lng, 'enter', true);
+      await this.createLocationLog(user.id, currentZone?.id ?? null, lat, lng, 'in_zone', true);
 
       this.server.to(`project_${projectId}`).emit('zone_restored', {
         workerId: user.id,
         workerName: user.fullName,
         zoneName: zoneResult.zoneName,
         restoredAt: now,
+      });
+
+      await this.notificationsService.send({
+        userId: user.id,
+        title: 'Back in zone',
+        body: `You are back inside ${zoneResult.zoneName ?? 'the work zone'}.`,
+        type: 'geofence',
+        refId: currentZone?.id ?? undefined,
+        refType: 'geofence',
       });
 
       console.log(`✅ ${user.fullName} ENTERED zone: ${zoneResult.zoneName}`);
@@ -678,9 +690,10 @@ export class GeofencingGateway
       state.zoneName = null;
       state.status = 'outside';
 
-      // exit log
+      // outside-zone log
       const nearestZone = await this.getNearestZone(lat, lng, projectId);
-      await this.createLocationLog(user.id, nearestZone?.id ?? null, lat, lng, 'exit', false);
+      const outsideLog = await this.createLocationLog(user.id, nearestZone?.id ?? null, lat, lng, 'out_of_zone', false);
+      state.lastOutsideLogId = outsideLog?.id ?? null;
 
       // Violation — একবারই create করো
       if (!state.hasActiveViolation && nearestZone) {
@@ -717,6 +730,17 @@ export class GeofencingGateway
           refType: 'geofence_violation',
         });
       }
+
+      await this.notificationsService.send({
+        userId: user.id,
+        title: 'Left work zone',
+        body: nearestZone
+          ? `You moved outside ${nearestZone.zoneName}.`
+          : 'You moved outside the work zone.',
+        type: 'geofence',
+        refId: nearestZone?.id ?? undefined,
+        refType: 'geofence',
+      });
 
       // Paused state persist করো, যাতে re-enter করলে এখান থেকে continue করা যায়
       if (state.sessionId) {
@@ -993,16 +1017,30 @@ export class GeofencingGateway
     geofenceId: string | null,
     lat: number,
     lng: number,
-    eventType: 'check_in' | 'out_of_zone' | 'check_out' | 'enter' | 'exit',
+    eventType: LocationEventType,
     isInsideZone: boolean,
   ) {
     try {
-      await this.prisma.locationLog.create({
+      return await this.prisma.locationLog.create({
         data: { userId, geofenceId, lat, lng, eventType, isInsideZone },
       });
     } catch (e) {
       console.error('LocationLog create failed:', e);
+      return null;
     }
+  }
+
+  private async closeOutsideLog(userId: string, logId: string, now: Date) {
+    const log = await this.prisma.locationLog.findFirst({
+      where: { id: logId, userId, eventType: 'out_of_zone' },
+      select: { id: true, loggedAt: true },
+    });
+    if (!log) return;
+    const durationSeconds = Math.max(0, Math.floor((now.getTime() - log.loggedAt.getTime()) / 1000));
+    await this.prisma.locationLog.update({
+      where: { id: logId },
+      data: { durationSeconds },
+    });
   }
 
   /**
@@ -1105,6 +1143,7 @@ export class GeofencingGateway
         lastLat: null,
         lastLng: null,
         lastInsideZone: data.isInsideZone,
+        lastOutsideLogId: null,
       };
       this.workerStates.set(data.userId, state);
       return { state, changed: true };
@@ -1132,6 +1171,10 @@ export class GeofencingGateway
     if (data.isInsideZone && !wasInsideZone) {
       existing.zoneEnteredAt = now;
       existing.hasActiveViolation = false;
+      if (existing.lastOutsideLogId) {
+        void this.closeOutsideLog(existing.userId, existing.lastOutsideLogId, now);
+        existing.lastOutsideLogId = null;
+      }
     }
 
     // ── Zone EXIT transition: accumulate elapsed time & persist it ──────

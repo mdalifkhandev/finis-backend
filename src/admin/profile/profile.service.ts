@@ -73,7 +73,7 @@ export class ProfileService {
         ...(dto.fullName && { fullName: dto.fullName }),
         ...(dto.phone && { phone: dto.phone }),
         ...(dto.dateOfBirth && { dateOfBirth: new Date(dto.dateOfBirth) }),
-        ...(dto.gender && { bio: dto.gender }),
+        ...(dto.bio && { bio: dto.bio }),
         ...(avatarUrl !== undefined && { avatarUrl }),
       },
       select: {
@@ -83,7 +83,15 @@ export class ProfileService {
         phone: true,
         avatarUrl: true,
         role: true,
+        status: true,
         dateOfBirth: true,
+        address: true,
+        bio: true,
+        department: true,
+        employeeId: true,
+        joinDate: true,
+        lastLoginAt: true,
+        createdAt: true,
       },
     });
   }

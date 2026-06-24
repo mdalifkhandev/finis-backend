@@ -16,6 +16,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { PublicPlansModule } from './public-plans/public-plans.module';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { ConfigModule } from '@nestjs/config';
+import { PublicContentModule } from './public-content/public-content.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ConfigModule } from '@nestjs/config';
     ManagerModule,
     NotificationsModule,
     PublicPlansModule,
+    PublicContentModule,
     SubscriptionModule,
     JwtModule.register({
       global: true,

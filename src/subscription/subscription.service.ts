@@ -768,7 +768,12 @@ export class SubscriptionService {
       where: { id: userId },
       select: { id: true, tenantId: true },
     });
-    if (!user?.tenantId) return { tenantId: null, current: null, history: [] };
+    if (!user?.tenantId) {
+      return {
+        tenantId: null,
+        current: null,
+      };
+    }
 
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: user.tenantId },
@@ -776,56 +781,70 @@ export class SubscriptionService {
     });
     if (!tenant) throw new NotFoundException('Tenant not found');
 
-    const history = await this.prisma.subscriptionPurchase.findMany({
-      where: { tenantId: tenant.id, userId: user.id },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        plan: {
-          select: {
-            id: true,
-            name: true,
-            priceMonthly: true,
-            priceYearly: true,
-            maxCompanies: true,
-            maxProjects: true,
-            maxUsers: true,
-            hasGeofencing: true,
-            hasAdvancedReporting: true,
-            hasCustomReporting: true,
-            hasWhiteLabel: true,
-            supportLevel: true,
-          },
-        },
-      },
-    });
-
     const isExpired =
       tenant.currentPeriodEnd != null &&
       new Date(tenant.currentPeriodEnd).getTime() < Date.now();
+
+    const periodEnd = tenant.currentPeriodEnd ? new Date(tenant.currentPeriodEnd) : null;
+    const daysLeft = periodEnd
+      ? Math.max(0, Math.ceil((periodEnd.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+      : null;
+
+    const currentPurchase = await this.prisma.subscriptionPurchase.findFirst({
+      where: {
+        tenantId: tenant.id,
+        userId: user.id,
+        status: 'active',
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        amount: true,
+        interval: true,
+        startedAt: true,
+        endedAt: true,
+        status: true,
+      },
+    });
 
     return {
       tenantId: tenant.id,
       current: {
         planName: tenant.plan?.name ?? null,
         subscriptionStatus: tenant.subscriptionStatus ?? null,
-        planInterval: tenant.planInterval ?? null,
-        currentPeriodStart: tenant.currentPeriodStart,
+        planInterval: currentPurchase?.interval ?? tenant.planInterval ?? null,
+        amount: currentPurchase?.amount ?? null,
+        startDate: currentPurchase?.startedAt ?? tenant.currentPeriodStart ?? null,
+        daysLeft,
         currentPeriodEnd: tenant.currentPeriodEnd,
         isActive: tenant.subscriptionStatus === 'active' && !isExpired,
         isExpired,
+        permissions: tenant.plan
+          ? {
+              support: tenant.plan.supportLevel ?? null,
+              companies: {
+                used: null,
+                max: tenant.plan.maxCompanies ?? null,
+                unlimited: tenant.plan.maxCompanies == null,
+              },
+              projects: {
+                used: null,
+                max: tenant.plan.maxProjects ?? null,
+                unlimited: tenant.plan.maxProjects == null,
+              },
+              users: {
+                used: null,
+                max: tenant.plan.maxUsers ?? null,
+                unlimited: tenant.plan.maxUsers == null,
+              },
+              features: {
+                geofencing: tenant.plan.hasGeofencing,
+                advancedReporting: tenant.plan.hasAdvancedReporting,
+                customReporting: tenant.plan.hasCustomReporting,
+                whiteLabel: tenant.plan.hasWhiteLabel,
+              },
+            }
+          : null,
       },
-      history: history.map((item) => ({
-        id: item.id,
-        planId: item.planId,
-        planName: item.planName,
-        interval: item.interval,
-        amount: item.amount,
-        status: item.status,
-        startedAt: item.startedAt,
-        endedAt: item.endedAt,
-        canceledAt: item.canceledAt,
-        plan: item.plan,
-      })),
     };
   }
 }

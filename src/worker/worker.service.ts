@@ -9,6 +9,7 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeofencingGateway } from '../admin/project/geofencing.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
+import { LocationEventType } from '../generated/prisma/client';
 import {
   SubmitTaskReportDto,
   CheckInDto,
@@ -830,18 +831,6 @@ export class WorkerService {
       },
     });
 
-    // Location log
-    if (dto.lat && dto.lng) {
-      await this.prisma.locationLog.create({
-        data: {
-          userId: workerId,
-          lat: dto.lat,
-          lng: dto.lng,
-          eventType: 'enter',
-        },
-      });
-    }
-
     // শুধু সিলেক্ট করা project-এর geofence(s)-এর বিরুদ্ধেই zone check করো —
     // অন্য project-গুলো touch করবো না
     const zoneResult =
@@ -858,6 +847,30 @@ export class WorkerService {
         eventType: 'check_in',
         isInsideZone: zoneResult.inside,
       },
+    });
+
+    if (zoneResult.inside) {
+      await this.prisma.locationLog.create({
+        data: {
+          userId: workerId,
+          geofenceId: null,
+          lat: dto.lat ?? 0,
+          lng: dto.lng ?? 0,
+          eventType: 'in_zone',
+          isInsideZone: true,
+        },
+      });
+    }
+
+    await this.notificationsService.send({
+      userId: workerId,
+      title: 'Checked in',
+      body: zoneResult.inside
+        ? 'You are inside the work zone.'
+        : 'You checked in. Please move into the work zone to start tracking.',
+      type: 'attendance',
+      refId: session.id,
+      refType: 'attendance_session',
     });
 
     const stateResult = this.geofencingGateway.upsertWorkerState({
@@ -963,10 +976,26 @@ export class WorkerService {
         geofenceId: null,
         lat: dto.lat ?? 0,
         lng: dto.lng ?? 0,
-        eventType: 'exit',
+        eventType: 'check_out',
         isInsideZone: false,
       },
     });
+
+    const liveState = this.geofencingGateway.getWorkerState(workerId);
+    if (liveState?.lastOutsideLogId) {
+      const outsideLog = await this.prisma.locationLog.findFirst({
+        where: { id: liveState.lastOutsideLogId, userId: workerId, eventType: 'out_of_zone' },
+        select: { id: true, loggedAt: true },
+      });
+      if (outsideLog) {
+        const durationSeconds = Math.max(0, Math.floor((now.getTime() - outsideLog.loggedAt.getTime()) / 1000));
+        await this.prisma.locationLog.update({
+          where: { id: outsideLog.id },
+          data: { durationSeconds },
+        });
+      }
+      liveState.lastOutsideLogId = null;
+    }
 
     // update এর পরে fetch করো — না হলে পুরনো hoursWorked যোগ হবে
     const allSessions = await this.prisma.attendanceSession.findMany({
@@ -985,17 +1014,14 @@ export class WorkerService {
 
     await this.syncDailyPayrollDraft(workerId, today, Math.round(totalHours * 100) / 100);
 
-    // Location log
-    if (dto.lat && dto.lng) {
-      await this.prisma.locationLog.create({
-        data: {
-          userId: workerId,
-          lat: dto.lat,
-          lng: dto.lng,
-          eventType: 'exit',
-        },
-      });
-    }
+    await this.notificationsService.send({
+      userId: workerId,
+      title: 'Checked out',
+      body: 'Your work session has ended.',
+      type: 'attendance',
+      refId: updatedSession.id,
+      refType: 'attendance_session',
+    });
 
     // শুধু এই session যেই project-এর জন্য খোলা হয়েছিল, সেই project-এর
     // room-এই broadcast করো — অন্য project-এর admin/manager কিছু দেখবে না
@@ -1438,15 +1464,18 @@ export class WorkerService {
       orderBy: { checkInTime: 'desc' },
     });
 
-    const log = await this.prisma.locationLog.create({
-      data: {
-        userId: workerId,
-        lat: dto.lat,
-        lng: dto.lng,
-        geofenceId: dto.geofenceId ?? null,
-        eventType: dto.eventType ?? 'update',
-      },
-    });
+    const log =
+      dto.eventType && dto.eventType !== 'update'
+        ? await this.prisma.locationLog.create({
+            data: {
+              userId: workerId,
+              lat: dto.lat,
+              lng: dto.lng,
+              geofenceId: dto.geofenceId ?? null,
+              eventType: dto.eventType as LocationEventType,
+            },
+          })
+        : null;
 
     if (!openSession) {
       // Check-in করা নেই → zone time count হবে না, শুধু lat/lng log রাখলাম

@@ -15,7 +15,7 @@ export class UpdateProfileDto {
 
   @IsOptional()
   @IsString()
-  gender?: string;
+  bio?: string;
 }
 
 export class ChangePasswordDto {

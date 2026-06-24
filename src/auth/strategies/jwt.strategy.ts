@@ -36,7 +36,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       },
     });
 
-    if (!user || user.status === 'suspended' || user.status === 'inactive') {
+    if (!user || ((user.status === 'suspended' || user.status === 'inactive') && user.role !== 'super_admin')) {
       throw new UnauthorizedException('User not active');
     }
 
