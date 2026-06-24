@@ -30,7 +30,9 @@ export class NotificationsGateway
         return;
       }
 
-      const payload = this.jwtService.verify(token);
+      const payload = this.jwtService.verify(token, {
+        secret: process.env.JWT_SECRET || 'secret',
+      });
       client.data.userId = payload.sub;
       client.data.role = payload.role;
       client.join(`user-${payload.sub}`);

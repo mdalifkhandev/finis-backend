@@ -277,18 +277,25 @@ export class TaskService {
     file?: Express.Multer.File,
   ) {
     await this.verifyTaskAccess(taskId, userId, userRole);
+    const {
+      expenseDescription,
+      expenseAmount,
+      ...taskUpdates
+    } = dto as UpdateTaskDto & { expenseDescription?: string; expenseAmount?: number | string };
 
     const updatedTask = await this.prisma.task.update({
       where: { id: taskId },
       data: {
-        ...dto,
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+        ...taskUpdates,
+        dueDate: taskUpdates.dueDate ? new Date(taskUpdates.dueDate) : undefined,
       },
     });
 
     let createdExpense: any = null;
-    const expenseDescription = dto.expenseDescription?.trim() || dto.description?.trim();
-    const hasExpensePayload = Boolean(expenseDescription || file?.filename);
+    const expenseText = expenseDescription?.trim() || taskUpdates.description?.trim();
+    const rawExpenseAmount = expenseAmount as any;
+    const hasExpensePayload =
+      Boolean(expenseText || file?.filename) || rawExpenseAmount !== undefined;
     if (hasExpensePayload) {
       const task = await this.prisma.task.findUnique({
         where: { id: taskId },
@@ -296,30 +303,60 @@ export class TaskService {
       });
 
       if (task) {
-        createdExpense = await this.prisma.expense.create({
-          data: {
-            workerId: userId,
-            projectId: task.projectId,
-            taskId,
-            description: expenseDescription || 'Task expense',
-            category: 'other',
-            amount: dto.expenseAmount ?? 0,
-            receiptUrl: file?.filename ?? null,
-            date: new Date(),
-            status: 'pending',
-          },
-          select: {
-            id: true,
-            description: true,
-            category: true,
-            amount: true,
-            receiptUrl: true,
-            status: true,
-            date: true,
-            taskId: true,
-            projectId: true,
-          },
+        const normalizedExpenseAmount =
+          rawExpenseAmount === undefined ||
+          rawExpenseAmount === null ||
+          rawExpenseAmount === ''
+            ? 0
+            : Number(rawExpenseAmount);
+
+        const existingExpense = await this.prisma.expense.findFirst({
+          where: { taskId },
+          orderBy: { createdAt: 'desc' },
         });
+
+        const expenseData = {
+          workerId: userId,
+          projectId: task.projectId,
+          taskId,
+          description: expenseText || 'Task expense',
+          category: 'other' as const,
+          amount: Number.isFinite(normalizedExpenseAmount) ? normalizedExpenseAmount : 0,
+          receiptUrl: file?.filename ?? existingExpense?.receiptUrl ?? null,
+          date: new Date(),
+          status: existingExpense ? existingExpense.status : ('pending' as const),
+        };
+
+        createdExpense = existingExpense
+          ? await this.prisma.expense.update({
+              where: { id: existingExpense.id },
+              data: expenseData,
+              select: {
+                id: true,
+                description: true,
+                category: true,
+                amount: true,
+                receiptUrl: true,
+                status: true,
+                date: true,
+                taskId: true,
+                projectId: true,
+              },
+            })
+          : await this.prisma.expense.create({
+              data: expenseData,
+              select: {
+                id: true,
+                description: true,
+                category: true,
+                amount: true,
+                receiptUrl: true,
+                status: true,
+                date: true,
+                taskId: true,
+                projectId: true,
+              },
+            });
       }
     }
 

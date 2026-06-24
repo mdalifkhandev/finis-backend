@@ -596,6 +596,7 @@ model Expense {
   task        Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
   worker      User            @relation(fields: [workerId], references: [id])
 
+  @@unique([taskId])
   @@map("expenses")
 }
 

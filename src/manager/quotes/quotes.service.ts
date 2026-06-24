@@ -6,6 +6,33 @@ import { CreateQuoteDto, UpdateQuoteDto } from './dto/quote.dto';
 export class QuotesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private slugify(value: string) {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  private async findQuoteByIdOrSlug(identifier: string) {
+    const byId = await this.prisma.quote.findUnique({
+      where: { id: identifier },
+    });
+
+    if (byId) return byId;
+
+    const normalized = this.slugify(identifier);
+    return this.prisma.quote.findFirst({
+      where: {
+        OR: [
+          { title: { equals: identifier, mode: 'insensitive' } },
+          { title: { equals: normalized.replace(/-/g, ' '), mode: 'insensitive' } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async createQuote(dto: CreateQuoteDto, userId: string) {
     const quantity = dto.quantity ?? 1;
     const unitPrice = dto.unitPrice ?? 0;
@@ -54,19 +81,19 @@ export class QuotesService {
   }
 
   async getQuoteById(id: string) {
-    const quote = await this.prisma.quote.findUnique({
-      where: { id },
+    const quote = await this.findQuoteByIdOrSlug(id);
+
+    if (!quote) throw new NotFoundException('Quote not found');
+    return this.prisma.quote.findUnique({
+      where: { id: quote.id },
       include: {
         createdBy: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
       },
     });
-
-    if (!quote) throw new NotFoundException('Quote not found');
-    return quote;
   }
 
   async updateQuote(id: string, dto: UpdateQuoteDto) {
-    const quote = await this.prisma.quote.findUnique({ where: { id } });
+    const quote = await this.findQuoteByIdOrSlug(id);
     if (!quote) throw new NotFoundException('Quote not found');
 
     const quantity = dto.quantity ?? quote.quantity;
@@ -74,7 +101,7 @@ export class QuotesService {
     const subtotal = Math.round(quantity * unitPrice * 100) / 100;
 
     return this.prisma.quote.update({
-      where: { id },
+      where: { id: quote.id },
       data: {
         projectType: dto.projectType ?? quote.projectType,
         propertyType: dto.propertyType ?? quote.propertyType,
@@ -94,9 +121,9 @@ export class QuotesService {
   }
 
   async deleteQuote(id: string) {
-    const quote = await this.prisma.quote.findUnique({ where: { id } });
+    const quote = await this.findQuoteByIdOrSlug(id);
     if (!quote) throw new NotFoundException('Quote not found');
-    await this.prisma.quote.delete({ where: { id } });
+    await this.prisma.quote.delete({ where: { id: quote.id } });
     return { success: true, message: 'Quote deleted successfully' };
   }
 }

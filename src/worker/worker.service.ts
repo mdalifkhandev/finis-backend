@@ -1729,7 +1729,6 @@ export class WorkerService {
       this.prisma.payroll.findMany({
         where: {
           workerId,
-          status: 'paid',
           OR: [
             { payPeriodStart: { gte: selected, lte: selectedEnd } },
             { payPeriodEnd: { gte: selected, lte: selectedEnd } },
@@ -1746,7 +1745,6 @@ export class WorkerService {
       this.prisma.payroll.findMany({
         where: {
           workerId,
-          status: 'paid',
         },
         select: {
           grossPay: true,
@@ -1818,6 +1816,14 @@ export class WorkerService {
       projectMap.set(key, current);
     });
 
+    const statusSummary = payrolls.reduce(
+      (acc, payroll) => {
+        acc[payroll.status] = (acc[payroll.status] ?? 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
     const projects = Array.from(projectMap.values()).map((project) => ({
       projectId: project.projectId,
       projectName: project.projectName,
@@ -1847,6 +1853,7 @@ export class WorkerService {
         status: worker.status,
       },
       projects,
+      statusSummary,
       lifetimeSummary: {
         totalHours: Math.round(lifetimeTotalHours * 100) / 100,
         totalHoursDisplay: this.formatHoursAndMinutes(lifetimeTotalHours),

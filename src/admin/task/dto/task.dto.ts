@@ -1,4 +1,5 @@
 import { ArrayNotEmpty, IsArray, IsString, IsOptional, IsNumber, IsEnum, IsUUID } from 'class-validator';
+import { Type } from 'class-transformer';
 import { TaskPriority, TaskStatus } from '../../../generated/prisma/client';
 
 export class CreateTaskDto {
@@ -34,13 +35,37 @@ export class CreateTaskDto {
 }
 
 export class UpdateTaskDto {
+  @IsOptional()
+  @IsString()
   title?: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsEnum(TaskPriority)
   priority?: TaskPriority;
+
+  @IsOptional()
+  @IsString()
   dueDate?: string;
+
+  @IsOptional()
+  @IsNumber()
   estimatedHours?: number;
+
+  @IsOptional()
+  @IsNumber()
   actualHours?: number;
+
+  @IsOptional()
+  @IsString()
   expenseDescription?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
   expenseAmount?: number;
 }
 
