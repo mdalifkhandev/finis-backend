@@ -273,7 +273,8 @@ export class TaskService {
     });
 
     let createdExpense: any = null;
-    const hasExpensePayload = Boolean(dto.expenseDescription?.trim() || file?.filename);
+    const expenseDescription = dto.expenseDescription?.trim() || dto.description?.trim();
+    const hasExpensePayload = Boolean(expenseDescription || file?.filename);
     if (hasExpensePayload) {
       const task = await this.prisma.task.findUnique({
         where: { id: taskId },
@@ -286,7 +287,7 @@ export class TaskService {
             workerId: userId,
             projectId: task.projectId,
             taskId,
-            description: dto.expenseDescription?.trim() || 'Task expense',
+            description: expenseDescription || 'Task expense',
             category: 'other',
             amount: dto.expenseAmount ?? 0,
             receiptUrl: file?.filename ?? null,

@@ -19,6 +19,7 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { UserRole } from '../../generated/prisma/client';
+import { S3Service } from '../../s3/s3.service';
 import {
   CreateTaskDto,
   UpdateTaskDto,
@@ -31,7 +32,10 @@ import {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.admin, UserRole.manager)
 export class TaskController {
-  constructor(private taskService: TaskService) {}
+  constructor(
+    private taskService: TaskService,
+    private s3Service: S3Service,
+  ) {}
 
   /** GET /admin/tasks — Manager শুধু assigned project-এর tasks পাবে */
   @Get()
@@ -103,14 +107,17 @@ export class TaskController {
   /** PUT /admin/tasks/:id — Manager পারবে */
   @Put(':id')
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
-  updateTask(
+  async updateTask(
     @Param('id') id: string,
     @Body() dto: UpdateTaskDto,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.taskService.updateTask(id, dto, userId, userRole, file);
+    const uploadedFile = file
+      ? { ...file, filename: await this.s3Service.uploadFile(file, 'task-expenses') }
+      : undefined;
+    return this.taskService.updateTask(id, dto, userId, userRole, uploadedFile);
   }
 
   /** PUT /admin/tasks/:id/reports/:reportId/review — Manager approve/reject করবে */
