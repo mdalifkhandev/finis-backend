@@ -303,6 +303,7 @@ export class TaskService {
             status: true,
             date: true,
             taskId: true,
+            projectId: true,
           },
         });
       }
