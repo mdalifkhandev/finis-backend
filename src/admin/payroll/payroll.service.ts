@@ -163,6 +163,102 @@ export class PayrollService {
     };
   }
 
+  /**
+   * Build a date window from the requested filter.
+   * Priority:
+   * 1. Explicit custom range (startDate/endDate)
+   * 2. range keyword
+   * 3. legacy date/month/year query params
+   */
+  private buildDateWindow(query: {
+    range?: 'custom' | 'weekly' | 'bi-weekly' | 'monthly' | 'bi-monthly' | 'yearly';
+    startDate?: string;
+    endDate?: string;
+    date?: string;
+    month?: string;
+    year?: string;
+  }) {
+    const now = new Date();
+
+    const normalizeStart = (value: Date) => {
+      const d = new Date(value);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    };
+
+    const normalizeEnd = (value: Date) => {
+      const d = new Date(value);
+      d.setHours(23, 59, 59, 999);
+      return d;
+    };
+
+    const makeMonthWindow = (base: Date, spanMonths: number) => {
+      const start = new Date(base.getFullYear(), base.getMonth(), 1);
+      const end = new Date(base.getFullYear(), base.getMonth() + spanMonths, 0);
+      return { startDate: normalizeStart(start), endDate: normalizeEnd(end) };
+    };
+
+    if (query.range === 'custom') {
+      const start = query.startDate ? normalizeStart(new Date(query.startDate)) : normalizeStart(now);
+      const end = query.endDate ? normalizeEnd(new Date(query.endDate)) : normalizeEnd(start);
+      return { startDate: start, endDate: end };
+    }
+
+    if (query.range === 'weekly') {
+      const ref = query.date ? new Date(query.date) : now;
+      const day = ref.getDay();
+      const start = new Date(ref);
+      start.setDate(ref.getDate() - day);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      return { startDate: normalizeStart(start), endDate: normalizeEnd(end) };
+    }
+
+    if (query.range === 'bi-weekly') {
+      const ref = query.date ? new Date(query.date) : now;
+      const start = normalizeStart(ref);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 13);
+      return { startDate: start, endDate: normalizeEnd(end) };
+    }
+
+    if (query.range === 'monthly') {
+      const ref = query.date ? new Date(query.date) : now;
+      return makeMonthWindow(ref, 1);
+    }
+
+    if (query.range === 'bi-monthly') {
+      const ref = query.date ? new Date(query.date) : now;
+      return makeMonthWindow(ref, 2);
+    }
+
+    if (query.range === 'yearly') {
+      const ref = query.date ? new Date(query.date) : now;
+      const start = new Date(ref.getFullYear(), 0, 1);
+      const end = new Date(ref.getFullYear(), 11, 31);
+      return { startDate: normalizeStart(start), endDate: normalizeEnd(end) };
+    }
+
+    if (query.date) {
+      const selected = new Date(query.date);
+      return { startDate: normalizeStart(selected), endDate: normalizeEnd(selected) };
+    }
+
+    if (query.month || query.year) {
+      const targetYear = query.year ? parseInt(query.year) : now.getFullYear();
+      const targetMonthIndex = query.month ? parseInt(query.month) - 1 : now.getMonth();
+      return {
+        startDate: normalizeStart(new Date(targetYear, targetMonthIndex, 1)),
+        endDate: normalizeEnd(new Date(targetYear, targetMonthIndex + 1, 0)),
+      };
+    }
+
+    return {
+      startDate: normalizeStart(now),
+      endDate: normalizeEnd(now),
+    };
+  }
+
   private async getTenantSubscriptionContext(adminId: string) {
     const admin = await this.prisma.user.findUnique({
       where: { id: adminId },
@@ -623,29 +719,21 @@ export class PayrollService {
     month?: string,
     year?: string,
     projectId?: string,
+    range?: 'custom' | 'weekly' | 'bi-weekly' | 'monthly' | 'bi-monthly' | 'yearly',
+    startDate?: string,
+    endDate?: string,
   ) {
     const subscription = await this.assertPayrollSubscriptionActive(adminId, userRole);
     const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
-    const now = new Date();
-    const targetYear = year ? parseInt(year) : now.getFullYear();
-    const targetMonthIndex = month ? parseInt(month) - 1 : now.getMonth();
-    const startDate = date
-      ? new Date(date)
-      : new Date(targetYear, targetMonthIndex, 1);
-    const endDate = date
-      ? new Date(date)
-      : new Date(targetYear, targetMonthIndex + 1, 0);
-
-    startDate.setHours(0, 0, 0, 0);
-    endDate.setHours(23, 59, 59, 999);
+    const window = this.buildDateWindow({ range, startDate, endDate, date, month, year });
 
     const payrolls = await this.prisma.payroll.findMany({
       where: {
         ...(accessibleCompanyIds.length > 0 ? { companyId: { in: accessibleCompanyIds } } : {}),
         OR: [
           {
-            payPeriodStart: { gte: startDate },
-            payPeriodEnd: { lte: endDate },
+            payPeriodStart: { gte: window.startDate },
+            payPeriodEnd: { lte: window.endDate },
           },
           {
             status: 'paid',
@@ -1386,24 +1474,26 @@ export class PayrollService {
     };
   }
 
-  async getPayrollOverview(adminId: string, userRole: string, date?: string, month?: string, year?: string) {
+  async getPayrollOverview(
+    adminId: string,
+    userRole: string,
+    date?: string,
+    month?: string,
+    year?: string,
+    range?: 'custom' | 'weekly' | 'bi-weekly' | 'monthly' | 'bi-monthly' | 'yearly',
+    startDate?: string,
+    endDate?: string,
+  ) {
     const subscription = await this.assertPayrollSubscriptionActive(adminId, userRole);
     const companyIds = await this.getAdminCompanyIds(adminId, userRole);
-
-    const now = new Date();
-    const targetYear = year ? parseInt(year) : now.getFullYear();
-    const targetMonthIndex = month ? parseInt(month) - 1 : now.getMonth();
-    const startDate = date ? new Date(date) : new Date(targetYear, targetMonthIndex, 1);
-    const endDate = date ? new Date(date) : new Date(targetYear, targetMonthIndex + 1, 0);
-    startDate.setHours(0, 0, 0, 0);
-    endDate.setHours(23, 59, 59, 999);
+    const window = this.buildDateWindow({ date, month, year, range, startDate, endDate });
 
     const [payrolls, activeWorkers, inventoryAlerts] = await Promise.all([
       this.prisma.payroll.findMany({
         where: {
           ...(companyIds.length > 0 ? { companyId: { in: companyIds } } : {}),
-          payPeriodStart: { gte: startDate },
-          payPeriodEnd: { lte: endDate },
+          payPeriodStart: { gte: window.startDate },
+          payPeriodEnd: { lte: window.endDate },
         },
         select: {
           regularHours: true,

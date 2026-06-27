@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsOptional, IsDateString, Min } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsDateString, Min, IsIn } from 'class-validator';
 
 // ─── Payroll Summary Query ────────────────────────────────────────────────────
 export class PayrollSummaryQueryDto {
@@ -13,6 +13,18 @@ export class PayrollSummaryQueryDto {
   @IsOptional()
   @IsString()
   year?: string;
+
+  @IsOptional()
+  @IsIn(['custom', 'weekly', 'bi-weekly', 'monthly', 'bi-monthly', 'yearly'])
+  range?: 'custom' | 'weekly' | 'bi-weekly' | 'monthly' | 'bi-monthly' | 'yearly';
+
+  @IsOptional()
+  @IsDateString()
+  startDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  endDate?: string;
 }
 
 // ─── Approve Payroll ──────────────────────────────────────────────────────────

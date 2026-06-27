@@ -113,7 +113,7 @@ export class PayrollController {
     return this.payrollService.updatePayroll(payrollId, adminId, userRole, dto);
   }
 
-  /** GET /admin/payroll/summary?month=1&year=2025&projectId=uuid */
+  /** GET /admin/payroll/summary?range=monthly&date=2026-06-27&projectId=uuid */
   @Get('summary')
   @Roles(UserRole.admin, UserRole.super_admin)
   getPayrollSummary(
@@ -129,10 +129,13 @@ export class PayrollController {
       query.month,
       query.year,
       projectId,
+      query.range,
+      query.startDate,
+      query.endDate,
     );
   }
 
-  /** GET /admin/payroll/overview?month=1&year=2025 */
+  /** GET /admin/payroll/overview?range=monthly&date=2026-06-27 */
   @Get('overview')
   @Roles(UserRole.admin, UserRole.super_admin)
   getPayrollOverview(
@@ -146,6 +149,9 @@ export class PayrollController {
       query.date,
       query.month,
       query.year,
+      query.range,
+      query.startDate,
+      query.endDate,
     );
   }
 
