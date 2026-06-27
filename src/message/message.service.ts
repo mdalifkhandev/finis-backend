@@ -23,6 +23,19 @@ export class MessageService {
     private readonly notificationsService: NotificationsService,
   ) { }
 
+  private isDirectChatAllowed(senderRole?: string, targetRole?: string) {
+    if (!senderRole || !targetRole) return false;
+    if (senderRole === 'super_admin' || targetRole === 'super_admin') return false;
+
+    const allowed: Record<string, string[]> = {
+      admin: ['manager', 'worker'],
+      manager: ['admin', 'worker'],
+      worker: ['manager'],
+    };
+
+    return allowed[senderRole]?.includes(targetRole) ?? false;
+  }
+
   private getPresence(userId: string, lastActiveAt?: Date | null) {
     return {
       isOnline: onlineUsers.has(userId),
@@ -36,9 +49,9 @@ export class MessageService {
 
   async getChatContacts(userId: string, userRole: string, search?: string) {
     const roleFilter: Record<string, any> = {
-      admin: { not: 'super_admin' },
-      manager: { not: 'super_admin' },
-      worker: { not: 'super_admin' },
+      admin: { in: ['manager', 'worker'] },
+      manager: { in: ['admin', 'worker'] },
+      worker: { in: ['manager'] },
     };
 
     const contacts = await this.prisma.user.findMany({
@@ -311,6 +324,15 @@ export class MessageService {
 
     if (targetUser?.role === 'super_admin') {
       throw new ForbiddenException('Use the Support tab to contact the administrator');
+    }
+
+    const sender = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+
+    if (!this.isDirectChatAllowed(sender?.role, targetUser?.role)) {
+      throw new ForbiddenException('You cannot start a direct chat with this user');
     }
 
     const existing = await this.prisma.messageThread.findFirst({
@@ -639,22 +661,44 @@ export class MessageService {
       select: { role: true },
     });
 
-    // super_admin শুধু support thread এ message পাঠাতে পারবে
-    if (sender?.role === 'super_admin') {
-      const thread = await this.prisma.messageThread.findUnique({
-        where: { id: threadId },
-        include: {
-          participants: {
-            include: { user: { select: { id: true, role: true } } },
-          },
+    const thread = await this.prisma.messageThread.findUnique({
+      where: { id: threadId },
+      include: {
+        participants: {
+          include: { user: { select: { id: true, role: true } } },
         },
-      });
+      },
+    });
+    if (!thread) throw new NotFoundException('Thread not found');
+
+    // super_admin can only send in support threads.
+    if (sender?.role === 'super_admin') {
       const otherParticipants = thread?.participants.filter((p) => p.userId !== senderId);
       const allOthersAreSuperAdmin = otherParticipants?.every(
         (p) => p.user.role === 'super_admin',
       );
       if (allOthersAreSuperAdmin) {
         throw new ForbiddenException('Super admin can only send messages in Support threads');
+      }
+    }
+
+    const otherParticipants = thread.participants.filter((p) => p.userId !== senderId);
+    const otherRoles = otherParticipants.map((p) => p.user.role);
+
+    if (otherRoles.includes('super_admin')) {
+      throw new ForbiddenException('Use the Support tab to contact the administrator');
+    }
+
+    if (sender?.role === 'worker') {
+      const hasAdminParticipant = otherRoles.includes('admin');
+      const hasManagerParticipant = otherRoles.includes('manager');
+
+      if (!hasManagerParticipant && !hasAdminParticipant) {
+        throw new ForbiddenException('Workers can only chat with managers');
+      }
+
+      if (hasAdminParticipant && otherParticipants.length === 1) {
+        throw new ForbiddenException('Workers can only reply to an existing admin chat');
       }
     }
 
