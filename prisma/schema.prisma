@@ -131,6 +131,8 @@ model User {
   createdTasks            Task[]                   @relation("TaskCreator")
   taskAssignees           TaskAssignee[]           @relation("TaskAssigneeUser")
   threadParticipants      ThreadParticipant[]
+  messageBlocksCreated    MessageBlock[]           @relation("MessageBlocker")
+  messageBlocksReceived   MessageBlock[]           @relation("MessageBlockedUser")
   timeAdjustments         TimeAdjustmentRequest[]
   certifications          UserCertification[]
   userSettings            UserSettings?
@@ -151,6 +153,19 @@ model WorkerManagerMap {
   worker    User   @relation("WorkerManager", fields: [workerId], references: [id])
 
   @@map("worker_manager_map")
+}
+
+model MessageBlock {
+  id            String   @id @default(uuid()) @db.Uuid
+  blockerId     String   @map("blocker_id") @db.Uuid
+  blockedUserId String   @map("blocked_user_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  blocker       User     @relation("MessageBlocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedUser   User     @relation("MessageBlockedUser", fields: [blockedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedUserId])
+  @@map("message_blocks")
 }
 
 model EmergencyContact {

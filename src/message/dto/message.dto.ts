@@ -97,6 +97,11 @@ export class StartSupportThreadDto {
   targetUserId?: string;
 }
 
+export class BlockUserDto {
+  @IsUUID()
+  targetUserId!: string;
+}
+
 export class AdminSendMessageDto {
   @IsUUID()
   threadId!: string;

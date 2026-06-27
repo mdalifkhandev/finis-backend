@@ -22,7 +22,6 @@ This module handles direct chat, support chat, notifications, and websocket deli
   - Can message `manager`.
   - Can reply in an existing admin-to-worker thread.
   - Cannot start a new direct chat with `admin`.
-  - Cannot block users.
   - Search shows only `manager`.
   - Existing direct chat threads with `admin` remain visible if the admin already started the conversation.
 
@@ -36,6 +35,9 @@ This module handles direct chat, support chat, notifications, and websocket deli
 - `GET /messages/threads/:threadId/messages`
 - `POST /messages/send`
 - `POST /messages/upload`
+- `POST /messages/block`
+- `POST /messages/unblock`
+- `GET /messages/blocked`
 
 ## Super Admin Endpoints
 
@@ -66,6 +68,9 @@ This module handles direct chat, support chat, notifications, and websocket deli
 - `super_admin` can only send messages in support threads.
 - `worker` can only start chats with `manager`.
 - `worker` can reply to an existing admin-created chat, but cannot initiate a new one with `admin`.
+- `block/unblock` rules:
+  - `admin` can block/unblock `manager` and `worker`.
+  - `manager` can block/unblock `worker`.
 - Notifications are sent to unread thread participants after each message.
 
 ## Search Rules

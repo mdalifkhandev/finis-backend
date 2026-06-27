@@ -24,6 +24,7 @@ import {
   AddParticipantDto,
   StartSupportThreadDto,
   AdminSendMessageDto,
+  BlockUserDto,
 } from './dto/message.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -207,6 +208,50 @@ export class MessageController {
     @Request() req: any,
   ) {
     return this.messageService.deleteMessage(messageId, req.user.id);
+  }
+
+  // ═════════════════════════════════════════════
+  // BLOCK / UNBLOCK
+  // ═════════════════════════════════════════════
+
+  /**
+   * POST /messages/block
+   * Role rules:
+   * - admin: manager, worker
+   * - manager: worker
+   */
+  @Post('block')
+  @Roles('admin', 'manager', 'worker')
+  blockUser(
+    @Request() req: any,
+    @Body() dto: BlockUserDto,
+  ) {
+    return this.messageService.blockUser(req.user.id, dto);
+  }
+
+  /**
+   * POST /messages/unblock
+   * Role rules:
+   * - admin: manager, worker
+   * - manager: worker
+   */
+  @Post('unblock')
+  @Roles('admin', 'manager', 'worker')
+  unblockUser(
+    @Request() req: any,
+    @Body() dto: BlockUserDto,
+  ) {
+    return this.messageService.unblockUser(req.user.id, dto);
+  }
+
+  /**
+   * GET /messages/blocked
+   * নিজের blocked users list
+   */
+  @Get('blocked')
+  @Roles('admin', 'manager', 'worker')
+  getBlockedUsers(@Request() req: any) {
+    return this.messageService.getBlockedUsers(req.user.id);
   }
 
   // ═════════════════════════════════════════════

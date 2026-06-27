@@ -14,6 +14,7 @@ import {
   MessageQueryDto,
   AddParticipantDto,
   AdminSendMessageDto,
+  BlockUserDto,
 } from './dto/message.dto';
 
 @Injectable()
@@ -34,6 +35,43 @@ export class MessageService {
     };
 
     return allowed[senderRole]?.includes(targetRole) ?? false;
+  }
+
+  private canBlockTarget(blockerRole?: string, targetRole?: string) {
+    if (!blockerRole || !targetRole) return false;
+    if (blockerRole === 'admin') {
+      return targetRole === 'manager' || targetRole === 'worker';
+    }
+    if (blockerRole === 'manager') {
+      return targetRole === 'worker';
+    }
+    return false;
+  }
+
+  private async isBlockedBetween(userA: string, userB: string) {
+    const block = await this.prisma.messageBlock.findFirst({
+      where: {
+        OR: [
+          { blockerId: userA, blockedUserId: userB },
+          { blockerId: userB, blockedUserId: userA },
+        ],
+      },
+      select: { id: true },
+    });
+    return !!block;
+  }
+
+  private async getBlockedUserIds(userId: string) {
+    const rows = await this.prisma.messageBlock.findMany({
+      where: {
+        OR: [{ blockerId: userId }, { blockedUserId: userId }],
+      },
+      select: { blockerId: true, blockedUserId: true },
+    });
+
+    return new Set(
+      rows.map((row) => (row.blockerId === userId ? row.blockedUserId : row.blockerId)),
+    );
   }
 
   private async getProjectScopedContacts(userId: string, userRole: string) {
@@ -160,7 +198,9 @@ export class MessageService {
 
   async getChatContacts(userId: string, userRole: string, search?: string) {
     const contacts = await this.getProjectScopedContacts(userId, userRole);
+    const blockedUserIds = await this.getBlockedUserIds(userId);
     const filtered = contacts.filter((user) => {
+      if (blockedUserIds.has(user.id)) return false;
       if (!search) return true;
       return [user.fullName, user.role].some((value) =>
         String(value ?? '').toLowerCase().includes(search.toLowerCase()),
@@ -210,6 +250,7 @@ export class MessageService {
     const { search } = query;
     const allowedContacts = await this.getProjectScopedContacts(userId, userRole);
     const allowedContactIds = new Set(allowedContacts.map((contact) => contact.id));
+    const blockedUserIds = await this.getBlockedUserIds(userId);
 
     const threads = await this.prisma.messageThread.findMany({
       where: {
@@ -240,6 +281,7 @@ export class MessageService {
         const others = thread.participants.filter((p) => p.userId !== userId);
         return others.every((p) => {
           if (p.user.role === 'super_admin') return false;
+          if (blockedUserIds.has(p.userId)) return false;
           if (userRole === 'worker' && p.user.role === 'admin') {
             return true;
           }
@@ -438,6 +480,10 @@ export class MessageService {
     const allowedContacts = await this.getProjectScopedContacts(userId, sender?.role ?? '');
     if (!allowedContacts.some((contact) => contact.id === dto.targetUserId)) {
       throw new ForbiddenException('You can only chat with users from your assigned project');
+    }
+
+    if (await this.isBlockedBetween(userId, dto.targetUserId)) {
+      throw new ForbiddenException('You cannot start a chat with this user');
     }
 
     const existing = await this.prisma.messageThread.findFirst({
@@ -776,6 +822,15 @@ export class MessageService {
     });
     if (!thread) throw new NotFoundException('Thread not found');
 
+    const otherParticipantIds = thread.participants
+      .filter((p) => p.userId !== senderId)
+      .map((p) => p.userId);
+    for (const otherId of otherParticipantIds) {
+      if (await this.isBlockedBetween(senderId, otherId)) {
+        throw new ForbiddenException('You cannot send messages to this user');
+      }
+    }
+
     // super_admin can only send in support threads.
     if (sender?.role === 'super_admin') {
       const otherParticipants = thread?.participants.filter((p) => p.userId !== senderId);
@@ -894,6 +949,58 @@ export class MessageService {
       thread!.participants.map((participant) => participant.userId),
     );
     return message;
+  }
+
+  async blockUser(blockerId: string, dto: BlockUserDto) {
+    if (blockerId === dto.targetUserId) {
+      throw new BadRequestException('Cannot block yourself');
+    }
+
+    const [blocker, target] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: blockerId }, select: { role: true } }),
+      this.prisma.user.findUnique({ where: { id: dto.targetUserId }, select: { role: true } }),
+    ]);
+
+    if (!this.canBlockTarget(blocker?.role, target?.role)) {
+      throw new ForbiddenException('You cannot block this user');
+    }
+
+    return this.prisma.messageBlock.upsert({
+      where: {
+        blockerId_blockedUserId: {
+          blockerId,
+          blockedUserId: dto.targetUserId,
+        },
+      },
+      update: {},
+      create: {
+        blockerId,
+        blockedUserId: dto.targetUserId,
+      },
+    });
+  }
+
+  async unblockUser(blockerId: string, dto: BlockUserDto) {
+    return this.prisma.messageBlock.deleteMany({
+      where: {
+        blockerId,
+        blockedUserId: dto.targetUserId,
+      },
+    });
+  }
+
+  async getBlockedUsers(userId: string) {
+    const rows = await this.prisma.messageBlock.findMany({
+      where: { blockerId: userId },
+      include: {
+        blockedUser: {
+          select: { id: true, fullName: true, avatarUrl: true, role: true, status: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return rows.map((row) => row.blockedUser);
   }
 
   private async notifyUnreadThreadParticipants(
