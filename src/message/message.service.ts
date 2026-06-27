@@ -36,6 +36,117 @@ export class MessageService {
     return allowed[senderRole]?.includes(targetRole) ?? false;
   }
 
+  private async getProjectScopedContacts(userId: string, userRole: string) {
+    if (userRole === 'super_admin') {
+      return [];
+    }
+
+    const projects = await this.prisma.project.findMany({
+      where:
+        userRole === 'admin'
+          ? { company: { ownerId: userId } }
+          : {
+              teamMembers: {
+                some:
+                  userRole === 'manager'
+                    ? { userId, role: 'manager' }
+                    : { userId, role: 'worker' },
+              },
+            },
+      select: {
+        id: true,
+        companyId: true,
+        managerId: true,
+        company: { select: { ownerId: true } },
+        teamMembers: {
+          select: {
+            userId: true,
+            role: true,
+            user: {
+              select: { id: true, fullName: true, avatarUrl: true, role: true, status: true },
+            },
+          },
+        },
+      },
+    });
+
+    const contactMap = new Map<string, any>();
+
+    const addContact = (user: any, projectId: string) => {
+      if (!user || user.id === userId) return;
+      const current = contactMap.get(user.id);
+      if (current) {
+        current.projectIds.add(projectId);
+        return;
+      }
+      contactMap.set(user.id, {
+        ...user,
+        projectIds: new Set([projectId]),
+      });
+    };
+
+    for (const project of projects) {
+      if (userRole === 'admin') {
+        for (const member of project.teamMembers) {
+          if (member.role === 'manager' || member.role === 'worker') {
+            addContact(member.user, project.id);
+          }
+        }
+      }
+
+      if (userRole === 'manager') {
+        const owner = await this.prisma.user.findUnique({
+          where: { id: project.company.ownerId },
+          select: { id: true, fullName: true, avatarUrl: true, role: true, status: true },
+        });
+        addContact(owner, project.id);
+        for (const member of project.teamMembers) {
+          if (member.role === 'manager' || member.role === 'worker') {
+            addContact(member.user, project.id);
+          }
+        }
+      }
+
+      if (userRole === 'worker') {
+        const managerIds = [
+          project.managerId,
+          ...(await this.prisma.workerManagerMap.findMany({
+            where: { workerId: userId },
+            select: { managerId: true },
+          })).map((item) => item.managerId),
+          ...project.teamMembers
+            .filter((member) => member.role === 'manager')
+            .map((member) => member.userId),
+        ].filter(Boolean) as string[];
+
+        const uniqueManagerIds = [...new Set(managerIds)];
+        const managers = await this.prisma.user.findMany({
+          where: { id: { in: uniqueManagerIds } },
+          select: { id: true, fullName: true, avatarUrl: true, role: true, status: true },
+        });
+
+        managers
+          .filter((manager) => manager.role === 'manager')
+          .forEach((manager) => addContact(manager, project.id));
+
+        for (const member of project.teamMembers) {
+          if (member.role === 'worker') {
+            addContact(member.user, project.id);
+          }
+        }
+      }
+    }
+
+    return [...contactMap.values()].map((contact) => ({
+      id: contact.id,
+      fullName: contact.fullName,
+      avatarUrl: contact.avatarUrl,
+      role: contact.role,
+      status: contact.status,
+      projectIds: [...contact.projectIds],
+    }));
+  }
+
   private getPresence(userId: string, lastActiveAt?: Date | null) {
     return {
       isOnline: onlineUsers.has(userId),
@@ -48,35 +159,15 @@ export class MessageService {
   // ─────────────────────────────────────────────
 
   async getChatContacts(userId: string, userRole: string, search?: string) {
-    const roleFilter: Record<string, any> = {
-      admin: { in: ['manager', 'worker'] },
-      manager: { in: ['admin', 'worker'] },
-      worker: { in: ['manager'] },
-    };
-
-    const contacts = await this.prisma.user.findMany({
-      where: {
-        id: { not: userId },
-        status: 'active',
-        role: roleFilter[userRole] ?? { notIn: ['super_admin'] },
-        ...(search && {
-          OR: [
-            { fullName: { contains: search, mode: 'insensitive' } },
-            { email: { contains: search, mode: 'insensitive' } },
-          ],
-        }),
-      },
-      select: {
-        id: true,
-        fullName: true,
-        avatarUrl: true,
-        role: true,
-        status: true,
-      },
-      orderBy: { fullName: 'asc' },
+    const contacts = await this.getProjectScopedContacts(userId, userRole);
+    const filtered = contacts.filter((user) => {
+      if (!search) return true;
+      return [user.fullName, user.role].some((value) =>
+        String(value ?? '').toLowerCase().includes(search.toLowerCase()),
+      );
     });
 
-    return contacts.map((user) => ({
+    return filtered.map((user) => ({
       ...user,
       ...this.getPresence(user.id, null),
     }));
@@ -115,8 +206,10 @@ export class MessageService {
   // USER — CHAT THREADS (user-to-user, no super_admin)
   // ─────────────────────────────────────────────
 
-  async getUserChatThreads(userId: string, query: ThreadQueryDto) {
+  async getUserChatThreads(userId: string, userRole: string, query: ThreadQueryDto) {
     const { search } = query;
+    const allowedContacts = await this.getProjectScopedContacts(userId, userRole);
+    const allowedContactIds = new Set(allowedContacts.map((contact) => contact.id));
 
     const threads = await this.prisma.messageThread.findMany({
       where: {
@@ -145,7 +238,13 @@ export class MessageService {
       .filter((thread) => {
         // শুধু user-to-user thread — কোনো super_admin নেই
         const others = thread.participants.filter((p) => p.userId !== userId);
-        return others.every((p) => p.user.role !== 'super_admin');
+        return others.every((p) => {
+          if (p.user.role === 'super_admin') return false;
+          if (userRole === 'worker' && p.user.role === 'admin') {
+            return true;
+          }
+          return allowedContactIds.has(p.userId);
+        });
       })
       .filter((thread) => {
         if (!search) return true;
@@ -317,22 +416,28 @@ export class MessageService {
       throw new BadRequestException('Cannot create a thread with yourself');
     }
 
-    const targetUser = await this.prisma.user.findUnique({
-      where: { id: dto.targetUserId },
-      select: { role: true },
-    });
+    const [targetUser, sender] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: dto.targetUserId },
+        select: { role: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      }),
+    ]);
 
     if (targetUser?.role === 'super_admin') {
       throw new ForbiddenException('Use the Support tab to contact the administrator');
     }
 
-    const sender = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { role: true },
-    });
-
     if (!this.isDirectChatAllowed(sender?.role, targetUser?.role)) {
       throw new ForbiddenException('You cannot start a direct chat with this user');
+    }
+
+    const allowedContacts = await this.getProjectScopedContacts(userId, sender?.role ?? '');
+    if (!allowedContacts.some((contact) => contact.id === dto.targetUserId)) {
+      throw new ForbiddenException('You can only chat with users from your assigned project');
     }
 
     const existing = await this.prisma.messageThread.findFirst({
@@ -696,10 +801,6 @@ export class MessageService {
       if (!hasManagerParticipant && !hasAdminParticipant) {
         throw new ForbiddenException('Workers can only chat with managers');
       }
-
-      if (hasAdminParticipant && otherParticipants.length === 1) {
-        throw new ForbiddenException('Workers can only reply to an existing admin chat');
-      }
     }
 
 
@@ -725,8 +826,12 @@ export class MessageService {
       senderId,
       message.sender?.fullName ?? 'New message',
       message.content ?? (locationUrl ? 'Shared a location' : ''),
+      thread.participants.map((participant) => participant.userId),
     );
-    return message;
+    return {
+      message,
+      participantIds: thread.participants.map((participant) => participant.userId),
+    };
   }
 
   // ─────────────────────────────────────────────
@@ -786,6 +891,7 @@ export class MessageService {
       adminId,
       message.sender?.fullName ?? 'New message',
       message.content ?? (locationUrl ? 'Shared a location' : ''),
+      thread!.participants.map((participant) => participant.userId),
     );
     return message;
   }
@@ -795,28 +901,14 @@ export class MessageService {
     senderId: string,
     senderName: string,
     preview: string,
+    recipientIds?: string[],
   ) {
-    const thread = await this.prisma.messageThread.findUnique({
-      where: { id: threadId },
-      include: {
-        participants: {
-          include: {
-            user: {
-              select: { id: true, fullName: true, role: true },
-            },
-          },
-        },
-      },
-    });
-
-    const recipients = thread?.participants
-      .map((participant) => participant.user)
-      .filter((user) => user.id !== senderId) ?? [];
+    const recipients = recipientIds?.filter((userId) => userId !== senderId) ?? [];
 
     await Promise.all(
       recipients.map((recipient) =>
         this.notificationsService.send({
-          userId: recipient.id,
+          userId: recipient,
           title: senderName,
           body: preview.slice(0, 120) || 'Sent you a message',
           type: 'message',

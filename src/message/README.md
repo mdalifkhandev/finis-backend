@@ -24,6 +24,7 @@ This module handles direct chat, support chat, notifications, and websocket deli
   - Cannot start a new direct chat with `admin`.
   - Cannot block users.
   - Search shows only `manager`.
+  - Existing direct chat threads with `admin` remain visible if the admin already started the conversation.
 
 ## REST Endpoints
 
@@ -69,6 +70,7 @@ This module handles direct chat, support chat, notifications, and websocket deli
 
 ## Search Rules
 
-- Search visibility follows the same role rules as direct chat contacts.
+- Search results for contacts follow role and project scope rules.
+- `worker` contact search shows only `manager`.
+- `worker` chat threads can still show an existing `admin` conversation if it was started by `admin` earlier.
 - `super_admin` is excluded from regular direct chat search results.
-

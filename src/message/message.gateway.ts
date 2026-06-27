@@ -69,6 +69,7 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
         } else {
           const chatThreads = await this.messageService.getUserChatThreads(
             client.data.userId,
+            client.data.role,
             {},
           );
           for (const thread of chatThreads.data) {

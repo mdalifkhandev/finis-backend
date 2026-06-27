@@ -80,7 +80,7 @@ export class MessageController {
     @Request() req: any,
     @Query() query: ThreadQueryDto,
   ) {
-    return this.messageService.getUserChatThreads(req.user.id, query);
+    return this.messageService.getUserChatThreads(req.user.id, req.user.role, query);
   }
 
   /**
@@ -156,16 +156,15 @@ export class MessageController {
     @Request() req: any,
     @Body() dto: SendMessageDto,
   ) {
-    return this.messageService.sendMessage(req.user.id, dto).then(async (message) => {
-      const thread = await this.messageService.getThreadById(dto.threadId, req.user.id);
-      const participantIds = thread.participants?.map((participant: any) => participant.userId) ?? [];
+    return this.messageService.sendMessage(req.user.id, dto).then(async (result: any) => {
+      const participantIds = result.participantIds ?? [];
       this.messageGateway.joinOnlineParticipantsToThread(dto.threadId, participantIds);
-      this.messageGateway.emitToThread(dto.threadId, 'message:new', message, participantIds);
+      this.messageGateway.emitToThread(dto.threadId, 'message:new', result.message, participantIds);
       this.messageGateway.emitToThread(dto.threadId, 'thread:updated', {
         threadId: dto.threadId,
-        lastMessage: message,
+        lastMessage: result.message,
       }, participantIds);
-      return message;
+      return result.message;
     });
   }
 
