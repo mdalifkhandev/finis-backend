@@ -7,6 +7,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { v4 as uuidv4 } from 'uuid';
 import { extname } from 'path';
+import sharp from 'sharp';
 
 @Injectable()
 export class S3Service {
@@ -31,15 +32,28 @@ export class S3Service {
         file: Express.Multer.File,
         folder: string = 'uploads',
     ): Promise<string> {
-        const ext = extname(file.originalname);
+        const isImage = file.mimetype.startsWith('image/');
+        const optimizedBuffer = isImage
+            ? await sharp(file.buffer)
+                .resize({
+                    width: 1600,
+                    height: 1600,
+                    fit: 'inside',
+                    withoutEnlargement: true,
+                })
+                .webp({ quality: 80 })
+                .toBuffer()
+            : file.buffer;
+        const ext = isImage ? '.webp' : extname(file.originalname);
+        const contentType = isImage ? 'image/webp' : file.mimetype;
         const key = `${folder}/${uuidv4()}${ext}`;
 
         await this.s3.send(
             new PutObjectCommand({
                 Bucket: this.bucket,
                 Key: key,
-                Body: file.buffer,
-                ContentType: file.mimetype,
+                Body: optimizedBuffer,
+                ContentType: contentType,
             }),
         );
 
