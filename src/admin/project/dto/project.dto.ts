@@ -185,7 +185,31 @@ export class CreateProjectDto {
   @IsNumber()
   @Min(0)
   @Type(() => Number)
-  roomsPerFloor?: number;
+  numFloorsMin?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  numFloorsMax?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  unitPerFloor?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  unitPerFloorMin?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  unitPerFloorMax?: number;
 
 
 
@@ -257,7 +281,31 @@ export class UpdateProjectDto {
   @IsNumber()
   @Min(0)
   @Type(() => Number)
-  roomsPerFloor?: number;
+  numFloorsMin?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  numFloorsMax?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  unitPerFloor?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  unitPerFloorMin?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  unitPerFloorMax?: number;
 
   @IsOptional()
   @IsNumber()

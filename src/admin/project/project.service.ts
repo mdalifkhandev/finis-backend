@@ -31,6 +31,31 @@ export class ProjectService {
     return [...new Set(sections.map((s) => s.trim().toLowerCase()).filter(Boolean))];
   }
 
+  private normalizeRange(min?: number, max?: number) {
+    if (min === undefined && max === undefined) return { min: undefined, max: undefined };
+    if (min !== undefined && max !== undefined && min > max) {
+      throw new BadRequestException('Minimum value cannot be greater than maximum value.');
+    }
+    return { min, max };
+  }
+
+  private buildAutoFloorUnits(floorNumber: number, unitMin?: number | null, unitMax?: number | null) {
+    const startSuffix = unitMin !== undefined && unitMin !== null ? unitMin % 100 : 1;
+    const endSuffix = unitMax !== undefined && unitMax !== null ? unitMax % 100 : startSuffix;
+    if (startSuffix > endSuffix) {
+      throw new BadRequestException('Unit minimum cannot be greater than unit maximum.');
+    }
+
+    return Array.from({ length: endSuffix - startSuffix + 1 }, (_, index) => {
+      const unitNumber = floorNumber * 100 + startSuffix + index;
+      return {
+        name: String(unitNumber),
+        status: 'pending' as const,
+        progress: 0,
+      };
+    });
+  }
+
   private validateHouseSetup(type: ProjectType | null | undefined, isWholeHouse: boolean, houseSections: string[]) {
     if (type !== ProjectType.house) {
       return { isWholeHouse: false, houseSections: [] as string[] };
@@ -437,6 +462,10 @@ export class ProjectService {
       dto.isWholeHouse ?? false,
       normalizedSections,
     );
+    const numFloorsRange = this.normalizeRange(dto.numFloorsMin, dto.numFloorsMax);
+    const unitRange = this.normalizeRange(dto.unitPerFloorMin, dto.unitPerFloorMax);
+    const numFloorsValue = dto.numFloors ?? numFloorsRange.max ?? numFloorsRange.min ?? null;
+    const unitPerFloorValue = dto.unitPerFloor ?? unitRange.max ?? unitRange.min ?? null;
 
     const project = await this.prisma.project.create({
       data: {
@@ -449,8 +478,12 @@ export class ProjectService {
         budget: dto.budget,
         location: dto.location,
         description: dto.description,
-        numFloors: dto.numFloors,
-        roomsPerFloor: dto.roomsPerFloor,
+        ...(numFloorsValue !== null && { numFloors: numFloorsValue }),
+        ...(numFloorsRange.min !== undefined && { numFloorsMin: numFloorsRange.min }),
+        ...(numFloorsRange.max !== undefined && { numFloorsMax: numFloorsRange.max }),
+        ...(unitPerFloorValue !== null && { roomsPerFloor: unitPerFloorValue, unitPerFloor: unitPerFloorValue }),
+        ...(unitRange.min !== undefined && { unitPerFloorMin: unitRange.min }),
+        ...(unitRange.max !== undefined && { unitPerFloorMax: unitRange.max }),
         ...(dto.priority !== undefined && { priority: dto.priority }),
         isWholeHouse: houseSetup.isWholeHouse,
         houseSections: houseSetup.houseSections,
@@ -473,8 +506,10 @@ export class ProjectService {
       refId: project.id,
     });
 
-    if (dto.autoGenerateFloors && dto.numFloors && dto.roomsPerFloor) {
-      for (let f = 1; f <= dto.numFloors; f++) {
+    if (dto.autoGenerateFloors && numFloorsValue && unitPerFloorValue) {
+      const floorStart = numFloorsRange.min ?? 1;
+      const floorEnd = numFloorsRange.max ?? numFloorsValue;
+      for (let f = floorStart; f <= floorEnd; f++) {
         const floor = await this.prisma.floor.create({
           data: {
             projectId: project.id,
@@ -484,11 +519,9 @@ export class ProjectService {
           },
         });
         await this.prisma.room.createMany({
-          data: Array.from({ length: dto.roomsPerFloor }, (_, r) => ({
+          data: this.buildAutoFloorUnits(f, unitRange.min, unitRange.max).map((unit) => ({
             floorId: floor.id,
-            name: `Room ${r + 1}`,
-            status: 'pending' as const,
-            progress: 0,
+            ...unit,
           })),
         });
       }
@@ -563,7 +596,12 @@ export class ProjectService {
       location: project.location,
       description: project.description,
       numFloors: project.numFloors,
+      numFloorsMin: (project as any).numFloorsMin,
+      numFloorsMax: (project as any).numFloorsMax,
       roomsPerFloor: project.roomsPerFloor,
+      unitPerFloor: (project as any).unitPerFloor ?? project.roomsPerFloor,
+      unitPerFloorMin: (project as any).unitPerFloorMin,
+      unitPerFloorMax: (project as any).unitPerFloorMax,
       budget: project.budget,
       spent: project.spent,
       remaining: project.remaining,
@@ -603,6 +641,10 @@ export class ProjectService {
     const nextSectionsSource = dto.houseSections ?? existingProject?.houseSections ?? [];
     const normalizedSections = this.normalizeHouseSections(nextSectionsSource);
     const houseSetup = this.validateHouseSetup(nextType, nextIsWholeHouse, normalizedSections);
+    const nextNumFloorsRange = this.normalizeRange(dto.numFloorsMin, dto.numFloorsMax);
+    const nextUnitRange = this.normalizeRange(dto.unitPerFloorMin, dto.unitPerFloorMax);
+    const nextNumFloors = dto.numFloors ?? nextNumFloorsRange.max ?? nextNumFloorsRange.min ?? null;
+    const nextUnitPerFloor = dto.unitPerFloor ?? nextUnitRange.max ?? nextUnitRange.min ?? null;
 
     // Prepare update payload
     const updateData: any = {
@@ -621,8 +663,12 @@ export class ProjectService {
       ...(dto.status && { status: dto.status }),
       ...(dto.startDate && { startDate: new Date(dto.startDate) }),
       ...(dto.endDate && { endDate: new Date(dto.endDate) }),
-      ...(dto.numFloors !== undefined && { numFloors: dto.numFloors }),
-      ...(dto.roomsPerFloor !== undefined && { roomsPerFloor: dto.roomsPerFloor }),
+      ...(nextNumFloors !== null && { numFloors: nextNumFloors }),
+      ...(nextNumFloorsRange.min !== undefined && { numFloorsMin: nextNumFloorsRange.min }),
+      ...(nextNumFloorsRange.max !== undefined && { numFloorsMax: nextNumFloorsRange.max }),
+      ...(nextUnitPerFloor !== null && { roomsPerFloor: nextUnitPerFloor, unitPerFloor: nextUnitPerFloor }),
+      ...(nextUnitRange.min !== undefined && { unitPerFloorMin: nextUnitRange.min }),
+      ...(nextUnitRange.max !== undefined && { unitPerFloorMax: nextUnitRange.max }),
       ...(dto.budget !== undefined && { budget: dto.budget }),
       ...(dto.spent !== undefined && { spent: dto.spent }),
       ...(dto.location && { location: dto.location }),
@@ -640,22 +686,21 @@ export class ProjectService {
 
     // Handle floor-plan updates: either auto-generate or replace with provided floors
     // If requested, remove existing floors and recreate according to payload
-    if (dto.autoGenerateFloors && dto.numFloors && dto.roomsPerFloor) {
+    if (dto.autoGenerateFloors && nextNumFloors && nextUnitPerFloor) {
       // wipe existing floors
       await this.prisma.floor.deleteMany({ where: { projectId } });
 
-      for (let i = 0; i < dto.numFloors; i++) {
-        const rooms = [] as any[];
-        for (let j = 0; j < dto.roomsPerFloor; j++) {
-          rooms.push({ name: `Room ${j + 1}`, status: 'pending', progress: 0 });
-        }
+      const floorStart = nextNumFloorsRange.min ?? 1;
+      const floorEnd = nextNumFloorsRange.max ?? nextNumFloors;
+      for (let floorNumber = floorStart; floorNumber <= floorEnd; floorNumber++) {
+        const units = this.buildAutoFloorUnits(floorNumber, nextUnitRange.min, nextUnitRange.max);
         await this.prisma.floor.create({
           data: {
             projectId,
-            name: `Floor ${i + 1}`,
-            floorNumber: i + 1,
+            name: floorNumber === 1 ? 'Ground Floor' : `Floor ${floorNumber}`,
+            floorNumber,
             status: 'pending',
-            rooms: { create: rooms },
+            rooms: { create: units },
           },
         });
       }
@@ -722,14 +767,14 @@ export class ProjectService {
       floorNumber: floor.floorNumber,
       status: floor.status,
       progress: floor.progress,
-      totalRooms: floor.rooms.length,
+      totalUnits: floor.rooms.length,
       taskCounts: {
         total: floor.tasks.length,
         completed: floor.tasks.filter((t) => t.status === 'completed').length,
         inProgress: floor.tasks.filter((t) => t.status === 'in_progress').length,
         notStarted: floor.tasks.filter((t) => t.status === 'pending').length,
       },
-      rooms: floor.rooms.map((room) => ({
+      units: floor.rooms.map((room) => ({
         id: room.id,
         name: room.name,
         type: room.type,
@@ -947,7 +992,7 @@ export class ProjectService {
     return { message: 'Floor deleted successfully' };
   }
 
-  // ─── ROOMS CRUD ────────────────────────────────────────────────────────────
+  // ─── UNITS CRUD ────────────────────────────────────────────────────────────
   async addRoom(projectId: string, floorId: string, dto: AddRoomDto, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
     const floor = await this.prisma.floor.findUnique({ where: { id: floorId } });
@@ -960,7 +1005,7 @@ export class ProjectService {
       const match = trimmed.match(/^(.*?)(\d+)$/);
 
       if (!match) {
-        throw new BadRequestException('Room number must end with digits, like A1 or Y20');
+        throw new BadRequestException('Unit number must end with digits, like A1 or Y20');
       }
 
       return {
@@ -973,18 +1018,18 @@ export class ProjectService {
     const end = parseRoomLabel(dto.endRoomNumber);
 
     if (start.prefix !== end.prefix) {
-      throw new BadRequestException('Start and end room prefix must be the same');
+      throw new BadRequestException('Start and end unit prefix must be the same');
     }
 
     const from = Math.min(start.number, end.number);
     const to = Math.max(start.number, end.number);
 
     if (from < 1) {
-      throw new BadRequestException('Room number must start from 1 or greater');
+      throw new BadRequestException('Unit number must start from 1 or greater');
     }
 
     if (to - from + 1 > 200) {
-      throw new BadRequestException('Too many rooms requested');
+      throw new BadRequestException('Too many units requested');
     }
 
     const roomsData = Array.from({ length: to - from + 1 }, (_, index) => {
@@ -1001,7 +1046,7 @@ export class ProjectService {
 
     await this.syncFloorAndProjectStatus(projectId, floorId);
 
-    return { message: `${roomsData.length} rooms created` };
+    return { message: `${roomsData.length} units created` };
   }
 
   async getRoomNames(projectId: string, floorId: string, userId: string, userRole: string) {
@@ -1041,7 +1086,7 @@ export class ProjectService {
       where: { id: roomId, floor: { projectId } },
       select: { id: true, floorId: true },
     });
-    if (!room) throw new NotFoundException('Room not found');
+    if (!room) throw new NotFoundException('Unit not found');
 
     const updatedRoom = await this.prisma.room.update({
       where: { id: roomId },
@@ -1065,12 +1110,12 @@ export class ProjectService {
       where: { id: roomId, floor: { projectId } },
       select: { id: true, floorId: true },
     });
-    if (!room) throw new NotFoundException('Room not found');
+    if (!room) throw new NotFoundException('Unit not found');
     await this.prisma.room.delete({ where: { id: roomId } });
 
     await this.syncFloorAndProjectStatus(projectId, room.floorId);
 
-    return { message: 'Room deleted successfully' };
+    return { message: 'Unit deleted successfully' };
   }
 
 

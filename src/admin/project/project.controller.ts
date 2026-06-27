@@ -220,10 +220,10 @@ export class ProjectController {
     return this.projectService.deleteFloor(id, floorId, userId, userRole);
   }
 
-  // ─── ROOMS ─────────────────────────────────────────────────────────────────
+  // ─── UNITS ────────────────────────────────────────────────────────────────
 
-  /** POST /admin/projects/:id/floors/:floorId/rooms */
-  @Post(':id/floors/:floorId/rooms')
+  /** POST /admin/projects/:id/floors/:floorId/units */
+  @Post(':id/floors/:floorId/units')
   addRoom(
     @Param('id') id: string,
     @Param('floorId') floorId: string,
@@ -234,10 +234,10 @@ export class ProjectController {
     return this.projectService.addRoom(id, floorId, dto, userId, userRole);
   }
 
-  /** GET /admin/projects/:id/floors/:floorId/rooms
-   *  Returns: room names only
+  /** GET /admin/projects/:id/floors/:floorId/units
+   *  Returns: unit names only
    */
-  @Get(':id/floors/:floorId/rooms')
+  @Get(':id/floors/:floorId/units')
   getRoomNames(
     @Param('id') id: string,
     @Param('floorId') floorId: string,
@@ -247,8 +247,8 @@ export class ProjectController {
     return this.projectService.getRoomNames(id, floorId, userId, userRole);
   }
 
-  /** PUT /admin/projects/:id/rooms/:roomId */
-  @Put(':id/rooms/:roomId')
+  /** PUT /admin/projects/:id/units/:roomId */
+  @Put(':id/units/:roomId')
   updateRoom(
     @Param('id') id: string,
     @Param('roomId') roomId: string,
@@ -259,8 +259,8 @@ export class ProjectController {
     return this.projectService.updateRoom(id, roomId, dto, userId, userRole);
   }
 
-  /** DELETE /admin/projects/:id/rooms/:roomId */
-  @Delete(':id/rooms/:roomId')
+  /** DELETE /admin/projects/:id/units/:roomId */
+  @Delete(':id/units/:roomId')
   deleteRoom(
     @Param('id') id: string,
     @Param('roomId') roomId: string,
