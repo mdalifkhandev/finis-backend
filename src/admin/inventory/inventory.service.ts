@@ -87,12 +87,45 @@ export class InventoryService {
 
   async getProjectList(user: AuthUser) {
     const scope = await this.getProjectScope(user);
-
-    return this.prisma.project.findMany({
+    const projects = await this.prisma.project.findMany({
       where:   scope,
-      select:  { id: true, name: true },
+      select:  { id: true, name: true, location: true },
       orderBy: { name: 'asc' },
     });
+
+    const inventoryByProject = await this.prisma.inventoryItem.findMany({
+      where: { project: scope },
+      select: {
+        projectId: true,
+        category: true,
+        unit: true,
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const categories = new Map<string, string>();
+    const units = new Map<string, string>();
+
+    for (const item of inventoryByProject) {
+      const category = item.category?.trim();
+      const unit = item.unit?.trim();
+
+      if (category) {
+        const key = category.toLowerCase();
+        if (!categories.has(key)) categories.set(key, category);
+      }
+
+      if (unit) {
+        const key = unit.toLowerCase();
+        if (!units.has(key)) units.set(key, unit);
+      }
+    }
+
+    return {
+      projects,
+      category: [...categories.values()],
+      unit: [...units.values()],
+    };
   }
 
   // ════════════════════════════════════════════

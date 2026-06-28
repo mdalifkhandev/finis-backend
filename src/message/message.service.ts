@@ -61,19 +61,6 @@ export class MessageService {
     return !!block;
   }
 
-  private async getBlockedUserIds(userId: string) {
-    const rows = await this.prisma.messageBlock.findMany({
-      where: {
-        OR: [{ blockerId: userId }, { blockedUserId: userId }],
-      },
-      select: { blockerId: true, blockedUserId: true },
-    });
-
-    return new Set(
-      rows.map((row) => (row.blockerId === userId ? row.blockedUserId : row.blockerId)),
-    );
-  }
-
   private async getProjectScopedContacts(userId: string, userRole: string) {
     if (userRole === 'super_admin') {
       return [];
@@ -198,9 +185,7 @@ export class MessageService {
 
   async getChatContacts(userId: string, userRole: string, search?: string) {
     const contacts = await this.getProjectScopedContacts(userId, userRole);
-    const blockedUserIds = await this.getBlockedUserIds(userId);
     const filtered = contacts.filter((user) => {
-      if (blockedUserIds.has(user.id)) return false;
       if (!search) return true;
       return [user.fullName, user.role].some((value) =>
         String(value ?? '').toLowerCase().includes(search.toLowerCase()),
@@ -250,7 +235,6 @@ export class MessageService {
     const { search } = query;
     const allowedContacts = await this.getProjectScopedContacts(userId, userRole);
     const allowedContactIds = new Set(allowedContacts.map((contact) => contact.id));
-    const blockedUserIds = await this.getBlockedUserIds(userId);
 
     const threads = await this.prisma.messageThread.findMany({
       where: {
@@ -281,7 +265,6 @@ export class MessageService {
         const others = thread.participants.filter((p) => p.userId !== userId);
         return others.every((p) => {
           if (p.user.role === 'super_admin') return false;
-          if (blockedUserIds.has(p.userId)) return false;
           if (userRole === 'worker' && p.user.role === 'admin') {
             return true;
           }
