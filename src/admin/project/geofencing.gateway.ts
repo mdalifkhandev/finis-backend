@@ -196,7 +196,7 @@ export class GeofencingGateway
           }
 
           console.log(
-            `✅ Super Admin joined ${projects.length} project rooms: ${user.fullName}`,
+            `✅ Super Admin joined ${projects.length} project units: ${user.fullName}`,
           );
         }
 

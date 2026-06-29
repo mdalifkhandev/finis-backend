@@ -26,11 +26,12 @@ import {
   UpdateTaskStatusDto,
   AssignTaskDto,
   ReviewTaskDto,
+  CreateSubTaskDto,
 } from './dto/task.dto';
 
 @Controller('admin/tasks')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.admin, UserRole.manager)
+@Roles(UserRole.admin, UserRole.manager, UserRole.super_admin)
 export class TaskController {
   constructor(
     private taskService: TaskService,
@@ -71,7 +72,7 @@ export class TaskController {
     return this.taskService.createTask(dto, userId, userRole);
   }
 
-  /** POST /admin/tasks/:id/assign — Worker assign করা (Manager পারবে) */
+  /** POST /admin/tasks/:id/assign — Worker assign করা (multiple unit support) */
   @Post(':id/assign')
   assignWorker(
     @Param('id') id: string,
@@ -82,6 +83,29 @@ export class TaskController {
     return this.taskService.assignWorker(id, dto, userId, userRole);
   }
 
+  /** POST /admin/tasks/:id/subtasks — sub task create */
+  @Post(':id/subtasks')
+  createSubTask(
+    @Param('id') id: string,
+    @Body() dto: CreateSubTaskDto,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.taskService.createSubTask(id, dto, userId, userRole);
+  }
+
+  /** PUT /admin/tasks/:id/subtasks/:subTaskId/approval — worker sub task approval */
+  @Put(':id/subtasks/:subTaskId/approval')
+  reviewSubTaskCreation(
+    @Param('id') id: string,
+    @Param('subTaskId') subTaskId: string,
+    @Body() dto: ReviewTaskDto,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.taskService.reviewSubTaskCreation(id, subTaskId, dto, userId, userRole);
+  }
+
   /** GET /admin/tasks/:id/available-workers */
   @Get(':id/available-workers')
   getAvailableWorkers(
@@ -89,8 +113,20 @@ export class TaskController {
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
     @Query('search') search?: string,
+    @Query('unitId') unitId?: string,
   ) {
-    return this.taskService.getAvailableWorkers(id, userId, userRole, search);
+    return this.taskService.getAvailableWorkers(id, userId, userRole, search, unitId);
+  }
+
+  /** PUT /admin/tasks/:id/approval — task creation approval/rejection */
+  @Put(':id/approval')
+  reviewTaskApproval(
+    @Param('id') id: string,
+    @Body() dto: ReviewTaskDto,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.taskService.reviewTaskApproval(id, dto, userId, userRole);
   }
 
   /** PUT /admin/tasks/:id/status — Manager পারবে */
@@ -130,6 +166,17 @@ export class TaskController {
     @CurrentUser('role') userRole: string,
   ) {
     return this.taskService.reviewTaskReport(id, reportId, dto, userId, userRole);
+  }
+
+  /** PUT /admin/tasks/:id/completion-review — final approval after all units complete */
+  @Put(':id/completion-review')
+  reviewTaskCompletion(
+    @Param('id') id: string,
+    @Body() dto: ReviewTaskDto,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.taskService.reviewTaskCompletion(id, dto, userId, userRole);
   }
 
   /** DELETE /admin/tasks/:id — Manager */

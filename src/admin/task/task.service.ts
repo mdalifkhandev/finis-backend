@@ -12,28 +12,177 @@ import {
   UpdateTaskStatusDto,
   AssignTaskDto,
   ReviewTaskDto,
+  CreateSubTaskDto,
 } from './dto/task.dto';
 import { UserRole } from '../../generated/prisma/client';
+
+type AuthUser = {
+  id: string;
+  role: string;
+  companyId?: string;
+};
+
+type PaginationInput = {
+  page?: number | string;
+  limit?: number | string;
+};
 
 @Injectable()
 export class TaskService {
   constructor(
-    private prisma: PrismaService,
-    private notificationsService: NotificationsService,
-  ) { }
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
+
+  private normalizePagination(query: PaginationInput) {
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const limit = Math.max(1, Number(query.limit ?? 10) || 10);
+    return { page, limit, skip: (page - 1) * limit };
+  }
+
+  private async getProjectIdsForUser(userId: string, userRole: string) {
+    if (userRole === UserRole.super_admin) {
+      const projects = await this.prisma.project.findMany({ select: { id: true } });
+      return projects.map((project) => project.id);
+    }
+
+    if (userRole === UserRole.admin) {
+      const companies = await this.prisma.company.findMany({
+        where: { ownerId: userId, isActive: true },
+        select: { id: true },
+      });
+
+      const companyIds = companies.map((company) => company.id);
+      const projects = await this.prisma.project.findMany({
+        where: { companyId: { in: companyIds } },
+        select: { id: true },
+      });
+      return projects.map((project) => project.id);
+    }
+
+    const memberships = await this.prisma.projectMember.findMany({
+      where: { userId, role: 'manager' },
+      select: { projectId: true },
+    });
+
+    return memberships.map((membership) => membership.projectId);
+  }
+
+  private async verifyTaskAccess(taskId: string, userId: string, userRole: string) {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: { project: { include: { company: true } } },
+    });
+
+    if (!task) throw new NotFoundException('Task not found');
+
+    if (userRole === UserRole.super_admin) {
+      return task;
+    }
+
+    if (userRole === UserRole.manager) {
+      const member = await this.prisma.projectMember.findFirst({
+        where: { projectId: task.projectId, userId, role: 'manager' },
+      });
+      if (!member) throw new ForbiddenException('Access denied');
+      return task;
+    }
+
+    if (task.project.company.ownerId !== userId) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    return task;
+  }
+
+  private async ensureProjectAndTaskUnits(taskId: string, unitId: string) {
+    const taskUnit = await this.prisma.taskUnit.findFirst({
+      where: { taskId, unitId: unitId },
+      include: { unit: { select: { id: true, name: true } } },
+    });
+
+    if (!taskUnit) {
+      throw new NotFoundException('Unit not found in this task');
+    }
+
+    return taskUnit;
+  }
+
+  private async resolveTaskAssignee(taskId: string, unitId: string, userId?: string) {
+    if (userId) {
+      const assignee = await this.prisma.taskAssignee.findFirst({
+        where: { taskId, unitId: unitId, userId },
+        include: {
+          user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          unit: { select: { id: true, name: true } },
+        },
+      });
+
+      if (assignee) return assignee;
+    }
+
+    const firstAssignee = await this.prisma.taskAssignee.findFirst({
+      where: { taskId, unitId: unitId },
+      orderBy: { assignedAt: 'asc' },
+      include: {
+        user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        unit: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!firstAssignee) {
+      throw new BadRequestException('No worker assigned for this unit');
+    }
+
+    return firstAssignee;
+  }
+
+  private async refreshTaskProgress(taskId: string) {
+    const [subTaskCount, completedCount] = await Promise.all([
+      this.prisma.subTask.count({ where: { taskId } }),
+      this.prisma.subTask.count({
+        where: { taskId, status: 'completed', approvalDecision: 'approved' },
+      }),
+    ]);
+
+    if (subTaskCount === 0) {
+      return;
+    }
+
+    if (subTaskCount === completedCount) {
+      await this.prisma.task.update({
+        where: { id: taskId },
+        data: { status: 'review' },
+      });
+      return;
+    }
+
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: { status: 'in_progress' },
+    });
+  }
 
   private toTaskResponse(task: any) {
-    const assignees = task.taskAssignees?.map((assignment: any) => assignment.user) ?? [];
-    const normalizedAssignees = assignees.length > 0 ? assignees : (task.assignee ? [task.assignee] : []);
+    const assignees = task.taskAssignees?.map((assignment: any) => ({
+      id: assignment.user.id,
+      fullName: assignment.user.fullName,
+      avatarUrl: assignment.user.avatarUrl,
+      role: assignment.user.role,
+      unitId: assignment.unitId,
+      unit: assignment.unit ?? null,
+    })) ?? [];
 
     return {
       ...task,
-      assignees: normalizedAssignees,
-      available: normalizedAssignees.length === 0,
+      assignees,
+      floors: task.taskFloors?.map((entry: any) => entry.floor) ?? [],
+      units: task.taskUnits?.map((entry: any) => entry.unit) ?? [],
+      subTasks: task.subTasks ?? [],
+      available: assignees.length === 0,
     };
   }
 
-  // ── GET ALL TASKS ──────────────────────────────────────────────
   async getTasks(
     userId: string,
     userRole: string,
@@ -43,29 +192,7 @@ export class TaskService {
     page = 1,
     limit = 10,
   ) {
-    let projectIds: string[];
-
-    if (userRole === UserRole.manager) {
-      // Manager → শুধু assigned project-এর tasks
-      const assignedProjects = await this.prisma.projectMember.findMany({
-        where: { userId, role: 'manager' },
-        select: { projectId: true },
-      });
-      projectIds = assignedProjects.map((p) => p.projectId);
-    } else {
-      // Admin → company ownership দিয়ে
-      const myCompanies = await this.prisma.company.findMany({
-        where: { ownerId: userId, isActive: true },
-        select: { id: true },
-      });
-      const companyIds = myCompanies.map((c) => c.id);
-      const myProjects = await this.prisma.project.findMany({
-        where: { companyId: { in: companyIds } },
-        select: { id: true },
-      });
-      projectIds = myProjects.map((p) => p.id);
-    }
-
+    const projectIds = await this.getProjectIdsForUser(userId, userRole);
     const skip = (page - 1) * limit;
 
     const where: any = {
@@ -85,19 +212,33 @@ export class TaskService {
         where,
         include: {
           project: { select: { id: true, name: true } },
-          floor: { select: { id: true, name: true } },
-          room: { select: { id: true, name: true } },
-          assignee: {
-            select: { id: true, fullName: true, avatarUrl: true, role: true },
+          floor: { select: { id: true, name: true, floorNumber: true } },
+          unit: { select: { id: true, name: true } },
+          taskFloors: {
+            include: { floor: { select: { id: true, name: true, floorNumber: true } } },
+          },
+          taskUnits: {
+            include: { unit: { select: { id: true, name: true, floorId: true } } },
           },
           taskAssignees: {
             include: {
-              user: {
-                select: { id: true, fullName: true, avatarUrl: true, role: true },
+              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+              unit: { select: { id: true, name: true } },
+            },
+          },
+          subTasks: {
+            orderBy: { createdAt: 'desc' },
+            include: {
+              unit: { select: { id: true, name: true } },
+              taskAssignee: {
+                include: {
+                  user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+                  unit: { select: { id: true, name: true } },
+                },
               },
             },
           },
-          _count: { select: { reports: true } },
+          _count: { select: { subTasks: true, reports: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -106,32 +247,36 @@ export class TaskService {
       this.prisma.task.count({ where }),
     ]);
 
-    const mapped = data.map((t) => this.toTaskResponse(t));
-
     return {
-      data: mapped,
+      data: data.map((task) => this.toTaskResponse(task)),
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
 
-  // ── CREATE TASK ────────────────────────────────────────────────
   async createTask(dto: CreateTaskDto, userId: string, userRole: string) {
-    // project access verify
-    let project;
+    const canCreateAsAdmin = userRole === UserRole.admin || userRole === UserRole.super_admin;
+    const canCreateAsManager = userRole === UserRole.manager;
+
+    if (!canCreateAsAdmin && !canCreateAsManager) {
+      throw new ForbiddenException('You are not allowed to create tasks');
+    }
+
     if (userRole === UserRole.manager) {
       const member = await this.prisma.projectMember.findFirst({
         where: { projectId: dto.projectId, userId, role: 'manager' },
       });
-      if (!member) throw new ForbiddenException('You are not assigned to this project');
-      project = await this.prisma.project.findUnique({ where: { id: dto.projectId } });
+      if (!member) {
+        throw new ForbiddenException('You are not assigned to this project');
+      }
     } else {
-      project = await this.prisma.project.findFirst({
+      const project = await this.prisma.project.findFirst({
         where: { id: dto.projectId, company: { ownerId: userId } },
       });
+      if (!project) {
+        throw new ForbiddenException('Project not found or not yours');
+      }
     }
-    if (!project) throw new ForbiddenException('Project not found or not yours');
 
-    // floor/room validate
     if (dto.floorId) {
       const floor = await this.prisma.floor.findFirst({
         where: { id: dto.floorId, projectId: dto.projectId },
@@ -139,46 +284,103 @@ export class TaskService {
       if (!floor) throw new NotFoundException('Floor not found in this project');
     }
 
-    if (dto.roomId) {
-      const room = await this.prisma.room.findFirst({
-        where: { id: dto.roomId, floor: { projectId: dto.projectId } },
+    if (dto.unitId) {
+      const room = await this.prisma.unit.findFirst({
+        where: { id: dto.unitId, floor: { projectId: dto.projectId } },
       });
-      if (!room) throw new NotFoundException('Room not found in this project');
+      if (!room) throw new NotFoundException('Unit not found in this project');
     }
 
+    if (dto.floorIds?.length) {
+      const floors = await this.prisma.floor.findMany({
+        where: { id: { in: dto.floorIds }, projectId: dto.projectId },
+        select: { id: true },
+      });
+      if (floors.length !== dto.floorIds.length) {
+        throw new NotFoundException('One or more floors not found in this project');
+      }
+    }
 
+    if (dto.unitIds?.length) {
+      const units = await this.prisma.unit.findMany({
+        where: { id: { in: dto.unitIds }, floor: { projectId: dto.projectId } },
+        select: { id: true },
+      });
+      if (units.length !== dto.unitIds.length) {
+        throw new NotFoundException('One or more units not found in this project');
+      }
+    }
+
+    const approvalDecision = userRole === UserRole.manager ? 'pending' : 'approved';
 
     const task = await this.prisma.task.create({
       data: {
         projectId: dto.projectId,
         floorId: dto.floorId ?? null,
-        roomId: dto.roomId ?? null,
+        unitId: dto.unitId ?? null,
         assignedTo: null,
         createdBy: userId,
         title: dto.title,
         description: dto.description ?? null,
         priority: dto.priority ?? 'medium',
         status: 'pending',
+        approvalDecision,
+        approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
+        approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         estimatedHours: dto.estimatedHours ?? null,
       },
+    });
+
+    if (dto.floorIds?.length) {
+      await this.prisma.taskFloor.createMany({
+        data: dto.floorIds.map((floorId) => ({ taskId: task.id, floorId })),
+        skipDuplicates: true,
+      });
+    } else if (dto.floorId) {
+      await this.prisma.taskFloor.createMany({
+        data: [{ taskId: task.id, floorId: dto.floorId }],
+        skipDuplicates: true,
+      });
+    }
+
+    if (dto.unitIds?.length) {
+      await this.prisma.taskUnit.createMany({
+        data: dto.unitIds.map((unitId) => ({ taskId: task.id, unitId })),
+        skipDuplicates: true,
+      });
+    } else if (dto.unitId) {
+      await this.prisma.taskUnit.createMany({
+        data: [{ taskId: task.id, unitId: dto.unitId }],
+        skipDuplicates: true,
+      });
+    }
+
+    const created = await this.prisma.task.findUnique({
+      where: { id: task.id },
       include: {
         project: { select: { id: true, name: true } },
-        floor: { select: { id: true, name: true } },
-        room: { select: { id: true, name: true } },
-        assignee: { select: { id: true, fullName: true, avatarUrl: true } },
+        floor: { select: { id: true, name: true, floorNumber: true } },
+        unit: { select: { id: true, name: true } },
+        taskFloors: {
+          include: { floor: { select: { id: true, name: true, floorNumber: true } } },
+        },
+        taskUnits: {
+          include: { unit: { select: { id: true, name: true, floorId: true } } },
+        },
         taskAssignees: {
           include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true } },
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            unit: { select: { id: true, name: true } },
           },
         },
+        subTasks: true,
       },
     });
 
-    return this.toTaskResponse(task);
+    return this.toTaskResponse(created);
   }
 
-  // ── GET TASK DETAILS ───────────────────────────────────────────
   async getTaskDetails(taskId: string, userId: string, userRole: string) {
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
@@ -186,51 +388,71 @@ export class TaskService {
         project: {
           select: { id: true, name: true, company: { select: { ownerId: true } } },
         },
-        floor: { select: { id: true, name: true } },
-        room: { select: { id: true, name: true } },
-        assignee: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            phone: true,
-            avatarUrl: true,
-            role: true,
-            department: true,
-          },
-        },
+        floor: { select: { id: true, name: true, floorNumber: true } },
+        unit: { select: { id: true, name: true } },
         creator: { select: { id: true, fullName: true, avatarUrl: true } },
         taskAssignees: {
           include: {
             user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            unit: { select: { id: true, name: true } },
+          },
+        },
+        taskFloors: {
+          include: { floor: { select: { id: true, name: true, floorNumber: true } } },
+        },
+        taskUnits: {
+          include: { unit: { select: { id: true, name: true, floorId: true } } },
+        },
+        subTasks: {
+          orderBy: { createdAt: 'desc' },
+          include: {
+            unit: { select: { id: true, name: true } },
+            taskAssignee: {
+              include: {
+                user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+                unit: { select: { id: true, name: true } },
+              },
+            },
+            reports: {
+              orderBy: { submittedAt: 'desc' },
+              include: { worker: { select: { id: true, fullName: true, avatarUrl: true } } },
+            },
+            inventories: {
+              include: {
+                inventory: { select: { id: true, name: true, unit: true } },
+              },
+            },
           },
         },
         reports: {
           orderBy: { submittedAt: 'desc' },
           include: {
             worker: { select: { id: true, fullName: true, avatarUrl: true } },
+            subTask: { select: { id: true, title: true } },
           },
         },
         taskInventories: {
           include: {
             inventory: { select: { id: true, name: true, unit: true } },
+            subTask: { select: { id: true, title: true } },
           },
         },
       },
     });
 
     if (!task) throw new NotFoundException('Task not found');
+
     if (userRole === UserRole.manager) {
       const member = await this.prisma.projectMember.findFirst({
         where: { projectId: task.projectId, userId, role: 'manager' },
       });
       if (!member) throw new ForbiddenException('Access denied');
-    } else {
-      if (task.project.company.ownerId !== userId)
+    } else if (userRole !== UserRole.super_admin) {
+      if (task.project.company.ownerId !== userId) {
         throw new ForbiddenException('Access denied');
+      }
     }
 
-    // task expenses
     const expenses = await this.prisma.expense.findMany({
       where: {
         OR: [
@@ -268,7 +490,6 @@ export class TaskService {
     };
   }
 
-  // ── UPDATE TASK ────────────────────────────────────────────────
   async updateTask(
     taskId: string,
     dto: UpdateTaskDto,
@@ -277,11 +498,14 @@ export class TaskService {
     file?: Express.Multer.File,
   ) {
     await this.verifyTaskAccess(taskId, userId, userRole);
-    const {
-      expenseDescription,
-      expenseAmount,
-      ...taskUpdates
-    } = dto as UpdateTaskDto & { expenseDescription?: string; expenseAmount?: number | string };
+
+    const { floorIds, unitIds, expenseDescription, expenseAmount, ...taskUpdates } =
+      dto as UpdateTaskDto & {
+        floorIds?: string[];
+        unitIds?: string[];
+        expenseDescription?: string;
+        expenseAmount?: number | string;
+      };
 
     const updatedTask = await this.prisma.task.update({
       where: { id: taskId },
@@ -291,104 +515,125 @@ export class TaskService {
       },
     });
 
-    let createdExpense: any = null;
-    const expenseText = expenseDescription?.trim() || taskUpdates.description?.trim();
-    const rawExpenseAmount = expenseAmount as any;
-    const hasExpensePayload =
-      Boolean(expenseText || file?.filename) || rawExpenseAmount !== undefined;
-    if (hasExpensePayload) {
-      const task = await this.prisma.task.findUnique({
-        where: { id: taskId },
-        select: { projectId: true },
-      });
-
-      if (task) {
-        const normalizedExpenseAmount =
-          rawExpenseAmount === undefined ||
-          rawExpenseAmount === null ||
-          rawExpenseAmount === ''
-            ? 0
-            : Number(rawExpenseAmount);
-
-        const existingExpense = await this.prisma.expense.findFirst({
-          where: { taskId },
-          orderBy: { createdAt: 'desc' },
+    if (floorIds !== undefined) {
+      await this.prisma.taskFloor.deleteMany({ where: { taskId } });
+      if (floorIds.length > 0) {
+        const floors = await this.prisma.floor.findMany({
+          where: { id: { in: floorIds }, projectId: updatedTask.projectId },
+          select: { id: true },
         });
-
-        const expenseData = {
-          workerId: userId,
-          projectId: task.projectId,
-          taskId,
-          description: expenseText || 'Task expense',
-          category: 'other' as const,
-          amount: Number.isFinite(normalizedExpenseAmount) ? normalizedExpenseAmount : 0,
-          receiptUrl: file?.filename ?? existingExpense?.receiptUrl ?? null,
-          date: new Date(),
-          status: existingExpense ? existingExpense.status : ('pending' as const),
-        };
-
-        createdExpense = existingExpense
-          ? await this.prisma.expense.update({
-              where: { id: existingExpense.id },
-              data: expenseData,
-              select: {
-                id: true,
-                description: true,
-                category: true,
-                amount: true,
-                receiptUrl: true,
-                status: true,
-                date: true,
-                taskId: true,
-                projectId: true,
-              },
-            })
-          : await this.prisma.expense.create({
-              data: expenseData,
-              select: {
-                id: true,
-                description: true,
-                category: true,
-                amount: true,
-                receiptUrl: true,
-                status: true,
-                date: true,
-                taskId: true,
-                projectId: true,
-              },
-            });
+        if (floors.length !== floorIds.length) {
+          throw new NotFoundException('One or more floors not found in this project');
+        }
+        await this.prisma.taskFloor.createMany({
+          data: floorIds.map((floorId) => ({ taskId, floorId })),
+          skipDuplicates: true,
+        });
       }
     }
 
-    return {
-      ...updatedTask,
-      ...(createdExpense ? { expense: createdExpense } : {}),
-    };
+    if (unitIds !== undefined) {
+      await this.prisma.taskUnit.deleteMany({ where: { taskId } });
+      if (unitIds.length > 0) {
+        const units = await this.prisma.unit.findMany({
+          where: { id: { in: unitIds }, floor: { projectId: updatedTask.projectId } },
+          select: { id: true },
+        });
+        if (units.length !== unitIds.length) {
+          throw new NotFoundException('One or more units not found in this project');
+        }
+        await this.prisma.taskUnit.createMany({
+          data: unitIds.map((unitId) => ({ taskId, unitId })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
+    if (expenseDescription || expenseAmount !== undefined || file?.filename) {
+      const normalizedAmount =
+        expenseAmount === undefined || expenseAmount === null
+          ? 0
+          : Number(expenseAmount);
+
+      await this.prisma.expense.create({
+        data: {
+          workerId: userId,
+          projectId: updatedTask.projectId,
+          taskId,
+          description: expenseDescription?.trim() || 'Task expense',
+          category: 'other',
+          amount: Number.isFinite(normalizedAmount) ? normalizedAmount : 0,
+          receiptUrl: file?.filename ?? null,
+          date: new Date(),
+          status: 'pending',
+        },
+      });
+    }
+
+    return updatedTask;
   }
 
-  // ── UPDATE STATUS ──────────────────────────────────────────────
   async updateTaskStatus(taskId: string, dto: UpdateTaskStatusDto, userId: string, userRole: string) {
-    await this.verifyTaskAccess(taskId, userId, userRole);
+    const task = await this.verifyTaskAccess(taskId, userId, userRole);
+
+    if (task.approvalDecision !== 'approved' && dto.status !== 'cancelled') {
+      throw new BadRequestException('Approved task only can move to execution flow');
+    }
 
     return this.prisma.task.update({
       where: { id: taskId },
-      data: { status: dto.status },
+      data: { status: dto.status as any },
     });
   }
 
-  // ── DELETE TASK ────────────────────────────────────────────────
+  async reviewTaskApproval(taskId: string, dto: ReviewTaskDto, userId: string, userRole: string) {
+    await this.verifyTaskAccess(taskId, userId, userRole);
+    if (userRole !== UserRole.admin && userRole !== UserRole.super_admin) {
+      throw new ForbiddenException('Only admin can approve or reject the task');
+    }
+
+    if (dto.reviewDecision === 'approved') {
+      await this.prisma.task.update({
+        where: { id: taskId },
+        data: {
+          approvalDecision: 'approved',
+          approvalReviewedBy: userId,
+          approvalReviewedAt: new Date(),
+          approvalNotes: dto.reviewDescription ?? null,
+          status: 'pending',
+        },
+      });
+      return { message: 'Task approved' };
+    }
+
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: {
+        approvalDecision: 'rejected',
+        approvalReviewedBy: userId,
+        approvalReviewedAt: new Date(),
+        approvalNotes: dto.reviewDescription ?? null,
+        status: 'cancelled',
+      },
+    });
+    return { message: 'Task rejected' };
+  }
+
   async deleteTask(taskId: string, userId: string, userRole: string) {
     await this.verifyTaskAccess(taskId, userId, userRole);
     await this.prisma.task.delete({ where: { id: taskId } });
     return { message: 'Task deleted successfully' };
   }
 
-  // ── AVAILABLE WORKERS TO ASSIGN ────────────────────────────────
-  async getAvailableWorkers(taskId: string, userId: string, userRole: string, search?: string) {
+  async getAvailableWorkers(
+    taskId: string,
+    userId: string,
+    userRole: string,
+    search?: string,
+    unitId?: string,
+  ) {
     const task = await this.verifyTaskAccess(taskId, userId, userRole);
-
-    // এই project এর worker members
-    const members = await this.prisma.projectMember.findMany({
+    const projectMembers = await this.prisma.projectMember.findMany({
       where: { projectId: task.projectId, role: 'worker' },
       include: {
         user: {
@@ -404,107 +649,126 @@ export class TaskService {
       },
     });
 
+    const assigned = await this.prisma.taskAssignee.findMany({
+      where: {
+        taskId,
+        ...(unitId ? { unitId: unitId } : {}),
+      },
+      select: { userId: true, unitId: true },
+    });
 
-    const totalWorkers = members.length;
-
-    const assignedIds = new Set([
-      task.assignedTo,
-      ...(task.taskAssignees?.map((assignment) => assignment.userId) ?? []),
-    ].filter((value): value is string => Boolean(value)));
-
-    let workers = members.map((m) => {
-      const isAssigned = assignedIds.has(m.user.id);
+    const assignedIds = new Set(assigned.map((entry) => entry.userId));
+    let workers = projectMembers.map((member) => {
+      const isAssigned = assignedIds.has(member.user.id);
       return {
-        ...m.user,
-        memberId: m.id,
+        ...member.user,
+        memberId: member.id,
         isAssigned,
-        // not available if assigned to this task or user is not active
-        isAvailable: !isAssigned && m.user.status === 'active',
+        isAvailable: !isAssigned && member.user.status === 'active',
       };
     });
 
     if (search) {
-      const s = search.toLowerCase();
-      workers = workers.filter((w) => w.fullName.toLowerCase().includes(s));
+      const needle = search.toLowerCase();
+      workers = workers.filter((worker) => worker.fullName.toLowerCase().includes(needle));
     }
-
-    const availableCount = workers.filter((w) => w.isAvailable).length;
 
     return {
       data: workers,
-      meta: { totalWorkers, availableCount },
+      meta: {
+        totalWorkers: workers.length,
+        availableCount: workers.filter((worker) => worker.isAvailable).length,
+      },
     };
   }
 
-  // ── ASSIGN WORKER ──────────────────────────────────────────────
   async assignWorker(taskId: string, dto: AssignTaskDto, userId: string, userRole: string) {
-    const task = await this.verifyTaskAccess(taskId, userId, userRole);
-    const userIds = [...new Set(dto.userIds)];
+    if (userRole !== UserRole.admin && userRole !== UserRole.super_admin) {
+      throw new ForbiddenException('Only admin can assign workers');
+    }
 
-    if (userIds.length === 0) {
+    const task = await this.verifyTaskAccess(taskId, userId, userRole);
+    if (task.approvalDecision !== 'approved') {
+      throw new BadRequestException('Task must be approved before assigning workers');
+    }
+
+    const unitIds = [...new Set(dto.unitIds)];
+    if (unitIds.length === 0) {
+      throw new BadRequestException('At least one unit is required');
+    }
+
+    const units = await this.prisma.taskUnit.findMany({
+      where: { taskId, unitId: { in: unitIds } },
+      include: { unit: { select: { id: true, name: true } } },
+    });
+    if (units.length !== unitIds.length) {
+      throw new NotFoundException('One or more units not found in this task');
+    }
+
+    const uniqueUserIds = [...new Set(dto.userIds)];
+    if (uniqueUserIds.length === 0) {
       throw new BadRequestException('At least one worker is required');
     }
 
     const members = await this.prisma.projectMember.findMany({
-      where: { projectId: task.projectId, userId: { in: userIds } },
+      where: { projectId: task.projectId, userId: { in: uniqueUserIds }, role: 'worker' },
       select: { userId: true },
     });
 
-    if (members.length !== userIds.length) {
+    if (members.length !== uniqueUserIds.length) {
       throw new BadRequestException('One or more users are not members of this project');
     }
 
-    const existingAssignees = await this.prisma.taskAssignee.findMany({
-      where: { taskId, userId: { in: userIds } },
-      select: { userId: true },
+    const existing = await this.prisma.taskAssignee.findMany({
+      where: { taskId, unitId: { in: unitIds }, userId: { in: uniqueUserIds } },
+      select: { userId: true, unitId: true },
     });
 
-    const existingAssigneeIds = new Set(existingAssignees.map((assignment) => assignment.userId));
-    const newAssigneeIds = userIds.filter((workerId) => !existingAssigneeIds.has(workerId));
+    const existingKeys = new Set(existing.map((item) => `${item.unitId}:${item.userId}`));
+    const data = unitIds.flatMap((unitId) =>
+      uniqueUserIds
+        .filter((workerId) => !existingKeys.has(`${unitId}:${workerId}`))
+        .map((workerId) => ({
+          taskId,
+          userId: workerId,
+          unitId: unitId,
+        })),
+    );
 
-    if (newAssigneeIds.length > 0) {
+    if (data.length > 0) {
       await this.prisma.taskAssignee.createMany({
-        data: newAssigneeIds.map((workerId) => ({ taskId, userId: workerId })),
+        data,
         skipDuplicates: true,
-      });
-    }
-
-    if (!task.assignedTo) {
-      await this.prisma.task.update({
-        where: { id: taskId },
-        data: {
-          assignedTo: userIds[0],
-          status: 'in_progress',
-        },
-      });
-    } else if (task.status === 'pending') {
-      await this.prisma.task.update({
-        where: { id: taskId },
-        data: { status: 'in_progress' },
       });
     }
 
     const updated = await this.prisma.task.findUnique({
       where: { id: taskId },
       include: {
-        assignee: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        project: { select: { id: true, name: true } },
         taskAssignees: {
           include: {
             user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            unit: { select: { id: true, name: true } },
           },
         },
-        project: { select: { id: true, name: true } },
+        taskFloors: {
+          include: { floor: { select: { id: true, name: true, floorNumber: true } } },
+        },
+        taskUnits: {
+          include: { unit: { select: { id: true, name: true, floorId: true } } },
+        },
       },
     });
 
     if (!updated) throw new NotFoundException('Task not found');
 
-    // Notify each assigned worker
-    for (const workerId of newAssigneeIds) {
+    const notifiedWorkerIds = [...new Set(data.map((item) => item.userId))];
+    for (const workerId of notifiedWorkerIds) {
       await this.notificationsService.send({
         userId: workerId,
-        title: 'New Task Assigned',
-        body: `You have been assigned to task: ${task.title}`,
+        title: 'New Unit Assigned',
+        body: `You have been assigned to a unit on task: ${task.title}`,
         type: 'task',
         refId: taskId,
         refType: 'task',
@@ -514,13 +778,149 @@ export class TaskService {
     return this.toTaskResponse(updated);
   }
 
-  // ── REVIEW TASK REPORT ─────────────────────────────────────────
-  async reviewTaskReport(taskId: string, reportId: string, dto: ReviewTaskDto, userId: string, userRole: string) {
+  async createSubTask(taskId: string, dto: CreateSubTaskDto, userId: string, userRole: string) {
+    const task = await this.verifyTaskAccess(taskId, userId, userRole);
+    if (task.approvalDecision !== 'approved') {
+      throw new BadRequestException('Task must be approved before creating subtasks');
+    }
+
+    const unitIds = Array.from(new Set(dto.unitIds?.length ? dto.unitIds : dto.unitId ? [dto.unitId] : []));
+    if (unitIds.length === 0) {
+      throw new BadRequestException('unitId or unitIds is required');
+    }
+
+    const approvalDecision = userRole === UserRole.worker ? 'pending' : 'approved';
+    const subTasks: any[] = [];
+
+    for (const unitId of unitIds) {
+      const taskUnit = await this.ensureProjectAndTaskUnits(taskId, unitId);
+      let taskAssignee = dto.taskAssigneeId
+        ? await this.prisma.taskAssignee.findFirst({
+            where: { id: dto.taskAssigneeId, taskId, unitId },
+            include: {
+              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+              unit: { select: { id: true, name: true } },
+            },
+          })
+        : null;
+
+      if (!taskAssignee) {
+        taskAssignee = await this.resolveTaskAssignee(
+          taskId,
+          unitId,
+          userRole === UserRole.worker ? userId : undefined,
+        );
+      }
+
+      const subTask = await this.prisma.subTask.create({
+        data: {
+          taskId,
+          unitId,
+          taskAssigneeId: taskAssignee.id,
+          createdBy: userId,
+          title: dto.title,
+          description: dto.description ?? null,
+          status: 'pending',
+          approvalDecision,
+          approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
+          approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
+        },
+        include: {
+          unit: { select: { id: true, name: true } },
+          taskAssignee: {
+            include: {
+              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+              unit: { select: { id: true, name: true } },
+            },
+          },
+          reports: true,
+          inventories: true,
+        },
+      });
+
+      subTasks.push(subTask);
+
+      if (approvalDecision === 'approved' && taskAssignee.userId) {
+        await this.notificationsService.send({
+          userId: taskAssignee.userId,
+          title: 'New Subtask Created',
+          body: `A new subtask has been created for unit: ${taskUnit.unit.name}`,
+          type: 'task',
+          refId: subTask.id,
+          refType: 'sub_task',
+        });
+      }
+    }
+
+    return {
+      message: `${subTasks.length} subtasks created`,
+      subtasks: subTasks,
+    };
+  }
+
+  async reviewSubTaskCreation(
+    taskId: string,
+    subTaskId: string,
+    dto: ReviewTaskDto,
+    userId: string,
+    userRole: string,
+  ) {
+    await this.verifyTaskAccess(taskId, userId, userRole);
+    if (userRole !== UserRole.admin && userRole !== UserRole.manager && userRole !== UserRole.super_admin) {
+      throw new ForbiddenException('Only admin or manager can review sub tasks');
+    }
+
+    const subTask = await this.prisma.subTask.findFirst({
+      where: { id: subTaskId, taskId },
+      include: { taskAssignee: true },
+    });
+
+    if (!subTask) throw new NotFoundException('Sub task not found');
+    if (subTask.approvalDecision !== 'pending') {
+      throw new BadRequestException('Sub task is already reviewed');
+    }
+
+    const nextStatus = dto.reviewDecision === 'approved' ? 'approved' : 'rejected';
+
+    await this.prisma.subTask.update({
+      where: { id: subTaskId },
+      data: {
+        approvalDecision: nextStatus,
+        approvalReviewedBy: userId,
+        approvalReviewedAt: new Date(),
+        approvalNotes: dto.reviewDescription ?? null,
+        status: dto.reviewDecision === 'approved' ? 'pending' : 'cancelled',
+      },
+    });
+
+    if (subTask.taskAssignee?.userId) {
+      await this.notificationsService.send({
+        userId: subTask.taskAssignee.userId,
+        title: dto.reviewDecision === 'approved' ? 'Subtask Approved' : 'Subtask Rejected',
+        body: dto.reviewDescription ?? '',
+        type: 'task',
+        refId: subTaskId,
+        refType: 'sub_task',
+      });
+    }
+
+    return { message: `Sub task ${dto.reviewDecision}` };
+  }
+
+  async reviewTaskReport(
+    taskId: string,
+    reportId: string,
+    dto: ReviewTaskDto,
+    userId: string,
+    userRole: string,
+  ) {
     await this.verifyTaskAccess(taskId, userId, userRole);
 
     const report = await this.prisma.taskReport.findFirst({
       where: { id: reportId, taskId },
+      include: { subTask: true },
     });
+
     if (!report) throw new NotFoundException('Report not found');
 
     const updated = await this.prisma.taskReport.update({
@@ -533,64 +933,69 @@ export class TaskService {
       },
     });
 
-    // Notify worker about review result
     await this.notificationsService.send({
       userId: report.workerId,
-      title: dto.reviewDecision === 'approved' ? 'Task Report Approved ✓' : 'Task Report Rejected',
-      body: dto.reviewDescription ?? (dto.reviewDecision === 'approved' ? 'Your task report has been approved.' : 'Your task report was rejected.'),
+      title: dto.reviewDecision === 'approved' ? 'Subtask Report Approved' : 'Subtask Report Rejected',
+      body: dto.reviewDescription ?? '',
       type: 'report',
       refId: reportId,
       refType: 'task_report',
     });
 
+    if (report.subTaskId) {
+      await this.prisma.subTask.update({
+        where: { id: report.subTaskId },
+        data: {
+          status: dto.reviewDecision === 'approved' ? 'completed' : 'in_progress',
+          submittedAt: dto.reviewDecision === 'approved' ? new Date() : undefined,
+          completedAt: dto.reviewDecision === 'approved' ? new Date() : null,
+        },
+      });
+
+      await this.refreshTaskProgress(taskId);
+    }
+
+    return { message: `Task report ${dto.reviewDecision}`, report: updated };
+  }
+
+  async reviewTaskCompletion(taskId: string, dto: ReviewTaskDto, userId: string, userRole: string) {
+    await this.verifyTaskAccess(taskId, userId, userRole);
+
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: { subTasks: true },
+    });
+
+    if (!task) throw new NotFoundException('Task not found');
+    if (task.status !== 'review') {
+      throw new BadRequestException('Task is not ready for final review');
+    }
+
     if (dto.reviewDecision === 'approved') {
       await this.prisma.task.update({
         where: { id: taskId },
-        data: { status: 'completed' },
-      });
-
-      await this.prisma.expense.updateMany({
-        where: { taskId },
         data: {
-          status: 'approved',
-          reviewedBy: userId,
-          reviewedAt: new Date(),
+          completionDecision: 'approved',
+          completionReviewedBy: userId,
+          completionReviewedAt: new Date(),
+          completionNotes: dto.reviewDescription ?? null,
+          status: 'completed',
         },
       });
-    } else if (dto.reviewDecision === 'rejected') {
-      await this.prisma.expense.updateMany({
-        where: { taskId, status: 'pending' },
-        data: {
-          status: 'rejected',
-          reviewedBy: userId,
-          reviewedAt: new Date(),
-        },
-      });
+      return { message: 'Task completed' };
     }
 
-    return { message: `Task ${dto.reviewDecision}`, report: updated };
-  }
-
-  // ── HELPER ────────────────────────────────────────────────────
-  private async verifyTaskAccess(taskId: string, userId: string, userRole?: string) {
-    const task = await this.prisma.task.findUnique({
+    await this.prisma.task.update({
       where: { id: taskId },
-      include: {
-        project: { include: { company: true } },
-        taskAssignees: { select: { userId: true } },
+      data: {
+        completionDecision: 'rejected',
+        completionReviewedBy: userId,
+        completionReviewedAt: new Date(),
+        completionNotes: dto.reviewDescription ?? null,
+        status: 'in_progress',
       },
     });
-    if (!task) throw new NotFoundException('Task not found');
 
-    if (userRole === UserRole.manager) {
-      const member = await this.prisma.projectMember.findFirst({
-        where: { projectId: task.projectId, userId, role: 'manager' },
-      });
-      if (!member) throw new ForbiddenException('Access denied');
-    } else {
-      if (task.project.company.ownerId !== userId)
-        throw new ForbiddenException('Access denied');
-    }
-    return task;
+    return { message: 'Task sent back to in progress' };
   }
 }

@@ -121,11 +121,11 @@ export class ProjectService {
 
   private async syncFloorAndProjectStatus(projectId: string, floorId: string) {
     const [floorRooms, projectRooms] = await Promise.all([
-      this.prisma.room.findMany({
+      this.prisma.unit.findMany({
         where: { floorId },
         select: { status: true },
       }),
-      this.prisma.room.findMany({
+      this.prisma.unit.findMany({
         where: { floor: { projectId } },
         select: { status: true },
       }),
@@ -285,7 +285,7 @@ export class ProjectService {
       remaining: true,
       location: true,
       numFloors: true,
-      roomsPerFloor: true,
+      unitPerFloor: true,
       company: { select: { id: true, name: true, logoUrl: true } },
       _count: { select: { floors: true, tasks: true, teamMembers: true } },
       teamMembers: {
@@ -481,7 +481,7 @@ export class ProjectService {
         ...(numFloorsValue !== null && { numFloors: numFloorsValue }),
         ...(numFloorsRange.min !== undefined && { numFloorsMin: numFloorsRange.min }),
         ...(numFloorsRange.max !== undefined && { numFloorsMax: numFloorsRange.max }),
-        ...(unitPerFloorValue !== null && { roomsPerFloor: unitPerFloorValue, unitPerFloor: unitPerFloorValue }),
+        ...(unitPerFloorValue !== null && { unitPerFloor: unitPerFloorValue }),
         ...(unitRange.min !== undefined && { unitPerFloorMin: unitRange.min }),
         ...(unitRange.max !== undefined && { unitPerFloorMax: unitRange.max }),
         ...(dto.priority !== undefined && { priority: dto.priority }),
@@ -518,7 +518,7 @@ export class ProjectService {
             status: 'pending',
           },
         });
-        await this.prisma.room.createMany({
+        await this.prisma.unit.createMany({
           data: this.buildAutoFloorUnits(f, unitRange.min, unitRange.max).map((unit) => ({
             floorId: floor.id,
             ...unit,
@@ -537,9 +537,9 @@ export class ProjectService {
             status: 'pending',
           },
         });
-        if (floorData.rooms && floorData.rooms.length > 0) {
-          await this.prisma.room.createMany({
-            data: floorData.rooms.map((r) => ({
+        if (floorData.units && floorData.units.length > 0) {
+          await this.prisma.unit.createMany({
+            data: floorData.units.map((r) => ({
               floorId: floor.id,
               name: r.name,
               type: r.type,
@@ -598,8 +598,8 @@ export class ProjectService {
       numFloors: project.numFloors,
       numFloorsMin: (project as any).numFloorsMin,
       numFloorsMax: (project as any).numFloorsMax,
-      roomsPerFloor: project.roomsPerFloor,
-      unitPerFloor: (project as any).unitPerFloor ?? project.roomsPerFloor,
+      unitPerFloor: project.unitPerFloor,
+      unitsPerFloor: project.unitPerFloor,
       unitPerFloorMin: (project as any).unitPerFloorMin,
       unitPerFloorMax: (project as any).unitPerFloorMax,
       budget: project.budget,
@@ -666,7 +666,7 @@ export class ProjectService {
       ...(nextNumFloors !== null && { numFloors: nextNumFloors }),
       ...(nextNumFloorsRange.min !== undefined && { numFloorsMin: nextNumFloorsRange.min }),
       ...(nextNumFloorsRange.max !== undefined && { numFloorsMax: nextNumFloorsRange.max }),
-      ...(nextUnitPerFloor !== null && { roomsPerFloor: nextUnitPerFloor, unitPerFloor: nextUnitPerFloor }),
+      ...(nextUnitPerFloor !== null && { unitPerFloor: nextUnitPerFloor }),
       ...(nextUnitRange.min !== undefined && { unitPerFloorMin: nextUnitRange.min }),
       ...(nextUnitRange.max !== undefined && { unitPerFloorMax: nextUnitRange.max }),
       ...(dto.budget !== undefined && { budget: dto.budget }),
@@ -700,7 +700,7 @@ export class ProjectService {
             name: floorNumber === 1 ? 'Ground Floor' : `Floor ${floorNumber}`,
             floorNumber,
             status: 'pending',
-            rooms: { create: units },
+            units: { create: units },
           },
         });
       }
@@ -710,7 +710,7 @@ export class ProjectService {
 
       for (let idx = 0; idx < dto.floors.length; idx++) {
         const f = dto.floors[idx];
-        const roomsToCreate = (f.rooms ?? []).map((r: any) => ({
+        const unitsToCreate = (f.units ?? []).map((r: any) => ({
           name: r.name,
           type: r.type,
           sizeSqft: r.sizeSqft,
@@ -724,7 +724,7 @@ export class ProjectService {
             name: f.name,
             floorNumber: typeof f.floorNumber === 'number' ? f.floorNumber : idx + 1,
             status: f.status ?? 'pending',
-            rooms: { create: roomsToCreate },
+            units: { create: unitsToCreate },
           },
         });
       }
@@ -749,14 +749,14 @@ export class ProjectService {
       where: { projectId },
       orderBy: { floorNumber: 'asc' },
       include: {
-        rooms: {
+        units: {
           orderBy: { name: 'asc' },
           include: {
             _count: { select: { tasks: true } },
             tasks: { select: { status: true } },
           },
         },
-        _count: { select: { tasks: true, rooms: true } },
+        _count: { select: { tasks: true, units: true } },
         tasks: { select: { status: true } },
       },
     });
@@ -767,14 +767,14 @@ export class ProjectService {
       floorNumber: floor.floorNumber,
       status: floor.status,
       progress: floor.progress,
-      totalUnits: floor.rooms.length,
+      totalUnits: floor.units.length,
       taskCounts: {
         total: floor.tasks.length,
         completed: floor.tasks.filter((t) => t.status === 'completed').length,
         inProgress: floor.tasks.filter((t) => t.status === 'in_progress').length,
         notStarted: floor.tasks.filter((t) => t.status === 'pending').length,
       },
-      units: floor.rooms.map((room) => ({
+      units: floor.units.map((room) => ({
         id: room.id,
         name: room.name,
         type: room.type,
@@ -884,7 +884,7 @@ export class ProjectService {
           title: true,
           status: true,
           floor: { select: { id: true, name: true, floorNumber: true } },
-          room: { select: { id: true, name: true } },
+          unit: { select: { id: true, name: true } },
           taskAssignees: {
             select: {
               user: { select: { id: true, fullName: true, avatarUrl: true } },
@@ -925,10 +925,10 @@ export class ProjectService {
               floorNumber: taskMap.get(report.taskId)!.floor!.floorNumber,
             }
           : null,
-        room: taskMap.get(report.taskId)?.room
+        unit: taskMap.get(report.taskId)?.unit
           ? {
-              id: taskMap.get(report.taskId)!.room!.id,
-              name: taskMap.get(report.taskId)!.room!.name,
+              id: taskMap.get(report.taskId)!.unit!.id,
+              name: taskMap.get(report.taskId)!.unit!.name,
             }
           : null,
         worker: taskMap.get(report.taskId)?.taskAssignees[0]?.user ?? null,
@@ -964,7 +964,7 @@ export class ProjectService {
 
     return this.prisma.floor.findUnique({
       where: { id: floor.id },
-      include: { rooms: true, _count: { select: { tasks: true, rooms: true } } },
+      include: { units: true, _count: { select: { tasks: true, units: true } } },
     });
   }
 
@@ -980,7 +980,7 @@ export class ProjectService {
         ...(dto.status && { status: dto.status }),
         ...(dto.progress !== undefined && { progress: dto.progress }),
       },
-      include: { rooms: true },
+      include: { units: true },
     });
   }
 
@@ -1032,7 +1032,7 @@ export class ProjectService {
       throw new BadRequestException('Too many units requested');
     }
 
-    const roomsData = Array.from({ length: to - from + 1 }, (_, index) => {
+    const unitsData = Array.from({ length: to - from + 1 }, (_, index) => {
       const roomNumber = from + index;
       return {
         floorId,
@@ -1042,11 +1042,11 @@ export class ProjectService {
       };
     });
 
-    await this.prisma.room.createMany({ data: roomsData });
+    await this.prisma.unit.createMany({ data: unitsData });
 
     await this.syncFloorAndProjectStatus(projectId, floorId);
 
-    return { message: `${roomsData.length} units created` };
+    return { message: `${unitsData.length} units created` };
   }
 
   async getRoomNames(projectId: string, floorId: string, userId: string, userRole: string) {
@@ -1061,13 +1061,13 @@ export class ProjectService {
       throw new NotFoundException('Floor not found for this project');
     }
 
-    const rooms = await this.prisma.room.findMany({
+    const units = await this.prisma.unit.findMany({
       where: { floorId },
       orderBy: { name: 'asc' },
       select: { id: true, name: true, status: true, progress: true, type: true },
     });
 
-    return rooms.map((room) => {
+    return units.map((room) => {
       const match = room.name.trim().match(/^(.*?)(\d+)$/);
       return {
         id: room.id,
@@ -1080,16 +1080,16 @@ export class ProjectService {
     });
   }
 
-  async updateRoom(projectId: string, roomId: string, dto: UpdateRoomDto, userId: string, userRole: string) {
+  async updateRoom(projectId: string, unitId: string, dto: UpdateRoomDto, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
-    const room = await this.prisma.room.findFirst({
-      where: { id: roomId, floor: { projectId } },
+    const room = await this.prisma.unit.findFirst({
+      where: { id: unitId, floor: { projectId } },
       select: { id: true, floorId: true },
     });
     if (!room) throw new NotFoundException('Unit not found');
 
-    const updatedRoom = await this.prisma.room.update({
-      where: { id: roomId },
+    const updatedUnit = await this.prisma.unit.update({
+      where: { id: unitId },
       data: {
         ...(dto.name && { name: dto.name }),
         ...(dto.type !== undefined && { type: dto.type }),
@@ -1101,17 +1101,17 @@ export class ProjectService {
 
     await this.syncFloorAndProjectStatus(projectId, room.floorId);
 
-    return updatedRoom;
+    return updatedUnit;
   }
 
-  async deleteRoom(projectId: string, roomId: string, userId: string, userRole: string) {
+  async deleteRoom(projectId: string, unitId: string, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
-    const room = await this.prisma.room.findFirst({
-      where: { id: roomId, floor: { projectId } },
+    const room = await this.prisma.unit.findFirst({
+      where: { id: unitId, floor: { projectId } },
       select: { id: true, floorId: true },
     });
     if (!room) throw new NotFoundException('Unit not found');
-    await this.prisma.room.delete({ where: { id: roomId } });
+    await this.prisma.unit.delete({ where: { id: unitId } });
 
     await this.syncFloorAndProjectStatus(projectId, room.floorId);
 

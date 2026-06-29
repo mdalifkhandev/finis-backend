@@ -130,6 +130,7 @@ model User {
   assignedTasks           Task[]                   @relation("TaskAssignee")
   createdTasks            Task[]                   @relation("TaskCreator")
   taskAssignees           TaskAssignee[]           @relation("TaskAssigneeUser")
+  createdSubTasks         SubTask[]                @relation("SubTaskCreator")
   threadParticipants      ThreadParticipant[]
   messageBlocksCreated    MessageBlock[]           @relation("MessageBlocker")
   messageBlocksReceived   MessageBlock[]           @relation("MessageBlockedUser")
@@ -382,13 +383,14 @@ model Floor {
   status      FloorStatus @default(pending)
   progress    Float?      @default(0)
   project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  rooms       Room[]
+  units       Unit[]
   tasks       Task[]
+  taskFloors  TaskFloor[]
 
   @@map("floors")
 }
 
-model Room {
+model Unit {
   id       String     @id @default(uuid()) @db.Uuid
   floorId  String     @map("floor_id") @db.Uuid
   name     String
@@ -398,27 +400,41 @@ model Room {
   progress Float?     @default(0)
   floor    Floor      @relation(fields: [floorId], references: [id], onDelete: Cascade)
   tasks    Task[]
+  taskUnits TaskUnit[]
+  taskAssignees TaskAssignee[]
+  subTasks SubTask[]
 
-  @@map("rooms")
+  @@map("units")
 }
 
 model Task {
   id              String          @id @default(uuid()) @db.Uuid
   projectId       String          @map("project_id") @db.Uuid
   floorId         String?         @map("floor_id") @db.Uuid
-  roomId          String?         @map("room_id") @db.Uuid
+  unitId          String?         @map("unit_id") @db.Uuid
   assignedTo      String?         @map("assigned_to") @db.Uuid
   createdBy       String          @map("created_by") @db.Uuid
   title           String
   description     String?
   priority        TaskPriority    @default(medium)
   status          TaskStatus      @default(pending)
+  approvalDecision ReviewDecision  @default(pending) @map("approval_decision")
+  approvalReviewedBy String?       @map("approval_reviewed_by") @db.Uuid
+  approvalReviewedAt DateTime?     @map("approval_reviewed_at")
+  approvalNotes    String?         @map("approval_notes")
+  completionDecision ReviewDecision @default(pending) @map("completion_decision")
+  completionReviewedBy String?     @map("completion_reviewed_by") @db.Uuid
+  completionReviewedAt DateTime?    @map("completion_reviewed_at")
+  completionNotes  String?         @map("completion_notes")
   dueDate         DateTime?       @map("due_date") @db.Date
   estimatedHours  Int?            @map("estimated_hours")
   actualHours     Float?          @map("actual_hours")
   createdAt       DateTime        @default(now()) @map("created_at")
   updatedAt       DateTime        @updatedAt @map("updated_at")
   taskInventories TaskInventory[]
+  taskFloors      TaskFloor[]
+  taskUnits       TaskUnit[]
+  subTasks        SubTask[]
   expenses        Expense[]
   reports         TaskReport[]
   taskAssignees   TaskAssignee[]  @relation("TaskAssignees")
@@ -426,26 +442,82 @@ model Task {
   creator         User            @relation("TaskCreator", fields: [createdBy], references: [id])
   floor           Floor?          @relation(fields: [floorId], references: [id])
   project         Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  room            Room?           @relation(fields: [roomId], references: [id])
+  unit            Unit?           @relation(fields: [unitId], references: [id])
 
   @@map("tasks")
+}
+
+model SubTask {
+  id                    String         @id @default(uuid()) @db.Uuid
+  taskId                String         @map("task_id") @db.Uuid
+  unitId                String         @map("unit_id") @db.Uuid
+  taskAssigneeId        String?        @map("task_assignee_id") @db.Uuid
+  createdBy             String         @map("created_by") @db.Uuid
+  title                 String
+  description           String?
+  status                TaskStatus     @default(pending)
+  approvalDecision      ReviewDecision @default(pending) @map("approval_decision")
+  approvalReviewedBy    String?        @map("approval_reviewed_by") @db.Uuid
+  approvalReviewedAt    DateTime?      @map("approval_reviewed_at")
+  approvalNotes         String?        @map("approval_notes")
+  startedAt             DateTime?      @map("started_at")
+  submittedAt           DateTime?      @map("submitted_at")
+  completedAt           DateTime?      @map("completed_at")
+  createdAt             DateTime       @default(now()) @map("created_at")
+  updatedAt             DateTime       @updatedAt @map("updated_at")
+  task                  Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  unit                  Unit           @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  taskAssignee          TaskAssignee?  @relation(fields: [taskAssigneeId], references: [id], onDelete: SetNull)
+  creator               User           @relation("SubTaskCreator", fields: [createdBy], references: [id])
+  reports               TaskReport[]
+  inventories           TaskInventory[]
+
+  @@index([taskId, unitId])
+  @@index([createdBy])
+  @@map("sub_tasks")
+}
+
+model TaskFloor {
+  id       String @id @default(uuid()) @db.Uuid
+  taskId   String @map("task_id") @db.Uuid
+  floorId  String @map("floor_id") @db.Uuid
+  task     Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  floor    Floor  @relation(fields: [floorId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, floorId])
+  @@map("task_floors")
+}
+
+model TaskUnit {
+  id      String @id @default(uuid()) @db.Uuid
+  taskId  String @map("task_id") @db.Uuid
+  unitId  String @map("unit_id") @db.Uuid
+  task    Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  unit    Unit   @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, unitId])
+  @@map("task_units")
 }
 
 model TaskAssignee {
   id         String   @id @default(uuid()) @db.Uuid
   taskId     String   @map("task_id") @db.Uuid
   userId     String   @map("user_id") @db.Uuid
+  unitId     String?  @map("unit_id") @db.Uuid
   assignedAt DateTime @default(now()) @map("assigned_at")
   task       Task     @relation("TaskAssignees", fields: [taskId], references: [id], onDelete: Cascade)
   user       User     @relation("TaskAssigneeUser", fields: [userId], references: [id], onDelete: Cascade)
+  unit       Unit?    @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  subTasks   SubTask[]
 
-  @@unique([taskId, userId])
+  @@unique([taskId, userId, unitId])
   @@map("task_assignees")
 }
 
 model TaskReport {
   id                String         @id @default(uuid()) @db.Uuid
   taskId            String         @map("task_id") @db.Uuid
+  subTaskId         String?        @map("sub_task_id") @db.Uuid
   workerId          String         @map("worker_id") @db.Uuid
   notes             String?
   beforePhotoUrl    String?        @map("before_photo_url")
@@ -458,6 +530,7 @@ model TaskReport {
   submittedAt       DateTime       @default(now()) @map("submitted_at")
   task              Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
   worker            User           @relation(fields: [workerId], references: [id])
+  subTask           SubTask?       @relation(fields: [subTaskId], references: [id], onDelete: SetNull)
 
   @@map("task_reports")
 }
@@ -641,11 +714,14 @@ model InventoryItem {
 model TaskInventory {
   id          String        @id @default(uuid()) @db.Uuid
   taskId      String        @map("task_id") @db.Uuid
+  subTaskId   String?       @map("sub_task_id") @db.Uuid
   inventoryId String        @map("inventory_id") @db.Uuid
   qtyUsed     Int           @map("qty_used")
   inventory   InventoryItem @relation(fields: [inventoryId], references: [id])
   task        Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  subTask     SubTask?      @relation(fields: [subTaskId], references: [id], onDelete: SetNull)
 
+  @@unique([subTaskId, inventoryId])
   @@map("task_inventories")
 }
 
@@ -894,6 +970,7 @@ enum TaskPriority {
 }
 
 enum TaskStatus {
+  in_active
   pending
   in_progress
   review

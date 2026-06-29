@@ -31,6 +31,7 @@ import {
   CreateSupportRequestDto,
   UpdateLocationDto,
   UpdateTaskInventoryDto,
+  CreateSubTaskDto,
 } from './dto/worker.dto';
 import { S3Service } from '../s3/s3.service';
 
@@ -80,6 +81,19 @@ export class WorkerController {
     @CurrentUser('id') workerId: string,
   ) {
     return this.workerService.getTaskDetail(taskId, workerId);
+  }
+
+  /**
+   * POST /worker/tasks/:id/subtasks
+   * Worker creates a subtask inside the unit/task
+   */
+  @Post('tasks/:id/subtasks')
+  createSubTask(
+    @Param('id', ParseUUIDPipe) taskId: string,
+    @CurrentUser('id') workerId: string,
+    @Body() dto: CreateSubTaskDto,
+  ) {
+    return this.workerService.createSubTask(taskId, workerId, dto);
   }
 
   /**

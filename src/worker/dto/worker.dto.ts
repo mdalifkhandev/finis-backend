@@ -49,6 +49,28 @@ export class SubmitTaskReportDto {
   inventoryUsed?: InventoryUsedItemDto[];
 }
 
+export class CreateSubTaskDto {
+  @IsOptional()
+  @IsUUID('4')
+  unitId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  unitIds?: string[];
+
+  @IsOptional()
+  @IsUUID('4')
+  taskAssigneeId?: string;
+
+  @IsString()
+  title!: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+}
+
 export class UpdateTaskInventoryDto {
   @IsInt()
   @Min(1)

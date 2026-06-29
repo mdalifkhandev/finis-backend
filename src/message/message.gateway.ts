@@ -84,7 +84,7 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
           }
         }
       } catch {
-        // Keep the socket connected; the UI can join rooms on demand.
+        // Keep the socket connected; the UI can join units on demand.
       }
 
       this.server.emit('user:online', { userId: client.data.userId });

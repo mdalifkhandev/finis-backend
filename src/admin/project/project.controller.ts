@@ -160,10 +160,10 @@ export class ProjectController {
     return this.projectService.deleteProject(id, adminId, userRole);
   }
 
-  // ─── FLOOR PLAN (screen: Floor & Room Setup) ───────────────────────────────
+  // ─── FLOOR PLAN (screen: Floor & Unit Setup) ───────────────────────────────
 
   /** GET /admin/projects/:id/floor-plan
-   *  Returns: all floors with their rooms, task counts per room
+   *  Returns: all floors with their units, task counts per room
    */
   @Get(':id/floor-plan')
   getFloorPlan(
@@ -247,27 +247,27 @@ export class ProjectController {
     return this.projectService.getRoomNames(id, floorId, userId, userRole);
   }
 
-  /** PUT /admin/projects/:id/units/:roomId */
-  @Put(':id/units/:roomId')
+  /** PUT /admin/projects/:id/units/:unitId */
+  @Put(':id/units/:unitId')
   updateRoom(
     @Param('id') id: string,
-    @Param('roomId') roomId: string,
+    @Param('unitId') unitId: string,
     @Body() dto: UpdateRoomDto,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
   ) {
-    return this.projectService.updateRoom(id, roomId, dto, userId, userRole);
+    return this.projectService.updateRoom(id, unitId, dto, userId, userRole);
   }
 
-  /** DELETE /admin/projects/:id/units/:roomId */
-  @Delete(':id/units/:roomId')
+  /** DELETE /admin/projects/:id/units/:unitId */
+  @Delete(':id/units/:unitId')
   deleteRoom(
     @Param('id') id: string,
-    @Param('roomId') roomId: string,
+    @Param('unitId') unitId: string,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
   ) {
-    return this.projectService.deleteRoom(id, roomId, userId, userRole);
+    return this.projectService.deleteRoom(id, unitId, userId, userRole);
   }
 
   // ─── PROJECT ANALYSIS (screen: checklist floors/tasks) ────────────────────

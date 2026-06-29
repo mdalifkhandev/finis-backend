@@ -86,7 +86,7 @@ export class CreateFloorDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateRoomDto)
-  rooms?: CreateRoomDto[];
+  units?: CreateRoomDto[];
 
   @IsOptional()
   @IsEnum(FloorStatus)

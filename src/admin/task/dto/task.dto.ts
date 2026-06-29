@@ -18,8 +18,18 @@ export class CreateTaskDto {
   floorId?: string;
 
   @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  floorIds?: string[];
+
+  @IsOptional()
   @IsString()
-  roomId?: string;
+  unitId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  unitIds?: string[];
 
   @IsOptional()
   @IsEnum(TaskPriority)
@@ -52,6 +62,16 @@ export class UpdateTaskDto {
   dueDate?: string;
 
   @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  floorIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  unitIds?: string[];
+
+  @IsOptional()
   @IsNumber()
   estimatedHours?: number;
 
@@ -78,7 +98,35 @@ export class AssignTaskDto {
   @IsArray()
   @ArrayNotEmpty()
   @IsUUID('4', { each: true })
+  unitIds!: string[];
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsUUID('4', { each: true })
   userIds!: string[];
+}
+
+export class CreateSubTaskDto {
+  @IsOptional()
+  @IsUUID('4')
+  unitId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsUUID('4', { each: true })
+  unitIds?: string[];
+
+  @IsOptional()
+  @IsUUID('4')
+  taskAssigneeId?: string;
+
+  @IsString()
+  title!: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
 }
 
 export class ReviewTaskDto {
