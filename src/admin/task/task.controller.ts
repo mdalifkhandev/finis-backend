@@ -62,6 +62,16 @@ export class TaskController {
     return this.taskService.getTaskDetails(id, userId, userRole);
   }
 
+  /** GET /admin/tasks/:id/locations — selected floors and units only */
+  @Get(':id/locations')
+  getTaskLocations(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.taskService.getTaskLocations(id, userId, userRole);
+  }
+
   /** POST /admin/tasks — Manager পারবে */
   @Post()
   createTask(

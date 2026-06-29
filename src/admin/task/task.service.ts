@@ -490,6 +490,42 @@ export class TaskService {
     };
   }
 
+  async getTaskLocations(taskId: string, userId: string, userRole: string) {
+    await this.verifyTaskAccess(taskId, userId, userRole);
+
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        taskFloors: {
+          include: { floor: { select: { id: true, name: true } } },
+        },
+        taskUnits: {
+          include: { unit: { select: { id: true, name: true } } },
+        },
+      },
+    });
+
+    if (!task) throw new NotFoundException('Task not found');
+
+    const floors = Array.from(
+      new Map(
+        task.taskFloors
+          .filter((entry) => entry.floor)
+          .map((entry) => [entry.floor.id, { id: entry.floor.id, name: entry.floor.name }]),
+      ).values(),
+    );
+
+    const units = Array.from(
+      new Map(
+        task.taskUnits
+          .filter((entry) => entry.unit)
+          .map((entry) => [entry.unit.id, { id: entry.unit.id, name: entry.unit.name }]),
+      ).values(),
+    );
+
+    return { floors, units };
+  }
+
   async updateTask(
     taskId: string,
     dto: UpdateTaskDto,
