@@ -1,6 +1,26 @@
-import { ArrayNotEmpty, IsArray, IsString, IsOptional, IsNumber, IsEnum, IsUUID } from 'class-validator';
+import {
+  ArrayNotEmpty,
+  IsArray,
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsEnum,
+  IsUUID,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { TaskPriority, TaskStatus } from '../../../generated/prisma/client';
+
+export class CreateTaskFloorDto {
+  @IsUUID('4')
+  floorId!: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsUUID('4', { each: true })
+  unitIds?: string[];
+}
 
 export class CreateTaskDto {
   @IsString()
@@ -30,6 +50,12 @@ export class CreateTaskDto {
   @IsArray()
   @IsUUID('4', { each: true })
   unitIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateTaskFloorDto)
+  floors?: CreateTaskFloorDto[];
 
   @IsOptional()
   @IsEnum(TaskPriority)

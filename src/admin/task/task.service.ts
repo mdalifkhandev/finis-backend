@@ -163,23 +163,68 @@ export class TaskService {
     });
   }
 
+  private buildTaskLocations(task: any) {
+    const floorMap = new Map<
+      string,
+      { id: string; name: string; floorNumber: number; units: Array<{ id: string; name: string }> }
+    >();
+
+    for (const entry of task.taskFloors ?? []) {
+      if (!entry.floor) continue;
+      if (!floorMap.has(entry.floor.id)) {
+        floorMap.set(entry.floor.id, {
+          id: entry.floor.id,
+          name: entry.floor.name,
+          floorNumber: entry.floor.floorNumber,
+          units: [],
+        });
+      }
+    }
+
+    for (const entry of task.taskUnits ?? []) {
+      if (!entry.unit) continue;
+      const floorId = entry.unit.floor?.id ?? entry.unit.floorId ?? task.floorId ?? null;
+      const floorName = entry.unit.floor?.name ?? null;
+      const floorNumber = entry.unit.floor?.floorNumber ?? 0;
+
+      if (!floorId) continue;
+
+      if (!floorMap.has(floorId)) {
+        floorMap.set(floorId, {
+          id: floorId,
+          name: floorName ?? 'Floor',
+          floorNumber,
+          units: [],
+        });
+      }
+
+      const floor = floorMap.get(floorId)!;
+      if (!floor.units.some((unit) => unit.id === entry.unit.id)) {
+        floor.units.push({ id: entry.unit.id, name: entry.unit.name });
+      }
+    }
+
+    return Array.from(floorMap.values());
+  }
+
   private toTaskResponse(task: any) {
-    const assignees = task.taskAssignees?.map((assignment: any) => ({
-      id: assignment.user.id,
-      fullName: assignment.user.fullName,
-      avatarUrl: assignment.user.avatarUrl,
-      role: assignment.user.role,
-      unitId: assignment.unitId,
-      unit: assignment.unit ?? null,
-    })) ?? [];
+    const { taskFloors, taskUnits, taskAssignees, subTasks, _count, project, floor, unit, ...rest } = task;
 
     return {
-      ...task,
-      assignees,
-      floors: task.taskFloors?.map((entry: any) => entry.floor) ?? [],
-      units: task.taskUnits?.map((entry: any) => entry.unit) ?? [],
-      subTasks: task.subTasks ?? [],
-      available: assignees.length === 0,
+      project: project ? { id: project.id, name: project.name } : null,
+      task: {
+        id: rest.id,
+        title: rest.title,
+        description: rest.description,
+        priority: rest.priority,
+        status: rest.status,
+        approvalDecision: rest.approvalDecision,
+        approvalNotes: rest.approvalNotes,
+        completionDecision: rest.completionDecision,
+        completionNotes: rest.completionNotes,
+        dueDate: rest.dueDate,
+      },
+      floors: this.buildTaskLocations(task),
     };
   }
 
@@ -218,7 +263,16 @@ export class TaskService {
             include: { floor: { select: { id: true, name: true, floorNumber: true } } },
           },
           taskUnits: {
-            include: { unit: { select: { id: true, name: true, floorId: true } } },
+            include: {
+              unit: {
+                select: {
+                  id: true,
+                  name: true,
+                  floorId: true,
+                  floor: { select: { id: true, name: true, floorNumber: true } },
+                },
+              },
+            },
           },
           taskAssignees: {
             include: {
@@ -277,6 +331,11 @@ export class TaskService {
       }
     }
 
+    const nestedFloorIds = dto.floors?.map((item) => item.floorId) ?? [];
+    const nestedUnitIds = dto.floors?.flatMap((item) => item.unitIds ?? []) ?? [];
+    const floorIds = Array.from(new Set([...(dto.floorIds ?? []), ...nestedFloorIds]));
+    const unitIds = Array.from(new Set([...(dto.unitIds ?? []), ...nestedUnitIds]));
+
     if (dto.floorId) {
       const floor = await this.prisma.floor.findFirst({
         where: { id: dto.floorId, projectId: dto.projectId },
@@ -291,22 +350,22 @@ export class TaskService {
       if (!room) throw new NotFoundException('Unit not found in this project');
     }
 
-    if (dto.floorIds?.length) {
+    if (floorIds.length) {
       const floors = await this.prisma.floor.findMany({
-        where: { id: { in: dto.floorIds }, projectId: dto.projectId },
+        where: { id: { in: floorIds }, projectId: dto.projectId },
         select: { id: true },
       });
-      if (floors.length !== dto.floorIds.length) {
+      if (floors.length !== floorIds.length) {
         throw new NotFoundException('One or more floors not found in this project');
       }
     }
 
-    if (dto.unitIds?.length) {
+    if (unitIds.length) {
       const units = await this.prisma.unit.findMany({
-        where: { id: { in: dto.unitIds }, floor: { projectId: dto.projectId } },
+        where: { id: { in: unitIds }, floor: { projectId: dto.projectId } },
         select: { id: true },
       });
-      if (units.length !== dto.unitIds.length) {
+      if (units.length !== unitIds.length) {
         throw new NotFoundException('One or more units not found in this project');
       }
     }
@@ -316,8 +375,8 @@ export class TaskService {
     const task = await this.prisma.task.create({
       data: {
         projectId: dto.projectId,
-        floorId: dto.floorId ?? null,
-        unitId: dto.unitId ?? null,
+        floorId: dto.floors?.length ? null : dto.floorId ?? null,
+        unitId: dto.floors?.length ? null : dto.unitId ?? null,
         assignedTo: null,
         createdBy: userId,
         title: dto.title,
@@ -332,9 +391,9 @@ export class TaskService {
       },
     });
 
-    if (dto.floorIds?.length) {
+    if (floorIds.length) {
       await this.prisma.taskFloor.createMany({
-        data: dto.floorIds.map((floorId) => ({ taskId: task.id, floorId })),
+        data: floorIds.map((floorId) => ({ taskId: task.id, floorId })),
         skipDuplicates: true,
       });
     } else if (dto.floorId) {
@@ -344,9 +403,9 @@ export class TaskService {
       });
     }
 
-    if (dto.unitIds?.length) {
+    if (unitIds.length) {
       await this.prisma.taskUnit.createMany({
-        data: dto.unitIds.map((unitId) => ({ taskId: task.id, unitId })),
+        data: unitIds.map((unitId) => ({ taskId: task.id, unitId })),
         skipDuplicates: true,
       });
     } else if (dto.unitId) {
@@ -366,7 +425,16 @@ export class TaskService {
           include: { floor: { select: { id: true, name: true, floorNumber: true } } },
         },
         taskUnits: {
-          include: { unit: { select: { id: true, name: true, floorId: true } } },
+          include: {
+            unit: {
+              select: {
+                id: true,
+                name: true,
+                floorId: true,
+                floor: { select: { id: true, name: true, floorNumber: true } },
+              },
+            },
+          },
         },
         taskAssignees: {
           include: {
@@ -401,7 +469,16 @@ export class TaskService {
           include: { floor: { select: { id: true, name: true, floorNumber: true } } },
         },
         taskUnits: {
-          include: { unit: { select: { id: true, name: true, floorId: true } } },
+          include: {
+            unit: {
+              select: {
+                id: true,
+                name: true,
+                floorId: true,
+                floor: { select: { id: true, name: true, floorNumber: true } },
+              },
+            },
+          },
         },
         subTasks: {
           orderBy: { createdAt: 'desc' },
@@ -500,7 +577,16 @@ export class TaskService {
           include: { floor: { select: { id: true, name: true } } },
         },
         taskUnits: {
-          include: { unit: { select: { id: true, name: true } } },
+          include: {
+            unit: {
+              select: {
+                id: true,
+                name: true,
+                floorId: true,
+                floor: { select: { id: true, name: true, floorNumber: true } },
+              },
+            },
+          },
         },
       },
     });
@@ -792,7 +878,16 @@ export class TaskService {
           include: { floor: { select: { id: true, name: true, floorNumber: true } } },
         },
         taskUnits: {
-          include: { unit: { select: { id: true, name: true, floorId: true } } },
+          include: {
+            unit: {
+              select: {
+                id: true,
+                name: true,
+                floorId: true,
+                floor: { select: { id: true, name: true, floorNumber: true } },
+              },
+            },
+          },
         },
       },
     });
