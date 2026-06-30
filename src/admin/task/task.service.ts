@@ -270,15 +270,125 @@ export class TaskService {
         description: subTask.description,
         priority: subTask.priority,
         dueDate: subTask.dueDate,
+        estimatedHours: subTask.estimatedHours,
         status: subTask.status,
         approvalDecision: subTask.approvalDecision,
         approvalNotes: subTask.approvalNotes,
         startedAt: subTask.startedAt,
         submittedAt: subTask.submittedAt,
         completedAt: subTask.completedAt,
-        unit: subTask.unit ?? null,
         units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
       })),
+    };
+  }
+
+  private toSimpleSubTaskResponse(subTask: any) {
+    if (!subTask) return null;
+    const latestReport = subTask.reports?.[0] ?? null;
+
+    return {
+      id: subTask.id,
+      title: subTask.title,
+      description: subTask.description,
+      priority: subTask.priority,
+      dueDate: subTask.dueDate,
+      estimatedHours: subTask.estimatedHours,
+      status: subTask.status,
+      approvalDecision: subTask.approvalDecision,
+      approvalNotes: subTask.approvalNotes ?? null,
+      startedAt: subTask.startedAt ?? null,
+      submittedAt: subTask.submittedAt ?? null,
+      completedAt: subTask.completedAt ?? null,
+      reportSummary: latestReport?.notes ?? null,
+      task: subTask.task ?? null,
+      units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
+      creator: subTask.creator ?? null,
+      taskAssignee: subTask.taskAssignee ?? null,
+    };
+  }
+
+  private toAdminSubTaskDetailResponse(subTask: any, taskExpenses: any[] = []) {
+    if (!subTask) return null;
+
+    const latestReport = subTask.reports?.[0] ?? null;
+    const taskProject = subTask.task?.project ?? null;
+    const assignment = subTask.taskAssignee
+      ? {
+          id: subTask.taskAssignee.id,
+          worker: subTask.taskAssignee.user ?? null,
+          unit: subTask.taskAssignee.unit ?? null,
+          assignedAt: subTask.taskAssignee.assignedAt ?? null,
+        }
+      : null;
+
+    return {
+      id: subTask.id,
+      title: subTask.title,
+      description: subTask.description,
+      priority: subTask.priority,
+      status: subTask.status,
+      approvalDecision: subTask.approvalDecision,
+      approvalNotes: subTask.approvalNotes ?? null,
+      dueDate: subTask.dueDate,
+      estimatedHours: subTask.estimatedHours,
+      estimatedTimeLabel:
+        subTask.estimatedHours !== null && subTask.estimatedHours !== undefined
+          ? `${subTask.estimatedHours} hours`
+          : null,
+      startedAt: subTask.startedAt ?? null,
+      submittedAt: subTask.submittedAt ?? null,
+      completedAt: subTask.completedAt ?? null,
+      createdAt: subTask.createdAt,
+      updatedAt: subTask.updatedAt,
+      task: subTask.task ?? null,
+      project: taskProject,
+      creator: subTask.creator ?? null,
+      assignment,
+      photos: {
+        beforePhotoUrl: latestReport?.beforePhotoUrl ?? null,
+        afterPhotoUrl: latestReport?.afterPhotoUrl ?? null,
+        receiptUrl: latestReport?.receiptUrl ?? null,
+      },
+      reportSummary: latestReport?.notes ?? null,
+      report: latestReport
+        ? {
+            id: latestReport.id,
+            notes: latestReport.notes ?? null,
+            reviewDecision: latestReport.reviewDecision ?? null,
+            reviewDescription: latestReport.reviewDescription ?? null,
+            reviewAttachmentUrl: latestReport.reviewAttachmentUrl ?? null,
+            reviewedBy: latestReport.reviewedBy ?? null,
+            reviewedAt: latestReport.reviewedAt ?? null,
+            submittedAt: latestReport.submittedAt ?? null,
+          }
+        : null,
+      review: {
+        approvalDecision: subTask.approvalDecision,
+        approvalDescription: subTask.approvalNotes ?? null,
+        approvalAttachmentUrl: subTask.approvalAttachmentUrl ?? null,
+        reportDecision: latestReport?.reviewDecision ?? null,
+        reportDescription: latestReport?.reviewDescription ?? null,
+        reportAttachmentUrl: latestReport?.reviewAttachmentUrl ?? null,
+      },
+      inventoryUsed: (subTask.inventories ?? []).map((item: any) => ({
+        id: item.id,
+        qtyUsed: item.qtyUsed,
+        inventory: item.inventory,
+      })),
+      expenses: taskExpenses.map((expense) => ({
+        id: expense.id,
+        description: expense.description,
+        category: expense.category,
+        amount: expense.amount,
+        status: expense.status,
+        date: expense.date,
+        receiptUrl: expense.receiptUrl,
+        reviewedBy: expense.reviewedBy,
+        reviewedAt: expense.reviewedAt,
+          reviewNotes: expense.reviewNotes,
+      })),
+      units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
+      taskAssignee: subTask.taskAssignee ?? null,
     };
   }
 
@@ -673,7 +783,6 @@ export class TaskService {
       where: { taskId },
       orderBy: { createdAt: 'desc' },
       include: {
-        unit: { select: { id: true, name: true } },
         subTaskUnits: {
           include: {
             unit: { select: { id: true, name: true } },
@@ -685,6 +794,7 @@ export class TaskService {
             title: true,
             priority: true,
             dueDate: true,
+            estimatedHours: true,
             status: true,
             approvalDecision: true,
             project: { select: { id: true, name: true } },
@@ -694,25 +804,13 @@ export class TaskService {
     });
 
     return {
-      data: subTasks.map((subTask: any) => ({
-        id: subTask.id,
-        title: subTask.title,
-        description: subTask.description,
-        priority: subTask.priority,
-        dueDate: subTask.dueDate,
-        status: subTask.status,
-        approvalDecision: subTask.approvalDecision,
-        task: subTask.task,
-        units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
-      })),
+      data: subTasks.map((subTask: any) => this.toSimpleSubTaskResponse(subTask)),
     };
   }
 
-  async getSubTaskDetails(taskId: string, subTaskId: string, userId: string, userRole: string) {
-    await this.verifyTaskAccess(taskId, userId, userRole);
-
+  async getSubTaskDetails(subTaskId: string, userId: string, userRole: string) {
     const subTask = await this.prisma.subTask.findFirst({
-      where: { id: subTaskId, taskId },
+      where: { id: subTaskId },
       include: {
         task: {
           select: {
@@ -720,12 +818,17 @@ export class TaskService {
             title: true,
             priority: true,
             dueDate: true,
+            estimatedHours: true,
             status: true,
             approvalDecision: true,
             project: { select: { id: true, name: true } },
           },
         },
-        unit: { select: { id: true, name: true, type: true } },
+        reports: {
+          orderBy: { submittedAt: 'desc' },
+          take: 1,
+          select: { notes: true, submittedAt: true },
+        },
         subTaskUnits: {
           include: {
             unit: { select: { id: true, name: true } },
@@ -737,10 +840,6 @@ export class TaskService {
             user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
             unit: { select: { id: true, name: true } },
           },
-        },
-        reports: {
-          orderBy: { submittedAt: 'desc' },
-          include: { worker: { select: { id: true, fullName: true, avatarUrl: true } } },
         },
         inventories: {
           include: {
@@ -754,7 +853,9 @@ export class TaskService {
       throw new NotFoundException('Sub task not found');
     }
 
-    return subTask;
+    await this.verifyTaskAccess(subTask.taskId, userId, userRole);
+
+    return this.toSimpleSubTaskResponse(subTask);
   }
 
   async getAllSubTasks(
@@ -827,6 +928,7 @@ export class TaskService {
         description: subTask.description,
         priority: subTask.priority,
         dueDate: subTask.dueDate,
+        estimatedHours: subTask.estimatedHours,
         status: subTask.status,
         approvalDecision: subTask.approvalDecision,
         task: subTask.task,
@@ -860,10 +962,9 @@ export class TaskService {
             status: true,
             approvalDecision: true,
             completionDecision: true,
-            project: { select: { id: true, name: true } },
+            project: { select: { id: true, name: true, location: true } },
           },
         },
-        unit: { select: { id: true, name: true, type: true } },
         subTaskUnits: {
           include: {
             unit: { select: { id: true, name: true } },
@@ -878,13 +979,24 @@ export class TaskService {
         },
         reports: {
           orderBy: { submittedAt: 'desc' },
-          include: {
-            worker: { select: { id: true, fullName: true, avatarUrl: true } },
+          take: 1,
+          select: {
+            id: true,
+            notes: true,
+            beforePhotoUrl: true,
+            afterPhotoUrl: true,
+            receiptUrl: true,
+            reviewDecision: true,
+            reviewDescription: true,
+            reviewAttachmentUrl: true,
+            reviewedBy: true,
+            reviewedAt: true,
+            submittedAt: true,
           },
         },
         inventories: {
           include: {
-            inventory: { select: { id: true, name: true, unit: true } },
+            inventory: { select: { id: true, name: true, unit: true, category: true } },
           },
         },
       },
@@ -894,7 +1006,83 @@ export class TaskService {
       throw new NotFoundException('Sub task not found');
     }
 
-    return subTask;
+    const taskExpenses = await this.prisma.expense.findMany({
+      where: { taskId: subTask.taskId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        description: true,
+        category: true,
+        amount: true,
+        status: true,
+        date: true,
+        receiptUrl: true,
+        reviewedBy: true,
+        reviewedAt: true,
+        reviewNotes: true,
+      },
+    });
+
+    return this.toAdminSubTaskDetailResponse(subTask, taskExpenses);
+  }
+
+  async reviewSubTaskApproval(
+    subTaskId: string,
+    dto: ReviewTaskDto,
+    userId: string,
+    userRole: string,
+    file?: { filename: string },
+  ) {
+    const subTask = await this.prisma.subTask.findUnique({
+      where: { id: subTaskId },
+      include: {
+        taskAssignee: true,
+        task: { select: { id: true } },
+      },
+    });
+
+    if (!subTask) throw new NotFoundException('Sub task not found');
+
+    return this.reviewSubTaskCreation(subTask.taskId, subTaskId, {
+      ...dto,
+      reviewAttachmentUrl: file?.filename ?? dto.reviewAttachmentUrl,
+    }, userId, userRole);
+  }
+
+  async reviewSubTaskReport(
+    subTaskId: string,
+    dto: ReviewTaskDto,
+    userId: string,
+    userRole: string,
+    file?: { filename: string },
+  ) {
+    const subTask = await this.prisma.subTask.findUnique({
+      where: { id: subTaskId },
+      select: { id: true, taskId: true },
+    });
+
+    if (!subTask) throw new NotFoundException('Sub task not found');
+
+    const latestReport = await this.prisma.taskReport.findFirst({
+      where: { subTaskId },
+      orderBy: { submittedAt: 'desc' },
+      select: { id: true },
+    });
+
+    if (!latestReport) {
+      throw new NotFoundException('Sub task report not found');
+    }
+
+    return this.reviewTaskReport(
+      subTask.taskId,
+      latestReport.id,
+      {
+        ...dto,
+        reviewAttachmentUrl: file?.filename ?? dto.reviewAttachmentUrl,
+      },
+      userId,
+      userRole,
+    );
   }
 
   async updateTask(
@@ -1099,52 +1287,60 @@ export class TaskService {
       throw new BadRequestException('Task must be approved before assigning workers');
     }
 
-    const unitIds = [...new Set(dto.unitIds)];
-    if (unitIds.length === 0) {
-      throw new BadRequestException('At least one unit is required');
+    const workerIds = Array.from(
+      new Set([...(dto.workerIds ?? []), ...(dto.workerId ? [dto.workerId] : [])]),
+    );
+
+    if (workerIds.length === 0) {
+      throw new BadRequestException('workerId or workerIds is required');
     }
 
-    const units = await this.prisma.taskUnit.findMany({
-      where: { taskId, unitId: { in: unitIds } },
-      include: { unit: { select: { id: true, name: true } } },
-    });
-    if (units.length !== unitIds.length) {
-      throw new NotFoundException('One or more units not found in this task');
-    }
-
-    const uniqueUserIds = [...new Set(dto.userIds)];
-    if (uniqueUserIds.length === 0) {
-      throw new BadRequestException('At least one worker is required');
-    }
-
-    const members = await this.prisma.projectMember.findMany({
-      where: { projectId: task.projectId, userId: { in: uniqueUserIds }, role: 'worker' },
+    const workers = await this.prisma.projectMember.findMany({
+      where: {
+        projectId: task.projectId,
+        userId: { in: workerIds },
+        role: 'worker',
+      },
       select: { userId: true },
     });
 
-    if (members.length !== uniqueUserIds.length) {
-      throw new BadRequestException('One or more users are not members of this project');
+    if (workers.length !== workerIds.length) {
+      throw new BadRequestException('One or more workers are not members of this project');
     }
 
-    const existing = await this.prisma.taskAssignee.findMany({
-      where: { taskId, unitId: { in: unitIds }, userId: { in: uniqueUserIds } },
-      select: { userId: true, unitId: true },
+    const taskUnits = await this.prisma.taskUnit.findMany({
+      where: { taskId },
+      include: { unit: { select: { id: true, name: true } } },
     });
 
-    const existingKeys = new Set(existing.map((item) => `${item.unitId}:${item.userId}`));
-    const data = unitIds.flatMap((unitId) =>
-      uniqueUserIds
-        .filter((workerId) => !existingKeys.has(`${unitId}:${workerId}`))
-        .map((workerId) => ({
+    await this.prisma.$transaction([
+      this.prisma.taskAssignee.deleteMany({ where: { taskId } }),
+      this.prisma.task.update({
+        where: { id: taskId },
+        data: { assignedTo: workerIds[0] },
+      }),
+    ]);
+
+    if (taskUnits.length > 0) {
+      const assigneeRows = workerIds.flatMap((workerId) =>
+        taskUnits.map((item) => ({
           taskId,
           userId: workerId,
-          unitId: unitId,
+          unitId: item.unitId,
         })),
-    );
+      );
 
-    if (data.length > 0) {
       await this.prisma.taskAssignee.createMany({
-        data,
+        data: assigneeRows,
+        skipDuplicates: true,
+      });
+    } else {
+      await this.prisma.taskAssignee.createMany({
+        data: workerIds.map((workerId) => ({
+          taskId,
+          userId: workerId,
+          unitId: null,
+        })),
         skipDuplicates: true,
       });
     }
@@ -1179,17 +1375,18 @@ export class TaskService {
 
     if (!updated) throw new NotFoundException('Task not found');
 
-    const notifiedWorkerIds = [...new Set(data.map((item) => item.userId))];
-    for (const workerId of notifiedWorkerIds) {
-      await this.notificationsService.send({
-        userId: workerId,
-        title: 'New Unit Assigned',
-        body: `You have been assigned to a unit on task: ${task.title}`,
-        type: 'task',
-        refId: taskId,
-        refType: 'task',
-      });
-    }
+    await Promise.all(
+      workerIds.map((workerId) =>
+        this.notificationsService.send({
+          userId: workerId,
+          title: 'Task Assigned',
+          body: `You have been assigned to task: ${task.title}`,
+          type: 'task',
+          refId: taskId,
+          refType: 'task',
+        }),
+      ),
+    );
 
     return this.toTaskResponse(updated);
   }
@@ -1248,6 +1445,7 @@ export class TaskService {
         description: dto.description ?? null,
         priority: dto.priority ?? 'medium',
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        estimatedHours: dto.estimatedHours ?? null,
         status: 'pending',
         approvalDecision,
         approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
@@ -1339,6 +1537,7 @@ export class TaskService {
       throw new BadRequestException('Sub task is already reviewed');
     }
 
+    const reviewText = dto.note ?? dto.reviewDescription ?? null;
     const nextStatus = dto.reviewDecision === 'approved' ? 'approved' : 'rejected';
 
     await this.prisma.subTask.update({
@@ -1347,7 +1546,8 @@ export class TaskService {
         approvalDecision: nextStatus,
         approvalReviewedBy: userId,
         approvalReviewedAt: new Date(),
-        approvalNotes: dto.reviewDescription ?? null,
+        approvalNotes: reviewText,
+        approvalAttachmentUrl: dto.reviewAttachmentUrl ?? null,
         status: dto.reviewDecision === 'approved' ? 'pending' : 'cancelled',
       },
     });
@@ -1356,7 +1556,7 @@ export class TaskService {
       await this.notificationsService.send({
         userId: subTask.taskAssignee.userId,
         title: dto.reviewDecision === 'approved' ? 'Subtask Approved' : 'Subtask Rejected',
-        body: dto.reviewDescription ?? '',
+        body: reviewText ?? '',
         type: 'task',
         refId: subTaskId,
         refType: 'sub_task',
@@ -1382,11 +1582,14 @@ export class TaskService {
 
     if (!report) throw new NotFoundException('Report not found');
 
+    const reviewText = dto.note ?? dto.reviewDescription ?? null;
+
     const updated = await this.prisma.taskReport.update({
       where: { id: reportId },
       data: {
         reviewDecision: dto.reviewDecision as any,
-        reviewDescription: dto.reviewDescription ?? null,
+        reviewDescription: reviewText,
+        reviewAttachmentUrl: dto.reviewAttachmentUrl ?? null,
         reviewedBy: userId,
         reviewedAt: new Date(),
       },
@@ -1395,7 +1598,7 @@ export class TaskService {
     await this.notificationsService.send({
       userId: report.workerId,
       title: dto.reviewDecision === 'approved' ? 'Subtask Report Approved' : 'Subtask Report Rejected',
-      body: dto.reviewDescription ?? '',
+      body: reviewText ?? '',
       type: 'report',
       refId: reportId,
       refType: 'task_report',

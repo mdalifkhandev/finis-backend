@@ -44,6 +44,10 @@ export class SubmitTaskReportDto {
   notes?: string;
 
   @IsOptional()
+  @IsString()
+  note?: string;
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => InventoryUsedItemDto)
@@ -75,6 +79,10 @@ export class CreateSubTaskDto {
   @IsOptional()
   @IsString()
   dueDate?: string;
+
+  @IsOptional()
+  @IsNumber()
+  estimatedHours?: number;
 }
 
 export class UpdateTaskInventoryDto {

@@ -82,17 +82,6 @@ export class TaskController {
     return this.taskService.getSubTasks(id, userId, userRole);
   }
 
-  /** GET /admin/tasks/:id/subtasks/:subTaskId — sub task details */
-  @Get(':id/subtasks/:subTaskId')
-  getSubTaskDetails(
-    @Param('id') id: string,
-    @Param('subTaskId') subTaskId: string,
-    @CurrentUser('id') userId: string,
-    @CurrentUser('role') userRole: string,
-  ) {
-    return this.taskService.getSubTaskDetails(id, subTaskId, userId, userRole);
-  }
-
   /** POST /admin/tasks — Manager পারবে */
   @Post()
   createTask(
@@ -103,7 +92,7 @@ export class TaskController {
     return this.taskService.createTask(dto, userId, userRole);
   }
 
-  /** POST /admin/tasks/:id/assign — Worker assign করা (multiple unit support) */
+  /** POST /admin/tasks/:id/assign — পুরো task এক worker-কে assign করা */
   @Post(':id/assign')
   assignWorker(
     @Param('id') id: string,

@@ -458,11 +458,13 @@ model SubTask {
   description           String?
   priority              TaskPriority   @default(medium)
   dueDate               DateTime?      @map("due_date") @db.Date
+  estimatedHours        Int?           @map("estimated_hours")
   status                TaskStatus     @default(pending)
   approvalDecision      ReviewDecision @default(pending) @map("approval_decision")
   approvalReviewedBy    String?        @map("approval_reviewed_by") @db.Uuid
   approvalReviewedAt    DateTime?      @map("approval_reviewed_at")
   approvalNotes         String?        @map("approval_notes")
+  approvalAttachmentUrl String?        @map("approval_attachment_url")
   startedAt             DateTime?      @map("started_at")
   submittedAt           DateTime?      @map("submitted_at")
   completedAt           DateTime?      @map("completed_at")
@@ -540,6 +542,7 @@ model TaskReport {
   receiptUrl        String?        @map("receipt_url")
   reviewDecision    ReviewDecision @default(pending) @map("review_decision")
   reviewDescription String?        @map("review_description")
+  reviewAttachmentUrl String?      @map("review_attachment_url")
   reviewedBy        String?        @map("reviewed_by") @db.Uuid
   reviewedAt        DateTime?      @map("reviewed_at")
   submittedAt       DateTime       @default(now()) @map("submitted_at")

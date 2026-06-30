@@ -472,13 +472,14 @@ export class WorkerService {
   async createSubTask(
     taskId: string,
     workerId: string,
-      dto: {
-        unitId?: string;
-        unitIds?: string[];
-        title: string;
-        description?: string;
+    dto: {
+      unitId?: string;
+      unitIds?: string[];
+      title: string;
+      description?: string;
       priority?: TaskPriority;
       dueDate?: string;
+      estimatedHours?: number;
     },
   ) {
     const task = await this.prisma.task.findUnique({
@@ -536,6 +537,7 @@ export class WorkerService {
         description: dto.description ?? null,
         priority: dto.priority ?? TaskPriority.medium,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        estimatedHours: dto.estimatedHours ?? null,
         status: 'pending',
         approvalDecision: 'pending',
       },
@@ -554,7 +556,6 @@ export class WorkerService {
       where: { id: subTask.id },
       include: {
         task: { select: { id: true, title: true } },
-        unit: { select: { id: true, name: true } },
         subTaskUnits: {
           include: {
             unit: { select: { id: true, name: true } },
@@ -565,7 +566,20 @@ export class WorkerService {
 
     return {
       message: '1 subtask created',
-      subTask: createdSubTask,
+      subTask: createdSubTask
+        ? {
+            id: createdSubTask.id,
+            title: createdSubTask.title,
+            description: createdSubTask.description,
+            priority: createdSubTask.priority,
+            dueDate: createdSubTask.dueDate,
+            estimatedHours: createdSubTask.estimatedHours,
+            status: createdSubTask.status,
+            approvalDecision: createdSubTask.approvalDecision,
+            task: createdSubTask.task,
+            units: (createdSubTask.subTaskUnits ?? []).map((item) => item.unit),
+          }
+        : null,
     };
   }
 
@@ -637,7 +651,7 @@ export class WorkerService {
         taskId: subTask.taskId,
         subTaskId: subTask.id,
         workerId,
-        notes: dto.notes ?? null,
+        notes: dto.note ?? dto.notes ?? null,
         beforePhotoUrl: files?.beforePhoto?.[0]?.filename
           ? files.beforePhoto[0].filename
           : dto.beforePhotoUrl ?? null,
@@ -783,7 +797,7 @@ export class WorkerService {
     const updatedReport = await this.prisma.taskReport.update({
       where: { id: report.id },
       data: {
-        notes: body?.notes ?? body?.description ?? report.notes,
+        notes: body?.note ?? body?.notes ?? body?.description ?? report.notes,
         beforePhotoUrl: files?.beforePhoto?.[0]?.filename
           ? files.beforePhoto[0].filename
           : body?.beforePhotoUrl ?? report.beforePhotoUrl,

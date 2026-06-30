@@ -121,15 +121,15 @@ export class UpdateTaskStatusDto {
 }
 
 export class AssignTaskDto {
-  @IsArray()
-  @ArrayNotEmpty()
-  @IsUUID('4', { each: true })
-  unitIds!: string[];
+  @IsOptional()
+  @IsUUID('4')
+  workerId?: string;
 
+  @IsOptional()
   @IsArray()
   @ArrayNotEmpty()
   @IsUUID('4', { each: true })
-  userIds!: string[];
+  workerIds?: string[];
 }
 
 export class CreateSubTaskDto {
@@ -157,6 +157,10 @@ export class CreateSubTaskDto {
   @IsOptional()
   @IsString()
   dueDate?: string;
+
+  @IsOptional()
+  @IsNumber()
+  estimatedHours?: number;
 }
 
 export class ReviewTaskDto {
@@ -166,4 +170,12 @@ export class ReviewTaskDto {
   @IsOptional()
   @IsString()
   reviewDescription?: string;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+
+  @IsOptional()
+  @IsString()
+  reviewAttachmentUrl?: string;
 }

@@ -197,6 +197,36 @@ export class WorkerController {
   }
 
   /**
+   * PUT /worker/subtasks/:id/report
+   * Subtask report update (screen-shot friendly route)
+   */
+  @Put('subtasks/:id/report')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'beforePhoto', maxCount: 1 },
+        { name: 'afterPhoto', maxCount: 1 },
+        { name: 'receipt', maxCount: 1 },
+      ],
+      { storage: memoryStorage() },
+    ),
+  )
+  async updateSubTaskReport(
+    @Param('id', ParseUUIDPipe) subTaskId: string,
+    @CurrentUser('id') workerId: string,
+    @Body() body: any,
+    @UploadedFiles()
+    files?: {
+      beforePhoto?: Express.Multer.File[];
+      afterPhoto?: Express.Multer.File[];
+      receipt?: Express.Multer.File[];
+    },
+  ) {
+    const uploadedFiles = await this.uploadTaskReportFiles(files);
+    return this.workerService.updateTaskReport(subTaskId, workerId, body, uploadedFiles);
+  }
+
+  /**
    * GET /worker/tasks/:id/inventory
    * Task available inventory items (project company)
    */

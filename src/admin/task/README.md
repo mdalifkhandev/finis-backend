@@ -50,7 +50,6 @@ This module handles task creation, assignment, task status updates, task reports
 - `GET /admin/tasks`
 - `GET /admin/tasks/:id`
 - `GET /admin/tasks/:id/subtasks`
-- `GET /admin/tasks/:id/subtasks/:subTaskId`
 - `GET /admin/subtasks`
 - `GET /admin/subtasks/:id`
 - `POST /admin/tasks`
@@ -68,6 +67,20 @@ This module handles task creation, assignment, task status updates, task reports
 - Subtasks are always created under an existing main task.
 - Use `unitId` for one unit or `unitIds` for multiple units in the same task.
 - Legacy single `floorId` and `unitId` still work.
+- `POST /admin/tasks/:id/assign` body can use `workerId` for single assign or `workerIds` for multiple assign.
+- `GET /admin/subtasks/:id` is the subtask details API.
+
+```json
+{
+  "workerId": "worker-user-id"
+}
+```
+
+```json
+{
+  "workerIds": ["worker-user-id-1", "worker-user-id-2"]
+}
+```
 
 ## Example Status Update
 
