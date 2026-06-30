@@ -403,6 +403,7 @@ model Unit {
   taskUnits TaskUnit[]
   taskAssignees TaskAssignee[]
   subTasks SubTask[]
+  subTaskUnits SubTaskUnit[]
 
   @@map("units")
 }
@@ -471,10 +472,22 @@ model SubTask {
   creator               User           @relation("SubTaskCreator", fields: [createdBy], references: [id])
   reports               TaskReport[]
   inventories           TaskInventory[]
+  subTaskUnits          SubTaskUnit[]
 
   @@index([taskId, unitId])
   @@index([createdBy])
   @@map("sub_tasks")
+}
+
+model SubTaskUnit {
+  id        String  @id @default(uuid()) @db.Uuid
+  subTaskId String  @map("sub_task_id") @db.Uuid
+  unitId    String  @map("unit_id") @db.Uuid
+  subTask   SubTask @relation(fields: [subTaskId], references: [id], onDelete: Cascade)
+  unit      Unit    @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@unique([subTaskId, unitId])
+  @@map("sub_task_units")
 }
 
 model TaskFloor {

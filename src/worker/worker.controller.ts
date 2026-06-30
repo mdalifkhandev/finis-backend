@@ -72,6 +72,21 @@ export class WorkerController {
   }
 
   /**
+   * GET /worker/subtasks?status=pending&search=paint&page=1&limit=10
+   * Dedicated subtask list
+   */
+  @Get('subtasks')
+  getSubTasks(
+    @CurrentUser('id') workerId: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '10',
+  ) {
+    return this.workerService.getSubTasks(workerId, status, search, +page, +limit);
+  }
+
+  /**
    * GET /worker/tasks/:id
    * Task details (geofence, floor, room, inventory, previous reports)
    */
@@ -81,6 +96,18 @@ export class WorkerController {
     @CurrentUser('id') workerId: string,
   ) {
     return this.workerService.getTaskDetail(taskId, workerId);
+  }
+
+  /**
+   * GET /worker/subtasks/:id
+   * Dedicated subtask detail
+   */
+  @Get('subtasks/:id')
+  getSubTaskDetail(
+    @Param('id', ParseUUIDPipe) subTaskId: string,
+    @CurrentUser('id') workerId: string,
+  ) {
+    return this.workerService.getSubTaskDetail(subTaskId, workerId);
   }
 
   /**

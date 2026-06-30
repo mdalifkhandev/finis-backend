@@ -5,6 +5,7 @@ import {
   IsInt,
   Min,
   IsArray,
+  ArrayNotEmpty,
   IsEnum,
   IsDateString,
   ValidateNested,
@@ -56,6 +57,7 @@ export class CreateSubTaskDto {
 
   @IsOptional()
   @IsArray()
+  @ArrayNotEmpty()
   @IsUUID('4', { each: true })
   unitIds?: string[];
 

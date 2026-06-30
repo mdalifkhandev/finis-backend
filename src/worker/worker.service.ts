@@ -47,6 +47,12 @@ export class WorkerService {
     return subTask.createdBy === workerId || subTask.taskAssignee?.userId === workerId;
   }
 
+  private ensureSubTaskApproved(subTask: { approvalDecision?: string }, actionLabel: string) {
+    if (subTask.approvalDecision !== 'approved') {
+      throw new BadRequestException(`Subtask must be approved before ${actionLabel}`);
+    }
+  }
+
   private workerTaskWhere(workerId: string) {
     return {
       OR: [
@@ -320,6 +326,16 @@ export class WorkerService {
     };
   }
 
+  async getSubTasks(
+    workerId: string,
+    status?: string,
+    search?: string,
+    page = 1,
+    limit = 10,
+  ) {
+    return this.getMyTasks(workerId, status, search, page, limit);
+  }
+
   async getTaskDetail(taskId: string, workerId: string) {
     const subTask = await this.prisma.subTask.findUnique({
       where: { id: taskId },
@@ -406,6 +422,10 @@ export class WorkerService {
     return subTask;
   }
 
+  async getSubTaskDetail(subTaskId: string, workerId: string) {
+    return this.getTaskDetail(subTaskId, workerId);
+  }
+
   async startTask(taskId: string, workerId: string) {
     const subTask = await this.prisma.subTask.findUnique({
       where: { id: taskId },
@@ -419,6 +439,7 @@ export class WorkerService {
     if (!this.isWorkerAssigned(subTask, workerId)) {
       throw new ForbiddenException('This task is not assigned to you');
     }
+    this.ensureSubTaskApproved(subTask, 'starting work');
     if (subTask.task.approvalDecision !== 'approved') {
       throw new BadRequestException('Main task is not approved yet');
     }
@@ -463,69 +484,84 @@ export class WorkerService {
       throw new BadRequestException('Main task must be approved first');
     }
 
-    const unitIds = Array.from(new Set(dto.unitIds?.length ? dto.unitIds : dto.unitId ? [dto.unitId] : []));
+    const unitIds = Array.from(new Set([...(dto.unitIds ?? []), ...(dto.unitId ? [dto.unitId] : [])]));
     if (unitIds.length === 0) {
       throw new BadRequestException('unitId or unitIds is required');
     }
 
-    const subTasks: any[] = [];
+    const taskUnits = await this.prisma.taskUnit.findMany({
+      where: { taskId, unitId: { in: unitIds } },
+      include: { unit: { select: { id: true, name: true } } },
+    });
 
-    for (const unitId of unitIds) {
-      const unit = await this.prisma.taskUnit.findFirst({
-        where: { taskId, unitId },
-        include: { unit: { select: { id: true, name: true } } },
-      });
-      if (!unit) throw new NotFoundException('Unit not found in this task');
-
-      let assignee = dto.taskAssigneeId
-        ? await this.prisma.taskAssignee.findFirst({
-            where: { id: dto.taskAssigneeId, taskId, unitId },
-            select: { id: true, userId: true },
-          })
-        : null;
-
-      if (!assignee) {
-        assignee = await this.prisma.taskAssignee.findFirst({
-          where: { taskId, unitId, userId: workerId },
-          select: { id: true, userId: true },
-        });
-      }
-
-      if (!assignee) {
-        assignee = await this.prisma.taskAssignee.findFirst({
-          where: { taskId, unitId },
-          select: { id: true, userId: true },
-          orderBy: { assignedAt: 'asc' },
-        });
-      }
-
-      if (!assignee) {
-        throw new BadRequestException('No worker assigned for this unit');
-      }
-
-      const subTask = await this.prisma.subTask.create({
-        data: {
-          taskId,
-          unitId,
-          taskAssigneeId: assignee.id,
-          createdBy: workerId,
-          title: dto.title,
-          description: dto.description ?? null,
-          status: 'pending',
-          approvalDecision: 'pending',
-        },
-        include: {
-          task: { select: { id: true, title: true } },
-          unit: { select: { id: true, name: true } },
-        },
-      });
-
-      subTasks.push(subTask);
+    if (taskUnits.length !== unitIds.length) {
+      throw new NotFoundException('One or more units not found in this task');
     }
 
+    const primaryUnitId = unitIds[0];
+    const primaryUnit = taskUnits.find((item) => item.unitId === primaryUnitId);
+    if (!primaryUnit) throw new NotFoundException('Unit not found in this task');
+
+    let assignee = dto.taskAssigneeId
+      ? await this.prisma.taskAssignee.findFirst({
+          where: { id: dto.taskAssigneeId, taskId, unitId: primaryUnitId },
+          select: { id: true, userId: true },
+        })
+      : null;
+
+    if (!assignee) {
+      assignee = await this.prisma.taskAssignee.findFirst({
+        where: { taskId, unitId: primaryUnitId, userId: workerId },
+        select: { id: true, userId: true },
+      });
+    }
+
+    if (!assignee) {
+      assignee = await this.prisma.taskAssignee.findFirst({
+        where: { taskId, unitId: primaryUnitId },
+        select: { id: true, userId: true },
+        orderBy: { assignedAt: 'asc' },
+      });
+    }
+
+    const subTask = await this.prisma.subTask.create({
+      data: {
+        taskId,
+        unitId: primaryUnitId,
+        taskAssigneeId: assignee?.id ?? null,
+        createdBy: workerId,
+        title: dto.title,
+        description: dto.description ?? null,
+        status: 'pending',
+        approvalDecision: 'pending',
+      },
+      include: {
+        task: { select: { id: true, title: true } },
+        unit: { select: { id: true, name: true } },
+      },
+    });
+
+    await this.prisma.subTaskUnit.createMany({
+      data: unitIds.map((unitId) => ({ subTaskId: subTask.id, unitId })),
+      skipDuplicates: true,
+    });
+
+    const createdSubTask = await this.prisma.subTask.findUnique({
+      where: { id: subTask.id },
+      include: {
+        task: { select: { id: true, title: true } },
+        unit: { select: { id: true, name: true } },
+        subTaskUnits: {
+          include: {
+            unit: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
     return {
-      message: `${subTasks.length} subtasks created`,
-      subtasks: subTasks,
+      message: '1 subtask created',
+      subTask: createdSubTask,
     };
   }
 
@@ -551,6 +587,7 @@ export class WorkerService {
     if (!this.isWorkerAssigned(subTask, workerId)) {
       throw new ForbiddenException('This task is not assigned to you');
     }
+    this.ensureSubTaskApproved(subTask, 'submitting a report');
     if (subTask.status === 'completed') {
       throw new BadRequestException('Task is already completed');
     }
@@ -654,6 +691,7 @@ export class WorkerService {
     if (!this.isWorkerAssigned(subTask, workerId)) {
       throw new ForbiddenException('This task is not assigned to you');
     }
+    this.ensureSubTaskApproved(subTask, 'updating the report');
 
     const report = await this.prisma.taskReport.findFirst({
       where: { subTaskId: taskId, workerId },
@@ -772,6 +810,7 @@ export class WorkerService {
     if (!this.isWorkerAssigned(subTask, workerId)) {
       throw new ForbiddenException('This task is not assigned to you');
     }
+    this.ensureSubTaskApproved(subTask, 'viewing inventory items');
 
     return this.prisma.inventoryItem.findMany({
       where: {
@@ -808,6 +847,7 @@ export class WorkerService {
     if (!this.isWorkerAssigned(subTask, workerId)) {
       throw new ForbiddenException('This task is not assigned to you');
     }
+    this.ensureSubTaskApproved(subTask, 'updating task inventory');
 
     if (subTask.status === 'completed') {
       throw new BadRequestException('Completed task inventory cannot be updated');

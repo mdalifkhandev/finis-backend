@@ -49,6 +49,10 @@ This module handles task creation, assignment, task status updates, task reports
 
 - `GET /admin/tasks`
 - `GET /admin/tasks/:id`
+- `GET /admin/tasks/:id/subtasks`
+- `GET /admin/tasks/:id/subtasks/:subTaskId`
+- `GET /admin/subtasks`
+- `GET /admin/subtasks/:id`
 - `POST /admin/tasks`
 - `POST /admin/tasks/:id/assign`
 - `GET /admin/tasks/:id/available-workers`
@@ -61,7 +65,8 @@ This module handles task creation, assignment, task status updates, task reports
 
 - Task create/update supports multiple floors and multiple units.
 - Use `floorIds` for floors.
-- Use `unitIds` for units.
+- Subtasks are always created under an existing main task.
+- Use `unitId` for one unit or `unitIds` for multiple units in the same task.
 - Legacy single `floorId` and `unitId` still work.
 
 ## Example Status Update

@@ -207,8 +207,36 @@ export class TaskService {
     return Array.from(floorMap.values());
   }
 
+  private buildTaskLocationLabel(task: any) {
+    const locations = this.buildTaskLocations(task);
+    if (locations.length === 0) {
+      return null;
+    }
+
+    return locations
+      .map((floor) => {
+        const unitNames = floor.units.map((unit) => unit.name);
+        return unitNames.length > 0 ? `${floor.name} - ${unitNames.join(', ')}` : floor.name;
+      })
+      .join('; ');
+  }
+
+  private countAssignedWorkers(task: any) {
+    const uniqueWorkerIds = new Set(
+      (task.taskAssignees ?? [])
+        .map((assignee: any) => assignee?.user?.id ?? assignee?.userId ?? null)
+        .filter(Boolean),
+    );
+
+    return uniqueWorkerIds.size;
+  }
+
   private toTaskResponse(task: any) {
     const { taskFloors, taskUnits, taskAssignees, subTasks, _count, project, floor, unit, ...rest } = task;
+    const subTaskCount = _count?.subTasks ?? subTasks?.length ?? 0;
+    const completedSubTaskCount =
+      subTasks?.filter((subTask: any) => subTask.status === 'completed').length ?? 0;
+    const assignedWorkerCount = this.countAssignedWorkers(task);
 
     return {
       project: project ? { id: project.id, name: project.name } : null,
@@ -225,6 +253,30 @@ export class TaskService {
         dueDate: rest.dueDate,
       },
       floors: this.buildTaskLocations(task),
+      location: this.buildTaskLocationLabel(task),
+      subTaskCount,
+      completedSubTaskCount,
+      assignedWorkerCount,
+    };
+  }
+
+  private toTaskWithSubTasksResponse(task: any) {
+    const base = this.toTaskResponse(task);
+    return {
+      ...base,
+      subTasks: (task.subTasks ?? []).map((subTask: any) => ({
+        id: subTask.id,
+        title: subTask.title,
+        description: subTask.description,
+        status: subTask.status,
+        approvalDecision: subTask.approvalDecision,
+        approvalNotes: subTask.approvalNotes,
+        startedAt: subTask.startedAt,
+        submittedAt: subTask.submittedAt,
+        completedAt: subTask.completedAt,
+        unit: subTask.unit ?? null,
+        units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
+      })),
     };
   }
 
@@ -612,6 +664,222 @@ export class TaskService {
     return { floors, units };
   }
 
+  async getSubTasks(taskId: string, userId: string, userRole: string) {
+    await this.verifyTaskAccess(taskId, userId, userRole);
+
+    const subTasks = await this.prisma.subTask.findMany({
+      where: { taskId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        unit: { select: { id: true, name: true } },
+        subTaskUnits: {
+          include: {
+            unit: { select: { id: true, name: true } },
+          },
+        },
+        taskAssignee: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            unit: { select: { id: true, name: true } },
+          },
+        },
+        creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        _count: { select: { reports: true, inventories: true } },
+      },
+    });
+
+    return {
+      data: subTasks,
+    };
+  }
+
+  async getSubTaskDetails(taskId: string, subTaskId: string, userId: string, userRole: string) {
+    await this.verifyTaskAccess(taskId, userId, userRole);
+
+    const subTask = await this.prisma.subTask.findFirst({
+      where: { id: subTaskId, taskId },
+      include: {
+        task: {
+          select: {
+            id: true,
+            title: true,
+            priority: true,
+            dueDate: true,
+            status: true,
+            approvalDecision: true,
+            project: { select: { id: true, name: true } },
+          },
+        },
+        unit: { select: { id: true, name: true, type: true } },
+        subTaskUnits: {
+          include: {
+            unit: { select: { id: true, name: true } },
+          },
+        },
+        creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        taskAssignee: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            unit: { select: { id: true, name: true } },
+          },
+        },
+        reports: {
+          orderBy: { submittedAt: 'desc' },
+          include: { worker: { select: { id: true, fullName: true, avatarUrl: true } } },
+        },
+        inventories: {
+          include: {
+            inventory: { select: { id: true, name: true, unit: true } },
+          },
+        },
+      },
+    });
+
+    if (!subTask) {
+      throw new NotFoundException('Sub task not found');
+    }
+
+    return subTask;
+  }
+
+  async getAllSubTasks(
+    userId: string,
+    userRole: string,
+    query: {
+      taskId?: string;
+      projectId?: string;
+      unitId?: string;
+      status?: string;
+      search?: string;
+      page?: number;
+      limit?: number;
+    },
+  ) {
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const limit = Math.max(1, Number(query.limit ?? 10) || 10);
+    const skip = (page - 1) * limit;
+
+    const projectIds = await this.getProjectIdsForUser(userId, userRole);
+    const where: any = {
+      task: {
+        projectId: { in: projectIds },
+        ...(query.projectId && { projectId: query.projectId }),
+      },
+      ...(query.taskId && { taskId: query.taskId }),
+      ...(query.unitId && { unitId: query.unitId }),
+      ...(query.status && { status: query.status }),
+      ...(query.search && {
+        OR: [
+          { title: { contains: query.search, mode: 'insensitive' } },
+          { description: { contains: query.search, mode: 'insensitive' } },
+        ],
+      }),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.subTask.findMany({
+        where,
+        include: {
+          task: {
+            select: {
+              id: true,
+              title: true,
+              priority: true,
+              dueDate: true,
+              status: true,
+              approvalDecision: true,
+              project: { select: { id: true, name: true } },
+            },
+          },
+          unit: { select: { id: true, name: true, floorId: true } },
+          subTaskUnits: {
+            include: {
+              unit: { select: { id: true, name: true } },
+            },
+          },
+          creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          taskAssignee: {
+            include: {
+              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+              unit: { select: { id: true, name: true } },
+            },
+          },
+          _count: { select: { reports: true, inventories: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.subTask.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getAdminSubTaskDetails(userId: string, userRole: string, subTaskId: string) {
+    const projectIds = await this.getProjectIdsForUser(userId, userRole);
+
+    const subTask = await this.prisma.subTask.findFirst({
+      where: {
+        id: subTaskId,
+        task: { projectId: { in: projectIds } },
+      },
+      include: {
+        task: {
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            priority: true,
+            dueDate: true,
+            status: true,
+            approvalDecision: true,
+            completionDecision: true,
+            project: { select: { id: true, name: true } },
+          },
+        },
+        unit: { select: { id: true, name: true, type: true } },
+        subTaskUnits: {
+          include: {
+            unit: { select: { id: true, name: true } },
+          },
+        },
+        creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        taskAssignee: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            unit: { select: { id: true, name: true } },
+          },
+        },
+        reports: {
+          orderBy: { submittedAt: 'desc' },
+          include: {
+            worker: { select: { id: true, fullName: true, avatarUrl: true } },
+          },
+        },
+        inventories: {
+          include: {
+            inventory: { select: { id: true, name: true, unit: true } },
+          },
+        },
+      },
+    });
+
+    if (!subTask) {
+      throw new NotFoundException('Sub task not found');
+    }
+
+    return subTask;
+  }
+
   async updateTask(
     taskId: string,
     dto: UpdateTaskDto,
@@ -915,77 +1183,125 @@ export class TaskService {
       throw new BadRequestException('Task must be approved before creating subtasks');
     }
 
-    const unitIds = Array.from(new Set(dto.unitIds?.length ? dto.unitIds : dto.unitId ? [dto.unitId] : []));
+    const unitIds = Array.from(new Set([...(dto.unitIds ?? []), ...(dto.unitId ? [dto.unitId] : [])]));
     if (unitIds.length === 0) {
       throw new BadRequestException('unitId or unitIds is required');
     }
 
     const approvalDecision = userRole === UserRole.worker ? 'pending' : 'approved';
-    const subTasks: any[] = [];
+    const taskUnits = await this.prisma.taskUnit.findMany({
+      where: { taskId, unitId: { in: unitIds } },
+      include: {
+        unit: { select: { id: true, name: true } },
+      },
+    });
 
-    for (const unitId of unitIds) {
-      const taskUnit = await this.ensureProjectAndTaskUnits(taskId, unitId);
-      let taskAssignee = dto.taskAssigneeId
-        ? await this.prisma.taskAssignee.findFirst({
-            where: { id: dto.taskAssigneeId, taskId, unitId },
-            include: {
-              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-              unit: { select: { id: true, name: true } },
-            },
-          })
-        : null;
-
-      if (!taskAssignee) {
-        taskAssignee = await this.resolveTaskAssignee(
-          taskId,
-          unitId,
-          userRole === UserRole.worker ? userId : undefined,
-        );
-      }
-
-      const subTask = await this.prisma.subTask.create({
-        data: {
-          taskId,
-          unitId,
-          taskAssigneeId: taskAssignee.id,
-          createdBy: userId,
-          title: dto.title,
-          description: dto.description ?? null,
-          status: 'pending',
-          approvalDecision,
-          approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
-          approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
-        },
-        include: {
-          unit: { select: { id: true, name: true } },
-          taskAssignee: {
-            include: {
-              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-              unit: { select: { id: true, name: true } },
-            },
-          },
-          reports: true,
-          inventories: true,
-        },
-      });
-
-      subTasks.push(subTask);
-
-      if (approvalDecision === 'approved' && taskAssignee.userId) {
-        await this.notificationsService.send({
-          userId: taskAssignee.userId,
-          title: 'New Subtask Created',
-          body: `A new subtask has been created for unit: ${taskUnit.unit.name}`,
-          type: 'task',
-          refId: subTask.id,
-          refType: 'sub_task',
-        });
-      }
+    if (taskUnits.length !== unitIds.length) {
+      throw new NotFoundException('One or more units not found in this task');
     }
 
+    const primaryUnitId = unitIds[0];
+    const primaryTaskUnit = taskUnits.find((item) => item.unitId === primaryUnitId);
+    if (!primaryTaskUnit) {
+      throw new NotFoundException('Unit not found in this task');
+    }
+
+    let taskAssignee: any = dto.taskAssigneeId
+      ? await this.prisma.taskAssignee.findFirst({
+          where: { id: dto.taskAssigneeId, taskId, unitId: primaryUnitId },
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            unit: { select: { id: true, name: true } },
+          },
+        })
+      : null;
+
+    if (!taskAssignee && userRole === UserRole.worker) {
+      taskAssignee = await this.resolveTaskAssignee(taskId, primaryUnitId, userId);
+    } else if (!taskAssignee) {
+      taskAssignee = await this.prisma.taskAssignee.findFirst({
+        where: { taskId, unitId: primaryUnitId },
+        include: {
+          user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          unit: { select: { id: true, name: true } },
+        },
+        orderBy: { assignedAt: 'asc' },
+      });
+    }
+
+    const subTask = await this.prisma.subTask.create({
+      data: {
+        taskId,
+        unitId: primaryUnitId,
+        taskAssigneeId: taskAssignee?.id ?? null,
+        createdBy: userId,
+        title: dto.title,
+        description: dto.description ?? null,
+        status: 'pending',
+        approvalDecision,
+        approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
+        approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
+      },
+      include: {
+        unit: { select: { id: true, name: true } },
+        taskAssignee: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            unit: { select: { id: true, name: true } },
+          },
+        },
+        reports: true,
+        inventories: true,
+      },
+    });
+
+    await this.prisma.subTaskUnit.createMany({
+      data: unitIds.map((unitId) => ({ subTaskId: subTask.id, unitId })),
+      skipDuplicates: true,
+    });
+
+    const updatedTask = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        project: { select: { id: true, name: true } },
+        taskFloors: {
+          include: { floor: { select: { id: true, name: true, floorNumber: true } } },
+        },
+        taskUnits: {
+          include: {
+            unit: {
+              select: {
+                id: true,
+                name: true,
+                floorId: true,
+                floor: { select: { id: true, name: true, floorNumber: true } },
+              },
+            },
+          },
+        },
+        subTasks: {
+          orderBy: { createdAt: 'desc' },
+          include: {
+            unit: { select: { id: true, name: true } },
+            subTaskUnits: {
+              include: {
+                unit: { select: { id: true, name: true } },
+              },
+            },
+            taskAssignee: {
+              include: {
+                user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+                unit: { select: { id: true, name: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
     return {
-      message: `${subTasks.length} subtasks created`,
-      subtasks: subTasks,
+      message: '1 subtask created',
+      data: this.toTaskWithSubTasksResponse(updatedTask),
     };
   }
 

@@ -20,6 +20,7 @@ import { GeofencingGateway } from './project/geofencing.gateway';
 import { TeamController } from './project/team.controller';
 
 import { TaskController } from './task/task.controller';
+import { SubTaskController } from './task/subtask.controller';
 import { TaskService } from './task/task.service';
 
 import { InventoryController } from './inventory/inventory.controller';
@@ -36,6 +37,7 @@ import { PayrollService } from './payroll/payroll.service';
     TeamController,
     ProfileController,
     TaskController,
+    SubTaskController,
     InventoryController,
     PayrollController,
   ],

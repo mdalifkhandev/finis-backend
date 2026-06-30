@@ -72,6 +72,27 @@ export class TaskController {
     return this.taskService.getTaskLocations(id, userId, userRole);
   }
 
+  /** GET /admin/tasks/:id/subtasks — sub task list */
+  @Get(':id/subtasks')
+  getSubTasks(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.taskService.getSubTasks(id, userId, userRole);
+  }
+
+  /** GET /admin/tasks/:id/subtasks/:subTaskId — sub task details */
+  @Get(':id/subtasks/:subTaskId')
+  getSubTaskDetails(
+    @Param('id') id: string,
+    @Param('subTaskId') subTaskId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.taskService.getSubTaskDetails(id, subTaskId, userId, userRole);
+  }
+
   /** POST /admin/tasks — Manager পারবে */
   @Post()
   createTask(
