@@ -291,6 +291,7 @@ export class TaskService {
       title: subTask.title,
       description: subTask.description,
       priority: subTask.priority,
+      startDate: subTask.createdAt ?? null,
       dueDate: subTask.dueDate,
       estimatedHours: subTask.estimatedHours,
       status: subTask.status,

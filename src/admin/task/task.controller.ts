@@ -52,16 +52,6 @@ export class TaskController {
     return this.taskService.getTasks(userId, userRole, status, search, projectId, +page, +limit);
   }
 
-  /** GET /admin/tasks/:id */
-  @Get(':id')
-  getTaskDetails(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-    @CurrentUser('role') userRole: string,
-  ) {
-    return this.taskService.getTaskDetails(id, userId, userRole);
-  }
-
   /** GET /admin/tasks/:id/locations — selected floors and units only */
   @Get(':id/locations')
   getTaskLocations(
