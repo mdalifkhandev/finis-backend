@@ -14,7 +14,7 @@ import {
   ReviewTaskDto,
   CreateSubTaskDto,
 } from './dto/task.dto';
-import { UserRole } from '../../generated/prisma/client';
+import { UserRole, TaskPriority } from '../../generated/prisma/client';
 
 type AuthUser = {
   id: string;
@@ -268,6 +268,8 @@ export class TaskService {
         id: subTask.id,
         title: subTask.title,
         description: subTask.description,
+        priority: subTask.priority,
+        dueDate: subTask.dueDate,
         status: subTask.status,
         approvalDecision: subTask.approvalDecision,
         approvalNotes: subTask.approvalNotes,
@@ -433,7 +435,7 @@ export class TaskService {
         createdBy: userId,
         title: dto.title,
         description: dto.description ?? null,
-        priority: dto.priority ?? 'medium',
+        priority: dto.priority ?? TaskPriority.medium,
         status: 'pending',
         approvalDecision,
         approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
@@ -677,19 +679,32 @@ export class TaskService {
             unit: { select: { id: true, name: true } },
           },
         },
-        taskAssignee: {
-          include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-            unit: { select: { id: true, name: true } },
+        task: {
+          select: {
+            id: true,
+            title: true,
+            priority: true,
+            dueDate: true,
+            status: true,
+            approvalDecision: true,
+            project: { select: { id: true, name: true } },
           },
         },
-        creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-        _count: { select: { reports: true, inventories: true } },
       },
     });
 
     return {
-      data: subTasks,
+      data: subTasks.map((subTask: any) => ({
+        id: subTask.id,
+        title: subTask.title,
+        description: subTask.description,
+        priority: subTask.priority,
+        dueDate: subTask.dueDate,
+        status: subTask.status,
+        approvalDecision: subTask.approvalDecision,
+        task: subTask.task,
+        units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
+      })),
     };
   }
 
@@ -791,20 +806,12 @@ export class TaskService {
               project: { select: { id: true, name: true } },
             },
           },
-          unit: { select: { id: true, name: true, floorId: true } },
+          unit: { select: { id: true, name: true } },
           subTaskUnits: {
             include: {
               unit: { select: { id: true, name: true } },
             },
           },
-          creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-          taskAssignee: {
-            include: {
-              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-              unit: { select: { id: true, name: true } },
-            },
-          },
-          _count: { select: { reports: true, inventories: true } },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -814,7 +821,17 @@ export class TaskService {
     ]);
 
     return {
-      data,
+      data: data.map((subTask: any) => ({
+        id: subTask.id,
+        title: subTask.title,
+        description: subTask.description,
+        priority: subTask.priority,
+        dueDate: subTask.dueDate,
+        status: subTask.status,
+        approvalDecision: subTask.approvalDecision,
+        task: subTask.task,
+        units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
+      })),
       meta: {
         total,
         page,
@@ -1206,17 +1223,9 @@ export class TaskService {
       throw new NotFoundException('Unit not found in this task');
     }
 
-    let taskAssignee: any = dto.taskAssigneeId
-      ? await this.prisma.taskAssignee.findFirst({
-          where: { id: dto.taskAssigneeId, taskId, unitId: primaryUnitId },
-          include: {
-            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-            unit: { select: { id: true, name: true } },
-          },
-        })
-      : null;
+    let taskAssignee: any = null;
 
-    if (!taskAssignee && userRole === UserRole.worker) {
+    if (userRole === UserRole.worker) {
       taskAssignee = await this.resolveTaskAssignee(taskId, primaryUnitId, userId);
     } else if (!taskAssignee) {
       taskAssignee = await this.prisma.taskAssignee.findFirst({
@@ -1237,6 +1246,8 @@ export class TaskService {
         createdBy: userId,
         title: dto.title,
         description: dto.description ?? null,
+        priority: dto.priority ?? 'medium',
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         status: 'pending',
         approvalDecision,
         approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
@@ -1244,6 +1255,7 @@ export class TaskService {
       },
       include: {
         unit: { select: { id: true, name: true } },
+        task: { select: { id: true, title: true, priority: true, dueDate: true } },
         taskAssignee: {
           include: {
             user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },

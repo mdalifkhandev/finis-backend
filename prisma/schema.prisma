@@ -456,6 +456,8 @@ model SubTask {
   createdBy             String         @map("created_by") @db.Uuid
   title                 String
   description           String?
+  priority              TaskPriority   @default(medium)
+  dueDate               DateTime?      @map("due_date") @db.Date
   status                TaskStatus     @default(pending)
   approvalDecision      ReviewDecision @default(pending) @map("approval_decision")
   approvalReviewedBy    String?        @map("approval_reviewed_by") @db.Uuid

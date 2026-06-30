@@ -143,16 +143,20 @@ export class CreateSubTaskDto {
   @IsUUID('4', { each: true })
   unitIds?: string[];
 
-  @IsOptional()
-  @IsUUID('4')
-  taskAssigneeId?: string;
-
   @IsString()
   title!: string;
 
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsEnum(TaskPriority)
+  priority?: TaskPriority;
+
+  @IsOptional()
+  @IsString()
+  dueDate?: string;
 }
 
 export class ReviewTaskDto {

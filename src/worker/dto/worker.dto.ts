@@ -12,7 +12,7 @@ import {
   IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { LocationEventType } from '../../generated/prisma/client';
+import { LocationEventType, TaskPriority } from '../../generated/prisma/client';
 
 // ── TASK ──────────────────────────────────────────────────────────────────────
 
@@ -61,16 +61,20 @@ export class CreateSubTaskDto {
   @IsUUID('4', { each: true })
   unitIds?: string[];
 
-  @IsOptional()
-  @IsUUID('4')
-  taskAssigneeId?: string;
-
   @IsString()
   title!: string;
 
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsEnum(TaskPriority)
+  priority?: TaskPriority;
+
+  @IsOptional()
+  @IsString()
+  dueDate?: string;
 }
 
 export class UpdateTaskInventoryDto {

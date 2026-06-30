@@ -9,7 +9,7 @@ import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeofencingGateway } from '../admin/project/geofencing.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
-import { LocationEventType } from '../generated/prisma/client';
+import { LocationEventType, TaskPriority } from '../generated/prisma/client';
 import {
   SubmitTaskReportDto,
   CheckInDto,
@@ -472,7 +472,14 @@ export class WorkerService {
   async createSubTask(
     taskId: string,
     workerId: string,
-    dto: { unitId?: string; unitIds?: string[]; taskAssigneeId?: string; title: string; description?: string },
+      dto: {
+        unitId?: string;
+        unitIds?: string[];
+        title: string;
+        description?: string;
+      priority?: TaskPriority;
+      dueDate?: string;
+    },
   ) {
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
@@ -502,14 +509,9 @@ export class WorkerService {
     const primaryUnit = taskUnits.find((item) => item.unitId === primaryUnitId);
     if (!primaryUnit) throw new NotFoundException('Unit not found in this task');
 
-    let assignee = dto.taskAssigneeId
-      ? await this.prisma.taskAssignee.findFirst({
-          where: { id: dto.taskAssigneeId, taskId, unitId: primaryUnitId },
-          select: { id: true, userId: true },
-        })
-      : null;
+    let assignee: { id: string; userId: string } | null = null;
 
-    if (!assignee) {
+    if (workerId) {
       assignee = await this.prisma.taskAssignee.findFirst({
         where: { taskId, unitId: primaryUnitId, userId: workerId },
         select: { id: true, userId: true },
@@ -532,6 +534,8 @@ export class WorkerService {
         createdBy: workerId,
         title: dto.title,
         description: dto.description ?? null,
+        priority: dto.priority ?? TaskPriority.medium,
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         status: 'pending',
         approvalDecision: 'pending',
       },
