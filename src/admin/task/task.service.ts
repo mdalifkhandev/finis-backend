@@ -141,7 +141,7 @@ export class TaskService {
     const [subTaskCount, completedCount] = await Promise.all([
       this.prisma.subTask.count({ where: { taskId } }),
       this.prisma.subTask.count({
-        where: { taskId, status: 'completed', approvalDecision: 'approved' },
+        where: { taskId, status: 'completed' },
       }),
     ]);
 

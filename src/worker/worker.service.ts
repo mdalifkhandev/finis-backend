@@ -869,6 +869,14 @@ export class WorkerService {
           throw new BadRequestException(`Not enough stock for: ${inv.name}`);
         }
 
+        const existingTaskInventory = await this.prisma.taskInventory.findFirst({
+          where: {
+            taskId: subTask.taskId,
+            subTaskId: subTask.id,
+            inventoryId: item.inventoryId,
+          },
+        });
+
         await this.prisma.$transaction([
           this.prisma.inventoryItem.update({
             where: { id: item.inventoryId },
@@ -883,14 +891,19 @@ export class WorkerService {
               reason: `Used in task: ${subTask.task.title}`,
             },
           }),
-          this.prisma.taskInventory.create({
-            data: {
-              taskId: subTask.taskId,
-              subTaskId: subTask.id,
-              inventoryId: item.inventoryId,
-              qtyUsed: item.qtyUsed,
-            },
-          }),
+          existingTaskInventory
+            ? this.prisma.taskInventory.update({
+                where: { id: existingTaskInventory.id },
+                data: { qtyUsed: item.qtyUsed },
+              })
+            : this.prisma.taskInventory.create({
+                data: {
+                  taskId: subTask.taskId,
+                  subTaskId: subTask.id,
+                  inventoryId: item.inventoryId,
+                  qtyUsed: item.qtyUsed,
+                },
+              }),
         ]);
       }
     }
