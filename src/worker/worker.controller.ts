@@ -195,6 +195,66 @@ export class WorkerController {
   }
 
   /**
+   * POST /worker/tasks/:id/report
+   * Backward-compatible alias for older clients
+   */
+  @Post('tasks/:id/report')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'beforePhoto', maxCount: 1 },
+        { name: 'afterPhoto', maxCount: 1 },
+        { name: 'receipt', maxCount: 1 },
+      ],
+      { storage: memoryStorage() },
+    ),
+  )
+  async submitLegacyTaskReport(
+    @Param('id', ParseUUIDPipe) subTaskId: string,
+    @CurrentUser('id') workerId: string,
+    @Body() dto: SubmitTaskReportDto,
+    @UploadedFiles()
+    files?: {
+      beforePhoto?: Express.Multer.File[];
+      afterPhoto?: Express.Multer.File[];
+      receipt?: Express.Multer.File[];
+    },
+  ) {
+    const uploadedFiles = await this.uploadTaskReportFiles(files);
+    return this.workerService.submitTaskReport(subTaskId, workerId, dto, uploadedFiles);
+  }
+
+  /**
+   * PUT /worker/tasks/:id/report
+   * Backward-compatible alias for older clients
+   */
+  @Put('tasks/:id/report')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'beforePhoto', maxCount: 1 },
+        { name: 'afterPhoto', maxCount: 1 },
+        { name: 'receipt', maxCount: 1 },
+      ],
+      { storage: memoryStorage() },
+    ),
+  )
+  async updateLegacyTaskReport(
+    @Param('id', ParseUUIDPipe) subTaskId: string,
+    @CurrentUser('id') workerId: string,
+    @Body() body: any,
+    @UploadedFiles()
+    files?: {
+      beforePhoto?: Express.Multer.File[];
+      afterPhoto?: Express.Multer.File[];
+      receipt?: Express.Multer.File[];
+    },
+  ) {
+    const uploadedFiles = await this.uploadTaskReportFiles(files);
+    return this.workerService.updateTaskReport(subTaskId, workerId, body, uploadedFiles);
+  }
+
+  /**
    * GET /worker/subtasks/:id/inventory
    * Dedicated subtask inventory items
    */

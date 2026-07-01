@@ -681,20 +681,20 @@ export class WorkerService {
     if (subTask.status !== 'pending' && subTask.status !== 'review') {
       throw new BadRequestException(`Task is already ${subTask.status}`);
     }
-    if (!files?.beforePhoto?.[0]?.filename) {
-      throw new BadRequestException('Before photo is required to start task');
-    }
 
-    await this.prisma.taskReport.create({
-      data: {
-        taskId: subTask.taskId,
-        subTaskId: subTask.id,
-        workerId,
-        beforePhotoUrl: files.beforePhoto[0].filename,
-        notes: 'Start task photo',
-        reviewDecision: 'pending',
-      },
-    });
+    const beforePhotoUrl = files?.beforePhoto?.[0]?.filename ?? null;
+    if (beforePhotoUrl) {
+      await this.prisma.taskReport.create({
+        data: {
+          taskId: subTask.taskId,
+          subTaskId: subTask.id,
+          workerId,
+          beforePhotoUrl,
+          notes: 'Start task photo',
+          reviewDecision: 'pending',
+        },
+      });
+    }
 
     return this.prisma.subTask.update({
       where: { id: taskId },
@@ -967,8 +967,6 @@ export class WorkerService {
       orderBy: { submittedAt: 'desc' },
     });
 
-    if (!report) throw new NotFoundException('Task report not found');
-
     const inventoryUsed = (() => {
       const raw = body?.inventoryUsed ?? body?.inventory_used;
       if (!raw) return [];
@@ -1045,21 +1043,33 @@ export class WorkerService {
       }
     }
 
-    const updatedReport = await this.prisma.taskReport.update({
-      where: { id: report.id },
-      data: {
-        notes: body?.note ?? body?.notes ?? body?.description ?? report.notes,
-        beforePhotoUrl: files?.beforePhoto?.[0]?.filename
-          ? files.beforePhoto[0].filename
-          : body?.beforePhotoUrl ?? report.beforePhotoUrl,
-        afterPhotoUrl: files?.afterPhoto?.[0]?.filename
-          ? files.afterPhoto[0].filename
-          : body?.afterPhotoUrl ?? report.afterPhotoUrl,
-        receiptUrl: files?.receipt?.[0]?.filename
-          ? files.receipt[0].filename
-          : body?.receiptUrl ?? report.receiptUrl,
-      },
-    });
+    const reportData = {
+      notes: body?.note ?? body?.notes ?? body?.description ?? null,
+      beforePhotoUrl: files?.beforePhoto?.[0]?.filename
+        ? files.beforePhoto[0].filename
+        : body?.beforePhotoUrl ?? null,
+      afterPhotoUrl: files?.afterPhoto?.[0]?.filename
+        ? files.afterPhoto[0].filename
+        : body?.afterPhotoUrl ?? null,
+      receiptUrl: files?.receipt?.[0]?.filename
+        ? files.receipt[0].filename
+        : body?.receiptUrl ?? null,
+      reviewDecision: 'pending' as const,
+    };
+
+    const updatedReport = report
+      ? await this.prisma.taskReport.update({
+          where: { id: report.id },
+          data: reportData,
+        })
+      : await this.prisma.taskReport.create({
+          data: {
+            taskId: subTask.taskId,
+            subTaskId: subTask.id,
+            workerId,
+            ...reportData,
+          },
+        });
 
     return {
       message: 'Task report updated successfully. Task remains pending review.',
