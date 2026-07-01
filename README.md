@@ -76,7 +76,6 @@ Patch body:
 ## Worker Main Task APIs
 
 - `GET /worker/tasks`
-- `GET /worker/tasks/:id`
 - `POST /worker/tasks/:id/subtasks`
 
 `GET /worker/tasks` dashboard-style grouped response দেয়:

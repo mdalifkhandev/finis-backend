@@ -87,18 +87,6 @@ export class WorkerController {
   }
 
   /**
-   * GET /worker/tasks/:id
-   * Task details (geofence, floor, room, inventory, previous reports)
-   */
-  @Get('tasks/:id')
-  getTaskDetail(
-    @Param('id', ParseUUIDPipe) taskId: string,
-    @CurrentUser('id') workerId: string,
-  ) {
-    return this.workerService.getTaskDetail(taskId, workerId);
-  }
-
-  /**
    * GET /worker/subtasks/:id
    * Dedicated subtask detail
    */
@@ -147,37 +135,6 @@ export class WorkerController {
   }
 
   /**
-   * POST /worker/tasks/:id/report
-   * Task report submit (before/after photo, inventory used, notes, receipt)
-   * -> status: in_progress -> review
-   */
-  @Post('tasks/:id/report')
-  @UseInterceptors(
-    FileFieldsInterceptor(
-      [
-        { name: 'beforePhoto', maxCount: 1 },
-        { name: 'afterPhoto', maxCount: 1 },
-        { name: 'receipt', maxCount: 1 },
-      ],
-      { storage: memoryStorage() },
-    ),
-  )
-  async submitTaskReport(
-    @Param('id', ParseUUIDPipe) taskId: string,
-    @CurrentUser('id') workerId: string,
-    @Body() dto: SubmitTaskReportDto,
-    @UploadedFiles()
-    files?: {
-      beforePhoto?: Express.Multer.File[];
-      afterPhoto?: Express.Multer.File[];
-      receipt?: Express.Multer.File[];
-    },
-  ) {
-    const uploadedFiles = await this.uploadTaskReportFiles(files);
-    return this.workerService.submitTaskReport(taskId, workerId, dto, uploadedFiles);
-  }
-
-  /**
    * POST /worker/subtasks/:id/report
    * Dedicated subtask report submit
    */
@@ -205,36 +162,6 @@ export class WorkerController {
   ) {
     const uploadedFiles = await this.uploadTaskReportFiles(files);
     return this.workerService.submitTaskReport(subTaskId, workerId, dto, uploadedFiles);
-  }
-
-  /**
-   * PUT /worker/tasks/:id/report
-   * Task report update (no DTO validation)
-   */
-  @Put('tasks/:id/report')
-  @UseInterceptors(
-    FileFieldsInterceptor(
-      [
-        { name: 'beforePhoto', maxCount: 1 },
-        { name: 'afterPhoto', maxCount: 1 },
-        { name: 'receipt', maxCount: 1 },
-      ],
-      { storage: memoryStorage() },
-    ),
-  )
-  async updateTaskReport(
-    @Param('id', ParseUUIDPipe) taskId: string,
-    @CurrentUser('id') workerId: string,
-    @Body() body: any,
-    @UploadedFiles()
-    files?: {
-      beforePhoto?: Express.Multer.File[];
-      afterPhoto?: Express.Multer.File[];
-      receipt?: Express.Multer.File[];
-    },
-  ) {
-    const uploadedFiles = await this.uploadTaskReportFiles(files);
-    return this.workerService.updateTaskReport(taskId, workerId, body, uploadedFiles);
   }
 
   /**
@@ -268,18 +195,6 @@ export class WorkerController {
   }
 
   /**
-   * GET /worker/tasks/:id/inventory
-   * Task available inventory items (project company)
-   */
-  @Get('tasks/:id/inventory')
-  getTaskInventoryItems(
-    @Param('id', ParseUUIDPipe) taskId: string,
-    @CurrentUser('id') workerId: string,
-  ) {
-    return this.workerService.getTaskInventoryItems(taskId, workerId);
-  }
-
-  /**
    * GET /worker/subtasks/:id/inventory
    * Dedicated subtask inventory items
    */
@@ -289,25 +204,6 @@ export class WorkerController {
     @CurrentUser('id') workerId: string,
   ) {
     return this.workerService.getTaskInventoryItems(subTaskId, workerId);
-  }
-
-  /**
-   * PATCH /worker/tasks/:id/inventory/:inventoryId
-   * Update a task inventory usage entry and sync stock quantity
-   */
-  @Patch('tasks/:id/inventory/:inventoryId')
-  updateTaskInventoryItem(
-    @Param('id', ParseUUIDPipe) taskId: string,
-    @Param('inventoryId', ParseUUIDPipe) inventoryId: string,
-    @CurrentUser('id') workerId: string,
-    @Body() dto: UpdateTaskInventoryDto,
-  ) {
-    return this.workerService.updateTaskInventoryItem(
-      taskId,
-      inventoryId,
-      workerId,
-      dto,
-    );
   }
 
   /**
