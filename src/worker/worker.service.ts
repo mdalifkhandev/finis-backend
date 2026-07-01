@@ -51,6 +51,10 @@ export class WorkerService {
       location: item.inventory?.location ?? null,
     }));
 
+    const assignedWorker = subTask.taskAssignee?.user ?? subTask.creator ?? null;
+    const taskDate = subTask.task?.dueDate ?? subTask.dueDate ?? subTask.createdAt ?? null;
+    const startTime = subTask.startedAt ?? subTask.createdAt ?? null;
+
     return {
       id: subTask.id,
       title: subTask.title,
@@ -63,8 +67,14 @@ export class WorkerService {
       completedAt: subTask.completedAt ?? null,
       taskDetails: {
         project: subTask.task?.project ?? null,
-        assignedTo: subTask.creator ?? null,
-        dueDate: subTask.task?.dueDate ?? subTask.dueDate ?? null,
+        assignedTo: assignedWorker,
+        projectName: subTask.task?.project?.name ?? null,
+        location: subTask.task?.project?.location ?? null,
+        roomNo: subTask.unit?.name ?? null,
+        date: taskDate,
+        dueDate: taskDate,
+        startTime,
+        endTime: subTask.task?.dueDate ?? subTask.dueDate ?? null,
         estimatedHours: subTask.estimatedHours ?? subTask.task?.estimatedHours ?? null,
         priority: subTask.priority,
         priorityLabel:
@@ -1068,7 +1078,6 @@ export class WorkerService {
     if (!this.isWorkerAssigned(subTask, workerId)) {
       throw new ForbiddenException('This task is not assigned to you');
     }
-    this.ensureSubTaskApproved(subTask, 'viewing inventory items');
 
     return this.prisma.inventoryItem.findMany({
       where: {
