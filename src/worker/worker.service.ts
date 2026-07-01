@@ -52,8 +52,9 @@ export class WorkerService {
     }));
 
     const assignedWorker = subTask.taskAssignee?.user ?? subTask.creator ?? null;
-    const taskDate = subTask.task?.dueDate ?? subTask.dueDate ?? subTask.createdAt ?? null;
+    const taskDate = subTask.dueDate ?? subTask.task?.dueDate ?? subTask.createdAt ?? null;
     const startTime = subTask.startedAt ?? subTask.createdAt ?? null;
+    const endTime = subTask.dueDate ?? subTask.task?.dueDate ?? subTask.createdAt ?? null;
 
     return {
       id: subTask.id,
@@ -62,7 +63,7 @@ export class WorkerService {
       priority: subTask.priority,
       status: subTask.status,
       approvalDecision: subTask.approvalDecision,
-      startedAt: subTask.startedAt ?? null,
+      startedAt: startTime,
       submittedAt: subTask.submittedAt ?? null,
       completedAt: subTask.completedAt ?? null,
       taskDetails: {
@@ -74,7 +75,7 @@ export class WorkerService {
         date: taskDate,
         dueDate: taskDate,
         startTime,
-        endTime: subTask.task?.dueDate ?? subTask.dueDate ?? null,
+        endTime,
         estimatedHours: subTask.estimatedHours ?? subTask.task?.estimatedHours ?? null,
         priority: subTask.priority,
         priorityLabel:

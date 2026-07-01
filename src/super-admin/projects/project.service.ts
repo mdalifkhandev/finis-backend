@@ -149,6 +149,158 @@ export class SuperAdminProjectService {
     });
   }
 
+  async getProjectProfile(projectId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        company: {
+          select: {
+            id: true,
+            name: true,
+            logoUrl: true,
+            phone: true,
+            email: true,
+            website: true,
+            address: true,
+            contacts: {
+              where: { isPrimary: true },
+              select: { id: true, fullName: true, role: true, email: true, phone: true },
+              take: 1,
+            },
+          },
+        },
+        _count: { select: { tasks: true, teamMembers: true, floors: true } },
+      },
+    });
+
+    if (!project) throw new NotFoundException('Project not found');
+
+    const primaryContact = project.company.contacts?.[0] ?? null;
+
+    return {
+      id: project.id,
+      name: project.name,
+      type: project.type,
+      status: project.status,
+      priority: project.priority,
+      isWholeHouse: project.isWholeHouse,
+      houseSections: project.houseSections,
+      progress: project.progress,
+      startDate: project.startDate,
+      endDate: project.endDate,
+      location: project.location,
+      description: project.description,
+      numFloors: project.numFloors,
+      numFloorsMin: (project as any).numFloorsMin,
+      numFloorsMax: (project as any).numFloorsMax,
+      unitPerFloor: project.unitPerFloor,
+      unitsPerFloor: project.unitPerFloor,
+      unitPerFloorMin: (project as any).unitPerFloorMin,
+      unitPerFloorMax: (project as any).unitPerFloorMax,
+      budget: project.budget,
+      spent: project.spent,
+      remaining: project.remaining,
+      client: {
+        companyId: project.company.id,
+        companyName: project.company.name,
+        logoUrl: project.company.logoUrl,
+        phone: project.company.phone,
+        email: project.company.email,
+        website: project.company.website,
+        address: project.company.address,
+        primaryContact,
+      },
+      counts: project._count,
+    };
+  }
+
+  async getFloorPlan(projectId: string) {
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
+    if (!project) throw new NotFoundException('Project not found');
+
+    const floors = await this.prisma.floor.findMany({
+      where: { projectId },
+      orderBy: { floorNumber: 'asc' },
+      include: {
+        units: {
+          orderBy: { name: 'asc' },
+          include: {
+            _count: { select: { tasks: true } },
+            tasks: { select: { status: true } },
+          },
+        },
+        _count: { select: { tasks: true, units: true } },
+        tasks: { select: { status: true } },
+      },
+    });
+
+    return floors.map((floor) => ({
+      id: floor.id,
+      name: floor.name,
+      floorNumber: floor.floorNumber,
+      status: floor.status,
+      progress: floor.progress,
+      totalUnits: floor.units.length,
+      taskCounts: {
+        total: floor.tasks.length,
+        completed: floor.tasks.filter((t) => t.status === 'completed').length,
+        inProgress: floor.tasks.filter((t) => t.status === 'in_progress').length,
+        notStarted: floor.tasks.filter((t) => t.status === 'pending').length,
+      },
+      units: floor.units.map((unit) => ({
+        id: unit.id,
+        name: unit.name,
+        type: unit.type,
+        sizeSqft: unit.sizeSqft,
+        status: unit.status,
+        progress: unit.progress,
+        taskCounts: {
+          total: unit.tasks.length,
+          completed: unit.tasks.filter((t) => t.status === 'completed').length,
+          inProgress: unit.tasks.filter((t) => t.status === 'in_progress').length,
+          notStarted: unit.tasks.filter((t) => t.status === 'pending').length,
+        },
+      })),
+    }));
+  }
+
+  async getProjectAnalysis(projectId: string) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        floors: {
+          orderBy: { floorNumber: 'asc' },
+          include: {
+            tasks: {
+              include: { assignee: { select: { id: true, fullName: true, avatarUrl: true } } },
+              orderBy: { createdAt: 'desc' },
+            },
+          },
+        },
+      },
+    });
+
+    if (!project) throw new NotFoundException('Project not found');
+
+    const checklist = project.floors.map((floor) => ({
+      floorId: floor.id,
+      floorName: floor.name,
+      floorStatus: floor.status,
+      tasks: floor.tasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        isCompleted: task.status === 'completed',
+        unitCount: task.estimatedHours ?? 0,
+        dueDate: task.dueDate,
+        assignee: task.assignee,
+        status: task.status,
+        priority: task.priority,
+      })),
+    }));
+
+    return { checklist };
+  }
+
   // ─── FINANCIAL ANALYSIS CHART ──────────────────────────────────────────────
   // Image 3 — Monthly budget vs actual expenditure bar chart
   async getFinancialAnalysis(

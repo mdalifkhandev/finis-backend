@@ -64,6 +64,30 @@ export class SuperAdminProjectController {
     return this.superAdminProjectService.getAllProjects(status, period, startDate, endDate, search);
   }
 
+  /**
+   * GET /super-admin/projects/:id/profile
+   */
+  @Get(':id/profile')
+  getProjectProfile(@Param('id') id: string) {
+    return this.superAdminProjectService.getProjectProfile(id);
+  }
+
+  /**
+   * GET /super-admin/projects/:id/floor-plan
+   */
+  @Get(':id/floor-plan')
+  getFloorPlan(@Param('id') id: string) {
+    return this.superAdminProjectService.getFloorPlan(id);
+  }
+
+  /**
+   * GET /super-admin/projects/:id/analysis
+   */
+  @Get(':id/analysis')
+  getProjectAnalysis(@Param('id') id: string) {
+    return this.superAdminProjectService.getProjectAnalysis(id);
+  }
+
   // ─── FINANCIAL ANALYSIS CHART ──────────────────────────────────────────────
 
   /**
