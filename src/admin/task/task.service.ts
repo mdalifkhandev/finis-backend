@@ -1588,7 +1588,6 @@ export class TaskService {
     await this.prisma.subTask.update({
       where: { id: subTaskId },
       data: {
-        approvalDecision: nextStatus,
         approvalReviewedBy: userId,
         approvalReviewedAt: new Date(),
         approvalNotes: reviewText,

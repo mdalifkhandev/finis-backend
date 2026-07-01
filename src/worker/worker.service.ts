@@ -789,8 +789,7 @@ export class WorkerService {
         priority: dto.priority ?? TaskPriority.medium,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         estimatedHours: dto.estimatedHours ?? null,
-        status: 'pending',
-        approvalDecision: 'pending',
+        status: 'in_active' as any,
       },
       include: {
         task: { select: { id: true, title: true } },
@@ -826,7 +825,6 @@ export class WorkerService {
             dueDate: createdSubTask.dueDate,
             estimatedHours: createdSubTask.estimatedHours,
             status: createdSubTask.status,
-            approvalDecision: createdSubTask.approvalDecision,
             task: createdSubTask.task,
             units: (createdSubTask.subTaskUnits ?? []).map((item) => item.unit),
           }
