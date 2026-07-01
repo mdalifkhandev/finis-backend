@@ -536,6 +536,7 @@ export class TaskService {
     }
 
     const approvalDecision = userRole === UserRole.manager ? 'pending' : 'approved';
+    const initialStatus = userRole === UserRole.manager ? 'in_active' : 'pending';
 
     const task = await this.prisma.task.create({
       data: {
@@ -547,7 +548,7 @@ export class TaskService {
         title: dto.title,
         description: dto.description ?? null,
         priority: dto.priority ?? TaskPriority.medium,
-        status: 'pending',
+        status: initialStatus,
         approvalDecision,
         approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
         approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
@@ -758,23 +759,33 @@ export class TaskService {
 
     if (!task) throw new NotFoundException('Task not found');
 
+    const unitsByFloorId = new Map<string, Array<{ id: string; name: string }>>();
+
+    for (const entry of task.taskUnits) {
+      if (!entry.unit?.floorId) continue;
+      const existing = unitsByFloorId.get(entry.unit.floorId) ?? [];
+      if (!existing.some((unit) => unit.id === entry.unit.id)) {
+        existing.push({ id: entry.unit.id, name: entry.unit.name });
+      }
+      unitsByFloorId.set(entry.unit.floorId, existing);
+    }
+
     const floors = Array.from(
       new Map(
         task.taskFloors
           .filter((entry) => entry.floor)
-          .map((entry) => [entry.floor.id, { id: entry.floor.id, name: entry.floor.name }]),
+          .map((entry) => [
+            entry.floor.id,
+            {
+              id: entry.floor.id,
+              name: entry.floor.name,
+              units: unitsByFloorId.get(entry.floor.id) ?? [],
+            },
+          ]),
       ).values(),
     );
 
-    const units = Array.from(
-      new Map(
-        task.taskUnits
-          .filter((entry) => entry.unit)
-          .map((entry) => [entry.unit.id, { id: entry.unit.id, name: entry.unit.name }]),
-      ).values(),
-    );
-
-    return { floors, units };
+    return { floors };
   }
 
   async getSubTasks(taskId: string, userId: string, userRole: string) {
@@ -799,6 +810,12 @@ export class TaskService {
             status: true,
             approvalDecision: true,
             project: { select: { id: true, name: true } },
+          },
+        },
+        taskAssignee: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            unit: { select: { id: true, name: true } },
           },
         },
       },
@@ -1346,6 +1363,33 @@ export class TaskService {
       });
     }
 
+    const taskAssignees = await this.prisma.taskAssignee.findMany({
+      where: { taskId },
+      orderBy: { assignedAt: 'asc' },
+      select: { id: true, unitId: true },
+    });
+
+    const assigneeByUnitId = new Map(
+      taskAssignees
+        .filter((entry) => entry.unitId)
+        .map((entry) => [entry.unitId as string, entry.id]),
+    );
+
+    const existingSubTasks = await this.prisma.subTask.findMany({
+      where: { taskId },
+      select: { id: true, unitId: true },
+    });
+
+    await Promise.all(
+      existingSubTasks.map((subTask) => {
+        const taskAssigneeId = assigneeByUnitId.get(subTask.unitId) ?? null;
+        return this.prisma.subTask.update({
+          where: { id: subTask.id },
+          data: { taskAssigneeId },
+        });
+      }),
+    );
+
     const updated = await this.prisma.task.findUnique({
       where: { id: taskId },
       include: {
@@ -1415,61 +1459,61 @@ export class TaskService {
       throw new NotFoundException('One or more units not found in this task');
     }
 
-    const primaryUnitId = unitIds[0];
-    const primaryTaskUnit = taskUnits.find((item) => item.unitId === primaryUnitId);
-    if (!primaryTaskUnit) {
-      throw new NotFoundException('Unit not found in this task');
-    }
+    const createdSubTasks: any[] = [];
 
-    let taskAssignee: any = null;
+    for (const unitId of unitIds) {
+      let taskAssignee: any = null;
 
-    if (userRole === UserRole.worker) {
-      taskAssignee = await this.resolveTaskAssignee(taskId, primaryUnitId, userId);
-    } else if (!taskAssignee) {
-      taskAssignee = await this.prisma.taskAssignee.findFirst({
-        where: { taskId, unitId: primaryUnitId },
-        include: {
-          user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-          unit: { select: { id: true, name: true } },
-        },
-        orderBy: { assignedAt: 'asc' },
-      });
-    }
-
-    const subTask = await this.prisma.subTask.create({
-      data: {
-        taskId,
-        unitId: primaryUnitId,
-        taskAssigneeId: taskAssignee?.id ?? null,
-        createdBy: userId,
-        title: dto.title,
-        description: dto.description ?? null,
-        priority: dto.priority ?? 'medium',
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
-        estimatedHours: dto.estimatedHours ?? null,
-        status: 'pending',
-        approvalDecision,
-        approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
-        approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
-      },
-      include: {
-        unit: { select: { id: true, name: true } },
-        task: { select: { id: true, title: true, priority: true, dueDate: true } },
-        taskAssignee: {
+      if (userRole === UserRole.worker) {
+        taskAssignee = await this.resolveTaskAssignee(taskId, unitId, userId);
+      } else {
+        taskAssignee = await this.prisma.taskAssignee.findFirst({
+          where: { taskId, unitId },
           include: {
             user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
             unit: { select: { id: true, name: true } },
           },
-        },
-        reports: true,
-        inventories: true,
-      },
-    });
+          orderBy: { assignedAt: 'asc' },
+        });
+      }
 
-    await this.prisma.subTaskUnit.createMany({
-      data: unitIds.map((unitId) => ({ subTaskId: subTask.id, unitId })),
-      skipDuplicates: true,
-    });
+      const subTask = await this.prisma.subTask.create({
+        data: {
+          taskId,
+          unitId,
+          taskAssigneeId: taskAssignee?.id ?? null,
+          createdBy: userId,
+          title: dto.title,
+          description: dto.description ?? null,
+          priority: dto.priority ?? 'medium',
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+          estimatedHours: dto.estimatedHours ?? null,
+          status: 'pending',
+          approvalDecision,
+          approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
+          approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
+        },
+        include: {
+          unit: { select: { id: true, name: true } },
+          task: { select: { id: true, title: true, priority: true, dueDate: true } },
+          taskAssignee: {
+            include: {
+              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+              unit: { select: { id: true, name: true } },
+            },
+          },
+          reports: true,
+          inventories: true,
+        },
+      });
+
+      await this.prisma.subTaskUnit.createMany({
+        data: [{ subTaskId: subTask.id, unitId }],
+        skipDuplicates: true,
+      });
+
+      createdSubTasks.push(subTask);
+    }
 
     const updatedTask = await this.prisma.task.findUnique({
       where: { id: taskId },
@@ -1511,7 +1555,7 @@ export class TaskService {
     });
 
     return {
-      message: '1 subtask created',
+      message: `${createdSubTasks.length} subtasks created`,
       data: this.toTaskWithSubTasksResponse(updatedTask),
     };
   }

@@ -37,6 +37,55 @@ export class WorkerService {
     return `${h}h ${m}m`;
   }
 
+  private toWorkerSubTaskDetailResponse(subTask: any) {
+    const latestReport = subTask.reports?.[0] ?? null;
+    const inventoryUsed = (subTask.inventories ?? []).map((item: any) => ({
+      id: item.id,
+      inventoryId: item.inventory?.id ?? null,
+      name: item.inventory?.name ?? null,
+      category: item.inventory?.category ?? null,
+      unit: item.inventory?.unit ?? null,
+      qtyUsed: item.qtyUsed,
+      currentQty: item.inventory?.currentQty ?? null,
+      minStockQty: item.inventory?.minStockQty ?? null,
+      location: item.inventory?.location ?? null,
+    }));
+
+    return {
+      id: subTask.id,
+      title: subTask.title,
+      description: subTask.description,
+      priority: subTask.priority,
+      status: subTask.status,
+      approvalDecision: subTask.approvalDecision,
+      startedAt: subTask.startedAt ?? null,
+      submittedAt: subTask.submittedAt ?? null,
+      completedAt: subTask.completedAt ?? null,
+      taskDetails: {
+        project: subTask.task?.project ?? null,
+        assignedTo: subTask.creator ?? null,
+        dueDate: subTask.task?.dueDate ?? subTask.dueDate ?? null,
+        estimatedHours: subTask.estimatedHours ?? subTask.task?.estimatedHours ?? null,
+        priority: subTask.priority,
+        priorityLabel:
+          subTask.priority === 'high'
+            ? 'High Priority'
+            : subTask.priority === 'low'
+              ? 'Low Priority'
+              : 'Medium Priority',
+      },
+      beforePhotoUrl: latestReport?.beforePhotoUrl ?? null,
+      afterPhotoUrl: latestReport?.afterPhotoUrl ?? null,
+      receiptUrl: latestReport?.receiptUrl ?? null,
+      note: latestReport?.notes ?? null,
+      reviewDecision: latestReport?.reviewDecision ?? null,
+      reviewDescription: latestReport?.reviewDescription ?? null,
+      availableInventory: subTask.task?.project?.inventoryItems ?? [],
+      inventoryUsed,
+      latestReport,
+    };
+  }
+
   private isWorkerAssigned(
     subTask: {
       createdBy?: string;
@@ -176,7 +225,13 @@ export class WorkerService {
           approvalDecision: true,
           createdBy: true,
           unitId: true,
-          unit: { select: { id: true, name: true } },
+          unit: {
+            select: {
+              id: true,
+              name: true,
+              floor: { select: { id: true, name: true, floorNumber: true } },
+            },
+          },
           taskAssignee: {
             select: {
               userId: true,
@@ -192,7 +247,6 @@ export class WorkerService {
               dueDate: true,
               status: true,
               project: { select: { id: true, name: true } },
-              floor: { select: { id: true, name: true } },
               unit: { select: { id: true, name: true } },
             },
           },
@@ -233,6 +287,75 @@ export class WorkerService {
       }
     }
 
+    const groupedTodayTasks = Array.from(
+      todayTasks.reduce((taskMap, subTask: any) => {
+        const taskId = subTask.task.id;
+        const floor = subTask.unit?.floor ?? null;
+        const unit = subTask.unit ?? null;
+
+        const taskEntry = taskMap.get(taskId) ?? {
+          id: taskId,
+          title: subTask.task.title,
+          priority: subTask.task.priority,
+          dueDate: subTask.task.dueDate,
+          status: subTask.task.status,
+          project: subTask.task.project,
+          scheduledLabel: thisWeekSchedule[0]?.schedule?.name ?? null,
+          floors: [],
+        };
+
+        let floorEntry = taskEntry.floors.find((item: any) => item.id === floor?.id);
+        if (!floorEntry) {
+          floorEntry = {
+            id: floor?.id ?? `no-floor-${taskId}`,
+            name: floor?.name ?? 'No Floor',
+            floorNumber: floor?.floorNumber ?? null,
+            units: [],
+          };
+          taskEntry.floors.push(floorEntry);
+        }
+
+        let unitEntry = floorEntry.units.find((item: any) => item.id === unit?.id);
+        if (!unitEntry) {
+          unitEntry = {
+            id: unit?.id ?? `no-unit-${subTask.id}`,
+            name: unit?.name ?? 'No Unit',
+            status: subTask.status,
+            approvalDecision: subTask.approvalDecision,
+            canCreateSubTask: true,
+            subTasks: [],
+          };
+          floorEntry.units.push(unitEntry);
+        }
+
+        unitEntry.status = unitEntry.status === 'in_progress' ? 'in_progress' : subTask.status;
+        if (subTask.status === 'in_progress') {
+          unitEntry.status = 'in_progress';
+        } else if (subTask.status === 'pending' && unitEntry.status !== 'in_progress') {
+          unitEntry.status = 'pending';
+        } else if (subTask.status === 'completed' && unitEntry.status !== 'in_progress' && unitEntry.status !== 'pending') {
+          unitEntry.status = 'completed';
+        }
+
+        unitEntry.subTasks.push({
+          id: subTask.id,
+          title: subTask.title,
+          status: subTask.status,
+          approvalDecision: subTask.approvalDecision,
+          action:
+            subTask.status === 'pending'
+              ? 'start'
+              : subTask.status === 'in_progress'
+                ? 'continue'
+                : 'view',
+          reportCount: subTask._count?.reports ?? 0,
+        });
+
+        taskMap.set(taskId, taskEntry);
+        return taskMap;
+      }, new Map<string, any>()).values(),
+    );
+
     return {
       stats: {
         todayTasksCount: todayTasks.length,
@@ -241,7 +364,7 @@ export class WorkerService {
         clockInTime,
         hoursWorked: attendance?.totalHours ?? null,
       },
-      todayTasks,
+      todayTasks: groupedTodayTasks,
       thisWeekSchedule: thisWeekSchedule.map((s) => ({
         id: s.schedule.id,
         name: s.schedule.name,
@@ -300,11 +423,15 @@ export class WorkerService {
               dueDate: true,
               status: true,
               project: { select: { id: true, name: true } },
-              floor: { select: { id: true, name: true } },
-              unit: { select: { id: true, name: true } },
             },
           },
-          unit: { select: { id: true, name: true } },
+          unit: {
+            select: {
+              id: true,
+              name: true,
+              floor: { select: { id: true, name: true, floorNumber: true } },
+            },
+          },
           taskAssignee: {
             include: {
               user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
@@ -317,12 +444,94 @@ export class WorkerService {
         skip,
         take: limit,
       }),
-      this.prisma.subTask.count({ where }),
+      this.prisma.subTask.findMany({
+        where,
+        select: { taskId: true },
+        distinct: ['taskId'],
+      }),
     ]);
 
+    const groupedTasks = Array.from(
+      data.reduce((map, subTask: any) => {
+        const taskId = subTask.task.id;
+        const floor = subTask.unit?.floor ?? null;
+        const unit = subTask.unit ?? null;
+
+        const existing = map.get(taskId) ?? {
+          id: taskId,
+          title: subTask.task.title,
+          priority: subTask.task.priority,
+          dueDate: subTask.task.dueDate,
+          status: subTask.task.status,
+          project: subTask.task.project,
+          scheduledLabel: null,
+          floors: [],
+        };
+
+        let floorEntry = existing.floors.find((item: any) => item.id === floor?.id);
+        if (!floorEntry) {
+          floorEntry = {
+            id: floor?.id ?? `no-floor-${taskId}`,
+            name: floor?.name ?? 'No Floor',
+            floorNumber: floor?.floorNumber ?? null,
+            units: [],
+          };
+          existing.floors.push(floorEntry);
+        }
+
+        let unitEntry = floorEntry.units.find((item: any) => item.id === unit?.id);
+        if (!unitEntry) {
+          unitEntry = {
+            id: unit?.id ?? `no-unit-${subTask.id}`,
+            name: unit?.name ?? 'No Unit',
+            status: subTask.status,
+            approvalDecision: subTask.approvalDecision,
+            canCreateSubTask: true,
+            subTasks: [],
+          };
+          floorEntry.units.push(unitEntry);
+        }
+
+        unitEntry.status = unitEntry.status === 'in_progress' ? 'in_progress' : subTask.status;
+        if (subTask.status === 'in_progress') {
+          unitEntry.status = 'in_progress';
+        } else if (subTask.status === 'pending' && unitEntry.status !== 'in_progress') {
+          unitEntry.status = 'pending';
+        } else if (
+          subTask.status === 'completed' &&
+          unitEntry.status !== 'in_progress' &&
+          unitEntry.status !== 'pending'
+        ) {
+          unitEntry.status = 'completed';
+        }
+
+        unitEntry.subTasks.push({
+          id: subTask.id,
+          title: subTask.title,
+          status: subTask.status,
+          approvalDecision: subTask.approvalDecision,
+          action:
+            subTask.status === 'pending'
+              ? 'start'
+              : subTask.status === 'in_progress'
+                ? 'continue'
+                : 'view',
+          reportCount: subTask._count?.reports ?? 0,
+        });
+
+        map.set(taskId, existing);
+        return map;
+      }, new Map<string, any>()).values(),
+    );
+
     return {
-      data,
-      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+      data: groupedTasks,
+      meta: {
+        total: total.length,
+        page,
+        limit,
+        totalPages: Math.ceil(total.length / limit),
+      },
     };
   }
 
@@ -419,14 +628,20 @@ export class WorkerService {
       throw new ForbiddenException('This task is not assigned to you');
     }
 
-    return subTask;
+    return this.toWorkerSubTaskDetailResponse(subTask);
   }
 
   async getSubTaskDetail(subTaskId: string, workerId: string) {
     return this.getTaskDetail(subTaskId, workerId);
   }
 
-  async startTask(taskId: string, workerId: string) {
+  async startTask(
+    taskId: string,
+    workerId: string,
+    files?: {
+      beforePhoto?: Express.Multer.File[];
+    },
+  ) {
     const subTask = await this.prisma.subTask.findUnique({
       where: { id: taskId },
       include: {
@@ -455,6 +670,20 @@ export class WorkerService {
     if (subTask.status !== 'pending' && subTask.status !== 'review') {
       throw new BadRequestException(`Task is already ${subTask.status}`);
     }
+    if (!files?.beforePhoto?.[0]?.filename) {
+      throw new BadRequestException('Before photo is required to start task');
+    }
+
+    await this.prisma.taskReport.create({
+      data: {
+        taskId: subTask.taskId,
+        subTaskId: subTask.id,
+        workerId,
+        beforePhotoUrl: files.beforePhoto[0].filename,
+        notes: 'Start task photo',
+        reviewDecision: 'pending',
+      },
+    });
 
     return this.prisma.subTask.update({
       where: { id: taskId },

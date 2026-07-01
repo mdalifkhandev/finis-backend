@@ -124,15 +124,26 @@ export class WorkerController {
   }
 
   /**
-   * POST /worker/tasks/:id/start
-   * Task start now -> status: pending -> in_progress
+   * POST /worker/subtasks/:id/start
+   * Subtask start now -> status: pending -> in_progress
    */
-  @Post('tasks/:id/start')
-  startTask(
-    @Param('id', ParseUUIDPipe) taskId: string,
+  @Post('subtasks/:id/start')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [{ name: 'beforePhoto', maxCount: 1 }],
+      { storage: memoryStorage() },
+    ),
+  )
+  async startTask(
+    @Param('id', ParseUUIDPipe) subTaskId: string,
     @CurrentUser('id') workerId: string,
+    @UploadedFiles()
+    files?: {
+      beforePhoto?: Express.Multer.File[];
+    },
   ) {
-    return this.workerService.startTask(taskId, workerId);
+    const uploadedFiles = await this.uploadTaskReportFiles(files);
+    return this.workerService.startTask(subTaskId, workerId, uploadedFiles);
   }
 
   /**
@@ -164,6 +175,36 @@ export class WorkerController {
   ) {
     const uploadedFiles = await this.uploadTaskReportFiles(files);
     return this.workerService.submitTaskReport(taskId, workerId, dto, uploadedFiles);
+  }
+
+  /**
+   * POST /worker/subtasks/:id/report
+   * Dedicated subtask report submit
+   */
+  @Post('subtasks/:id/report')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'beforePhoto', maxCount: 1 },
+        { name: 'afterPhoto', maxCount: 1 },
+        { name: 'receipt', maxCount: 1 },
+      ],
+      { storage: memoryStorage() },
+    ),
+  )
+  async submitSubTaskReport(
+    @Param('id', ParseUUIDPipe) subTaskId: string,
+    @CurrentUser('id') workerId: string,
+    @Body() dto: SubmitTaskReportDto,
+    @UploadedFiles()
+    files?: {
+      beforePhoto?: Express.Multer.File[];
+      afterPhoto?: Express.Multer.File[];
+      receipt?: Express.Multer.File[];
+    },
+  ) {
+    const uploadedFiles = await this.uploadTaskReportFiles(files);
+    return this.workerService.submitTaskReport(subTaskId, workerId, dto, uploadedFiles);
   }
 
   /**
@@ -239,6 +280,18 @@ export class WorkerController {
   }
 
   /**
+   * GET /worker/subtasks/:id/inventory
+   * Dedicated subtask inventory items
+   */
+  @Get('subtasks/:id/inventory')
+  getSubTaskInventoryItems(
+    @Param('id', ParseUUIDPipe) subTaskId: string,
+    @CurrentUser('id') workerId: string,
+  ) {
+    return this.workerService.getTaskInventoryItems(subTaskId, workerId);
+  }
+
+  /**
    * PATCH /worker/tasks/:id/inventory/:inventoryId
    * Update a task inventory usage entry and sync stock quantity
    */
@@ -251,6 +304,25 @@ export class WorkerController {
   ) {
     return this.workerService.updateTaskInventoryItem(
       taskId,
+      inventoryId,
+      workerId,
+      dto,
+    );
+  }
+
+  /**
+   * PATCH /worker/subtasks/:id/inventory/:inventoryId
+   * Dedicated subtask inventory usage update
+   */
+  @Patch('subtasks/:id/inventory/:inventoryId')
+  updateSubTaskInventoryItem(
+    @Param('id', ParseUUIDPipe) subTaskId: string,
+    @Param('inventoryId', ParseUUIDPipe) inventoryId: string,
+    @CurrentUser('id') workerId: string,
+    @Body() dto: UpdateTaskInventoryDto,
+  ) {
+    return this.workerService.updateTaskInventoryItem(
+      subTaskId,
       inventoryId,
       workerId,
       dto,
