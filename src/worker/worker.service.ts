@@ -732,7 +732,18 @@ export class WorkerService {
     });
 
     if (taskUnits.length !== unitIds.length) {
-      throw new NotFoundException('One or more units not found in this task');
+      const allowedUnits = await this.prisma.taskUnit.findMany({
+        where: { taskId },
+        include: { unit: { select: { id: true, name: true } } },
+      });
+
+      throw new NotFoundException({
+        message: 'One or more units not found in this task',
+        allowedUnits: allowedUnits.map((item) => ({
+          id: item.unit.id,
+          name: item.unit.name,
+        })),
+      });
     }
 
     const primaryUnitId = unitIds[0];
