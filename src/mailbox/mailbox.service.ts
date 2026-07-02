@@ -308,6 +308,21 @@ export class MailboxService {
     });
   }
 
+  async setFavorite(managerId: string, conversationId: string, isStarred: boolean) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, managerId },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    return this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { isStarred },
+    });
+  }
+
   async handleInboundWebhook(payload: string | Buffer, headers: WebhookHeaders) {
     const rawBody = Buffer.isBuffer(payload) ? payload.toString('utf8') : payload;
     const webhookSecret = process.env.RESEND_WEBHOOK_SECRET;

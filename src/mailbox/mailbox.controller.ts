@@ -2,6 +2,7 @@ import {
   Body,
   BadRequestException,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
@@ -143,5 +144,25 @@ export class MailboxController {
     @Param('conversationId') conversationId: string,
   ) {
     return this.mailboxService.toggleStar(managerId, conversationId);
+  }
+
+  @Post('mailbox/:conversationId/favorite')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.manager)
+  favoriteConversation(
+    @CurrentUser('id') managerId: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.mailboxService.setFavorite(managerId, conversationId, true);
+  }
+
+  @Delete('mailbox/:conversationId/favorite')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.manager)
+  unfavoriteConversation(
+    @CurrentUser('id') managerId: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.mailboxService.setFavorite(managerId, conversationId, false);
   }
 }
