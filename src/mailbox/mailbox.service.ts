@@ -10,6 +10,13 @@ type WebhookHeaders = {
   timestamp?: string;
   signature?: string;
 };
+type MailboxUser = {
+  id: string;
+  fullName: string;
+  email: string;
+  role: string;
+  avatarUrl?: string | null;
+};
 
 @Injectable()
 export class MailboxService {
@@ -62,6 +69,18 @@ export class MailboxService {
     return bodyText ?? bodyHtml?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() ?? '';
   }
 
+  private formatUser(user?: MailboxUser | null) {
+    if (!user) return null;
+
+    return {
+      id: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      role: user.role,
+      avatarUrl: user.avatarUrl ?? null,
+    };
+  }
+
   async sendMail(managerId: string, dto: SendMailDto, attachments?: MailboxAttachment[]) {
     const conversationId = randomUUID();
     const proxyAddress = this.buildProxyAddress(conversationId);
@@ -77,6 +96,11 @@ export class MailboxService {
         clientName,
         proxyAddress,
         status: 'active',
+      },
+      include: {
+        manager: {
+          select: { id: true, fullName: true, email: true, role: true, avatarUrl: true },
+        },
       },
     });
 
@@ -122,25 +146,51 @@ export class MailboxService {
     return {
       conversation,
       proxyAddress,
+      sender: this.formatUser(conversation.manager),
     };
   }
 
-  async listMailbox(managerId: string, status?: string, starred?: string) {
-    const conversations = await this.prisma.conversation.findMany({
-      where: {
-        managerId,
-        ...(status && ['active', 'closed'].includes(status) ? { status } : {}),
-        ...(starred != null ? { isStarred: starred === 'true' } : {}),
-      },
-      include: {
-        messages: {
-          orderBy: { createdAt: 'desc' },
-        },
-      },
-      orderBy: [{ isStarred: 'desc' }, { createdAt: 'desc' }],
-    });
+  async listMailbox(
+    managerId: string,
+    status?: string,
+    starred?: string,
+    page?: string,
+    limit?: string,
+  ) {
+    const pageNumber = Math.max(1, Number.parseInt(page ?? '1', 10) || 1);
+    const limitNumber = Math.min(100, Math.max(1, Number.parseInt(limit ?? '10', 10) || 10));
+    const skip = (pageNumber - 1) * limitNumber;
 
-    return conversations.map((conversation) => {
+    const where = {
+      managerId,
+      ...(status && ['active', 'closed'].includes(status) ? { status } : {}),
+      ...(starred != null ? { isStarred: starred === 'true' } : {}),
+    };
+
+    const [conversations, total] = await Promise.all([
+      this.prisma.conversation.findMany({
+        where,
+        skip,
+        take: limitNumber,
+        orderBy: [{ isStarred: 'desc' }, { createdAt: 'desc' }],
+        include: {
+          manager: {
+            select: { id: true, fullName: true, email: true, role: true, avatarUrl: true },
+          },
+          messages: {
+            include: {
+              sender: {
+                select: { id: true, fullName: true, email: true, role: true, avatarUrl: true },
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+          },
+        },
+      }),
+      this.prisma.conversation.count({ where }),
+    ]);
+
+    const data = conversations.map((conversation) => {
       const latestMessage = conversation.messages[0] ?? null;
       const unreadCount = conversation.messages.filter((message) => !message.isRead && message.direction === 'received').length;
 
@@ -152,6 +202,7 @@ export class MailboxService {
         status: conversation.status,
         isStarred: conversation.isStarred,
         createdAt: conversation.createdAt,
+        sender: this.formatUser(conversation.manager),
         unreadCount,
         latestMessage: latestMessage
           ? {
@@ -161,17 +212,36 @@ export class MailboxService {
               preview: this.extractBodyText(latestMessage.bodyHtml, latestMessage.bodyText).slice(0, 160),
               createdAt: latestMessage.createdAt,
               isRead: latestMessage.isRead,
+              sender: this.formatUser(latestMessage.sender),
             }
           : null,
       };
     });
+
+    return {
+      data,
+      meta: {
+        total,
+        page: pageNumber,
+        limit: limitNumber,
+        totalPages: Math.ceil(total / limitNumber),
+      },
+    };
   }
 
   async getConversation(managerId: string, conversationId: string) {
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: conversationId, managerId },
       include: {
+        manager: {
+          select: { id: true, fullName: true, email: true, role: true, avatarUrl: true },
+        },
         messages: {
+          include: {
+            sender: {
+              select: { id: true, fullName: true, email: true, role: true, avatarUrl: true },
+            },
+          },
           orderBy: { createdAt: 'asc' },
         },
       },
@@ -192,6 +262,7 @@ export class MailboxService {
 
     return {
       ...conversation,
+      sender: this.formatUser(conversation.manager),
       messages: conversation.messages,
     };
   }

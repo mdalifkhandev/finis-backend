@@ -108,8 +108,10 @@ export class MailboxController {
     @CurrentUser('id') managerId: string,
     @Query('status') status?: string,
     @Query('starred') starred?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.mailboxService.listMailbox(managerId, status, starred);
+    return this.mailboxService.listMailbox(managerId, status, starred, page, limit);
   }
 
   @Get('mailbox/:conversationId')
