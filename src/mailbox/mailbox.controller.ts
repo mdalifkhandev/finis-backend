@@ -51,37 +51,28 @@ export class MailboxController {
   @Post('mail/send')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.manager)
-  sendMail(
-    @CurrentUser('id') managerId: string,
-    @Body() dto: SendMailDto,
-  ) {
-    return this.mailboxService.sendMail(managerId, dto, dto.attachments as any);
-  }
-
-  @Post('mail/upload-pdf')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.manager)
   @UseInterceptors(FileInterceptor('file', {
     storage: memoryStorage(),
     fileFilter: pdfFileFilter,
     limits: { fileSize: 20 * 1024 * 1024 },
   }))
-  async uploadPdf(
+  async sendMail(
+    @CurrentUser('id') managerId: string,
+    @Body() dto: SendMailDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    if (!file) {
-      throw new BadRequestException('PDF file is required');
+    const attachments = [...(dto.attachments ?? [])];
+
+    if (file) {
+      const url = await this.s3Service.uploadFile(file, 'mailbox-pdfs');
+      attachments.push({
+        name: file.originalname,
+        url,
+        size: String(file.size),
+      });
     }
 
-    const url = await this.s3Service.uploadFile(file, 'mailbox-pdfs');
-
-    return {
-      data: {
-        url,
-        originalName: file.originalname,
-        mimeType: file.mimetype,
-      },
-    };
+    return this.mailboxService.sendMail(managerId, dto, attachments as any);
   }
 
   @Public()
