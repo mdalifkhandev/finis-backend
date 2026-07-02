@@ -132,6 +132,8 @@ model User {
   taskAssignees           TaskAssignee[]           @relation("TaskAssigneeUser")
   createdSubTasks         SubTask[]                @relation("SubTaskCreator")
   threadParticipants      ThreadParticipant[]
+  mailboxConversations    Conversation[]       @relation("MailboxManager")
+  mailboxMessagesSent     MailboxMessage[]     @relation("MailboxMessageSender")
   messageBlocksCreated    MessageBlock[]           @relation("MessageBlocker")
   messageBlocksReceived   MessageBlock[]           @relation("MessageBlockedUser")
   timeAdjustments         TimeAdjustmentRequest[]
@@ -881,6 +883,23 @@ model MessageThread {
   @@map("message_threads")
 }
 
+model Conversation {
+  id           String    @id @default(uuid()) @db.Uuid
+  managerId    String    @map("manager_id") @db.Uuid
+  clientEmail  String    @map("client_email")
+  clientName   String    @map("client_name")
+  proxyAddress String    @unique @map("proxy_address")
+  status       String    @default("active")
+  isStarred    Boolean   @default(false) @map("is_starred")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  messages     MailboxMessage[]
+  manager      User      @relation("MailboxManager", fields: [managerId], references: [id], onDelete: Cascade)
+
+  @@index([managerId, status])
+  @@index([managerId, isStarred])
+  @@map("mailbox_conversations")
+}
+
 model ThreadParticipant {
   id       String        @id @default(uuid()) @db.Uuid
   threadId String        @map("thread_id") @db.Uuid
@@ -907,6 +926,26 @@ model Message {
   thread    MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
   @@map("messages")
+}
+
+model MailboxMessage {
+  id             String       @id @default(uuid()) @db.Uuid
+  conversationId  String       @map("conversation_id") @db.Uuid
+  senderId       String?      @map("sender_id") @db.Uuid
+  direction       String
+  fromEmail       String       @map("from_email")
+  toEmail         String       @map("to_email")
+  subject         String
+  bodyText        String?      @map("body_text")
+  bodyHtml        String?      @map("body_html")
+  attachments     Json?
+  isRead          Boolean      @default(false) @map("is_read")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender          User?        @relation("MailboxMessageSender", fields: [senderId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+  @@map("mailbox_messages")
 }
 
 model Notification {

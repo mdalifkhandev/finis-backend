@@ -1639,6 +1639,34 @@ export class TaskService {
       },
     });
 
+    const expenseAmount =
+      typeof dto.expenseAmount === 'number' && Number.isFinite(dto.expenseAmount)
+        ? dto.expenseAmount
+        : null;
+
+    if (dto.reviewDecision === 'approved' && expenseAmount != null) {
+      await this.prisma.expense.upsert({
+        where: { taskId },
+        update: {
+          amount: expenseAmount,
+          reviewNotes: reviewText,
+          reviewedBy: userId,
+          reviewedAt: new Date(),
+          status: 'pending',
+        },
+        create: {
+          workerId: report.workerId,
+          projectId: report.subTask?.taskId ? undefined : null,
+          taskId,
+          description: reviewText ?? 'Task expense',
+          category: 'other',
+          amount: expenseAmount,
+          date: new Date(),
+          status: 'pending',
+        },
+      });
+    }
+
     await this.notificationsService.send({
       userId: report.workerId,
       title: dto.reviewDecision === 'approved' ? 'Subtask Report Approved' : 'Subtask Report Rejected',

@@ -9,18 +9,18 @@ export class MailService {
 
   constructor(private config: ConfigService) {
     this.transporter = nodemailer.createTransport({
-      host: config.get('MAIL_HOST'),
-      port: config.get<number>('MAIL_PORT'),
+      host: this.config.get('MAIL_HOST') ?? 'smtp.resend.com',
+      port: this.config.get<number>('MAIL_PORT') ?? 465,
       secure: true,
       auth: {
-        user: config.get('MAIL_USER'),
-        pass: config.get('MAIL_PASS'),
+        user: this.config.get('MAIL_USER') ?? 'resend',
+        pass: this.config.get('MAIL_PASS'),
       },
     });
   }
 
   private getFromAddress() {
-    return this.config.get('MAIL_FROM') ?? this.config.get('MAIL_USER');
+    return this.config.get('MAIL_FROM') ?? this.config.get('MAIL_USER') ?? 'onboarding@proconstructiq.com';
   }
 
   async sendInviteEmail(email: string, token: string, role: string) {
@@ -42,7 +42,7 @@ export class MailService {
       });
       this.logger.log(`Invite email sent to ${email}`);
     } catch (error) {
-      this.logger.error(`Failed to send invite email to ${email}`, error);
+      this.logger.error(`Failed to send invite email to ${email}`, error as any);
     }
   }
 
@@ -67,7 +67,7 @@ export class MailService {
       });
       this.logger.log(`Credentials email sent to ${email}`);
     } catch (error) {
-      this.logger.error(`Failed to send credentials email to ${email}`, error);
+      this.logger.error(`Failed to send credentials email to ${email}`, error as any);
     }
   }
 
@@ -91,7 +91,7 @@ export class MailService {
       });
       this.logger.log(`OTP email sent to ${email}`);
     } catch (error) {
-      this.logger.error(`Failed to send OTP to ${email}`, error);
+      this.logger.error(`Failed to send OTP to ${email}`, error as any);
     }
   }
 
@@ -113,7 +113,7 @@ export class MailService {
       });
       this.logger.log(`Company contact email sent to ${to}`);
     } catch (error) {
-      this.logger.error(`Failed to send company contact email to ${to}`, error);
+      this.logger.error(`Failed to send company contact email to ${to}`, error as any);
       throw error;
     }
   }

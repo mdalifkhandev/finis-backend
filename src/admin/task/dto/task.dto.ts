@@ -172,6 +172,11 @@ export class ReviewTaskDto {
   reviewDescription?: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  expenseAmount?: number;
+
+  @IsOptional()
   @IsString()
   note?: string;
 

@@ -454,11 +454,15 @@ CREATE TABLE "sub_tasks" (
     "created_by" UUID NOT NULL,
     "title" TEXT NOT NULL,
     "description" TEXT,
+    "priority" "TaskPriority" NOT NULL DEFAULT 'medium',
+    "due_date" DATE,
+    "estimated_hours" INTEGER,
     "status" "TaskStatus" NOT NULL DEFAULT 'pending',
     "approval_decision" "ReviewDecision" NOT NULL DEFAULT 'pending',
     "approval_reviewed_by" UUID,
     "approval_reviewed_at" TIMESTAMP(3),
     "approval_notes" TEXT,
+    "approval_attachment_url" TEXT,
     "started_at" TIMESTAMP(3),
     "submitted_at" TIMESTAMP(3),
     "completed_at" TIMESTAMP(3),
@@ -466,6 +470,15 @@ CREATE TABLE "sub_tasks" (
     "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "sub_tasks_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "sub_task_units" (
+    "id" UUID NOT NULL,
+    "sub_task_id" UUID NOT NULL,
+    "unit_id" UUID NOT NULL,
+
+    CONSTRAINT "sub_task_units_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -509,6 +522,7 @@ CREATE TABLE "task_reports" (
     "receipt_url" TEXT,
     "review_decision" "ReviewDecision" NOT NULL DEFAULT 'pending',
     "review_description" TEXT,
+    "review_attachment_url" TEXT,
     "reviewed_by" UUID,
     "reviewed_at" TIMESTAMP(3),
     "submitted_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -822,6 +836,20 @@ CREATE TABLE "message_threads" (
 );
 
 -- CreateTable
+CREATE TABLE "mailbox_conversations" (
+    "id" UUID NOT NULL,
+    "manager_id" UUID NOT NULL,
+    "client_email" TEXT NOT NULL,
+    "client_name" TEXT NOT NULL,
+    "proxy_address" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'active',
+    "is_starred" BOOLEAN NOT NULL DEFAULT false,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "mailbox_conversations_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "thread_participants" (
     "id" UUID NOT NULL,
     "thread_id" UUID NOT NULL,
@@ -844,6 +872,24 @@ CREATE TABLE "messages" (
     "sent_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "messages_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "mailbox_messages" (
+    "id" UUID NOT NULL,
+    "conversation_id" UUID NOT NULL,
+    "sender_id" UUID,
+    "direction" TEXT NOT NULL,
+    "from_email" TEXT NOT NULL,
+    "to_email" TEXT NOT NULL,
+    "subject" TEXT NOT NULL,
+    "body_text" TEXT,
+    "body_html" TEXT,
+    "attachments" JSONB,
+    "is_read" BOOLEAN NOT NULL DEFAULT false,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "mailbox_messages_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -909,6 +955,9 @@ CREATE INDEX "sub_tasks_task_id_unit_id_idx" ON "sub_tasks"("task_id", "unit_id"
 CREATE INDEX "sub_tasks_created_by_idx" ON "sub_tasks"("created_by");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "sub_task_units_sub_task_id_unit_id_key" ON "sub_task_units"("sub_task_id", "unit_id");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "task_floors_task_id_floor_id_key" ON "task_floors"("task_id", "floor_id");
 
 -- CreateIndex
@@ -936,7 +985,19 @@ CREATE UNIQUE INDEX "task_inventories_sub_task_id_inventory_id_key" ON "task_inv
 CREATE UNIQUE INDEX "public_content_pages_slug_key" ON "public_content_pages"("slug");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "mailbox_conversations_proxy_address_key" ON "mailbox_conversations"("proxy_address");
+
+-- CreateIndex
+CREATE INDEX "mailbox_conversations_manager_id_status_idx" ON "mailbox_conversations"("manager_id", "status");
+
+-- CreateIndex
+CREATE INDEX "mailbox_conversations_manager_id_is_starred_idx" ON "mailbox_conversations"("manager_id", "is_starred");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "thread_participants_thread_id_user_id_key" ON "thread_participants"("thread_id", "user_id");
+
+-- CreateIndex
+CREATE INDEX "mailbox_messages_conversation_id_created_at_idx" ON "mailbox_messages"("conversation_id", "created_at");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "device_tokens_token_key" ON "device_tokens"("token");
@@ -1045,6 +1106,12 @@ ALTER TABLE "sub_tasks" ADD CONSTRAINT "sub_tasks_task_assignee_id_fkey" FOREIGN
 
 -- AddForeignKey
 ALTER TABLE "sub_tasks" ADD CONSTRAINT "sub_tasks_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "sub_task_units" ADD CONSTRAINT "sub_task_units_sub_task_id_fkey" FOREIGN KEY ("sub_task_id") REFERENCES "sub_tasks"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "sub_task_units" ADD CONSTRAINT "sub_task_units_unit_id_fkey" FOREIGN KEY ("unit_id") REFERENCES "units"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "task_floors" ADD CONSTRAINT "task_floors_task_id_fkey" FOREIGN KEY ("task_id") REFERENCES "tasks"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1158,6 +1225,9 @@ ALTER TABLE "documents" ADD CONSTRAINT "documents_uploaded_by_fkey" FOREIGN KEY 
 ALTER TABLE "support_requests" ADD CONSTRAINT "support_requests_created_by_id_fkey" FOREIGN KEY ("created_by_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "mailbox_conversations" ADD CONSTRAINT "mailbox_conversations_manager_id_fkey" FOREIGN KEY ("manager_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "thread_participants" ADD CONSTRAINT "thread_participants_thread_id_fkey" FOREIGN KEY ("thread_id") REFERENCES "message_threads"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -1168,6 +1238,12 @@ ALTER TABLE "messages" ADD CONSTRAINT "messages_sender_id_fkey" FOREIGN KEY ("se
 
 -- AddForeignKey
 ALTER TABLE "messages" ADD CONSTRAINT "messages_thread_id_fkey" FOREIGN KEY ("thread_id") REFERENCES "message_threads"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "mailbox_messages" ADD CONSTRAINT "mailbox_messages_conversation_id_fkey" FOREIGN KEY ("conversation_id") REFERENCES "mailbox_conversations"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "mailbox_messages" ADD CONSTRAINT "mailbox_messages_sender_id_fkey" FOREIGN KEY ("sender_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;

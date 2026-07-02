@@ -908,24 +908,36 @@ export class WorkerService {
       }
     }
 
-    const report = await this.prisma.taskReport.create({
-      data: {
-        taskId: subTask.taskId,
-        subTaskId: subTask.id,
-        workerId,
-        notes: dto.note ?? dto.notes ?? null,
-        beforePhotoUrl: files?.beforePhoto?.[0]?.filename
-          ? files.beforePhoto[0].filename
-          : dto.beforePhotoUrl ?? null,
-        afterPhotoUrl: files?.afterPhoto?.[0]?.filename
-          ? files.afterPhoto[0].filename
-          : dto.afterPhotoUrl ?? null,
-        receiptUrl: files?.receipt?.[0]?.filename
-          ? files.receipt[0].filename
-          : dto.receiptUrl ?? null,
-        reviewDecision: 'pending',
-      },
+    const existingReport = await this.prisma.taskReport.findFirst({
+      where: { taskId: subTask.taskId, subTaskId: subTask.id, workerId },
+      orderBy: { submittedAt: 'desc' },
     });
+
+    const reportPayload = {
+      taskId: subTask.taskId,
+      subTaskId: subTask.id,
+      workerId,
+      notes: dto.note ?? dto.notes ?? null,
+      beforePhotoUrl: files?.beforePhoto?.[0]?.filename
+        ? files.beforePhoto[0].filename
+        : existingReport?.beforePhotoUrl ?? dto.beforePhotoUrl ?? null,
+      afterPhotoUrl: files?.afterPhoto?.[0]?.filename
+        ? files.afterPhoto[0].filename
+        : existingReport?.afterPhotoUrl ?? dto.afterPhotoUrl ?? null,
+      receiptUrl: files?.receipt?.[0]?.filename
+        ? files.receipt[0].filename
+        : existingReport?.receiptUrl ?? dto.receiptUrl ?? null,
+      reviewDecision: 'pending' as const,
+    };
+
+    const report = existingReport
+      ? await this.prisma.taskReport.update({
+          where: { id: existingReport.id },
+          data: reportPayload,
+        })
+      : await this.prisma.taskReport.create({
+          data: reportPayload,
+        });
 
     if (subTask.task.project.company.ownerId) {
       await this.notificationsService.send({
@@ -1058,13 +1070,13 @@ export class WorkerService {
       notes: body?.note ?? body?.notes ?? body?.description ?? null,
       beforePhotoUrl: files?.beforePhoto?.[0]?.filename
         ? files.beforePhoto[0].filename
-        : body?.beforePhotoUrl ?? null,
+        : report?.beforePhotoUrl ?? body?.beforePhotoUrl ?? null,
       afterPhotoUrl: files?.afterPhoto?.[0]?.filename
         ? files.afterPhoto[0].filename
-        : body?.afterPhotoUrl ?? null,
+        : report?.afterPhotoUrl ?? body?.afterPhotoUrl ?? null,
       receiptUrl: files?.receipt?.[0]?.filename
         ? files.receipt[0].filename
-        : body?.receiptUrl ?? null,
+        : report?.receiptUrl ?? body?.receiptUrl ?? null,
       reviewDecision: 'pending' as const,
     };
 
