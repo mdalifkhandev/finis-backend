@@ -81,6 +81,15 @@ export class MailboxService {
     };
   }
 
+  private normalizeMailboxStatus(status?: string) {
+    if (!status) return undefined;
+
+    if (status === 'inbox') return 'active';
+    if (status === 'active' || status === 'closed') return status;
+
+    return undefined;
+  }
+
   async sendMail(managerId: string, dto: SendMailDto, attachments?: MailboxAttachment[]) {
     const conversationId = randomUUID();
     const proxyAddress = this.buildProxyAddress(conversationId);
@@ -161,9 +170,11 @@ export class MailboxService {
     const limitNumber = Math.min(100, Math.max(1, Number.parseInt(limit ?? '10', 10) || 10));
     const skip = (pageNumber - 1) * limitNumber;
 
+    const normalizedStatus = this.normalizeMailboxStatus(status);
+
     const where = {
       managerId,
-      ...(status && ['active', 'closed'].includes(status) ? { status } : {}),
+      ...(normalizedStatus ? { status: normalizedStatus } : {}),
       ...(starred != null ? { isStarred: starred === 'true' } : {}),
     };
 
