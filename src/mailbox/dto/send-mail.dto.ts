@@ -17,8 +17,9 @@ export class SendMailDto {
   @IsEmail()
   clientEmail!: string;
 
+  @IsOptional()
   @IsString()
-  clientName!: string;
+  clientName?: string;
 
   @IsString()
   subject!: string;

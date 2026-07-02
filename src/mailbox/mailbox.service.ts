@@ -66,6 +66,7 @@ export class MailboxService {
     const conversationId = randomUUID();
     const proxyAddress = this.buildProxyAddress(conversationId);
     const bodyHtml = `<div>${dto.body.replace(/\n/g, '<br/>')}</div>`;
+    const clientName = dto.clientName?.trim() || dto.clientEmail;
     const resend = this.getResendClient();
 
     const conversation = await this.prisma.conversation.create({
@@ -73,7 +74,7 @@ export class MailboxService {
         id: conversationId,
         managerId,
         clientEmail: dto.clientEmail,
-        clientName: dto.clientName,
+        clientName,
         proxyAddress,
         status: 'active',
       },
