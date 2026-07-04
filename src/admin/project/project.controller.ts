@@ -259,9 +259,32 @@ export class ProjectController {
     return this.projectService.updateRoom(id, unitId, dto, userId, userRole);
   }
 
+  /** PUT /admin/projects/:id/rooms/:unitId */
+  @Put(':id/rooms/:unitId')
+  updateRoomAlias(
+    @Param('id') id: string,
+    @Param('unitId') unitId: string,
+    @Body() dto: UpdateRoomDto,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.updateRoom(id, unitId, dto, userId, userRole);
+  }
+
   /** DELETE /admin/projects/:id/units/:unitId */
   @Delete(':id/units/:unitId')
   deleteRoom(
+    @Param('id') id: string,
+    @Param('unitId') unitId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.deleteRoom(id, unitId, userId, userRole);
+  }
+
+  /** DELETE /admin/projects/:id/rooms/:unitId */
+  @Delete(':id/rooms/:unitId')
+  deleteRoomAlias(
     @Param('id') id: string,
     @Param('unitId') unitId: string,
     @CurrentUser('id') userId: string,

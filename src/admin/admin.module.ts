@@ -27,6 +27,8 @@ import { InventoryController } from './inventory/inventory.controller';
 import { InventoryService } from './inventory/inventory.service';
 import { PayrollController } from './payroll/payroll.controller';
 import { PayrollService } from './payroll/payroll.service';
+import { AdminReportsController } from './reports/reports.controller';
+import { ReportsService } from '../super-admin/reports/reports.service';
 
 @Module({
   imports: [PrismaModule, ConfigModule, NotificationsModule, S3Module],
@@ -40,6 +42,7 @@ import { PayrollService } from './payroll/payroll.service';
     SubTaskController,
     InventoryController,
     PayrollController,
+    AdminReportsController,
   ],
   providers: [
     DashboardService,
@@ -50,6 +53,7 @@ import { PayrollService } from './payroll/payroll.service';
     TaskService,
     InventoryService,
     PayrollService,
+    ReportsService,
   ],
   exports: [CompanyService, ProjectService, InventoryService, PayrollService, GeofencingGateway],
 })

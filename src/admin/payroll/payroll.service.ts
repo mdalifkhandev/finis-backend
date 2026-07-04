@@ -350,20 +350,13 @@ export class PayrollService {
       wsibRate: number;
       vacationPayRate: number;
     },
-    overrideDeductions?: number,
   ) {
     const regularPay = regularHours * ratePerHour;
     const overtimePay = overtimeHours * ratePerHour * 1.5;
     const grossPay = Math.round((regularPay + overtimePay) * 100) / 100;
 
-    const cppEmployee = Math.round(grossPay * config.cppEmployeeRate * 100) / 100;
-    const eiEmployee = Math.round(grossPay * config.eiEmployeeRate * 100) / 100;
-    const federalTax = Math.round(grossPay * config.federalTaxRate * 100) / 100;
-    const provincialTax = Math.round(grossPay * config.provincialTaxRate * 100) / 100;
-    const computedDeductions =
-      Math.round((cppEmployee + eiEmployee + federalTax + provincialTax) * 100) / 100;
-    const deductions = overrideDeductions ?? computedDeductions;
-    const netPay = Math.round((grossPay - deductions) * 100) / 100;
+    const deductions = 0;
+    const netPay = grossPay;
 
     const cppEmployer = Math.round(grossPay * config.cppEmployerRate * 100) / 100;
     const eiEmployer = Math.round(grossPay * config.eiEmployerRate * 100) / 100;
@@ -378,10 +371,10 @@ export class PayrollService {
       netPay,
       employerCost,
       breakdown: {
-        cppEmployee,
-        eiEmployee,
-        federalTax,
-        provincialTax,
+        cppEmployee: 0,
+        eiEmployee: 0,
+        federalTax: 0,
+        provincialTax: 0,
       },
     };
   }
@@ -911,7 +904,6 @@ export class PayrollService {
         wsibRate: config?.wsibRate ?? 0.0142,
         vacationPayRate: config?.vacationPayRate ?? 0.04,
       },
-      dto.deductions,
     );
 
     return this.prisma.payroll.update({

@@ -45,14 +45,14 @@ export class PayrollManagementService {
 
     // ─── Calculate deductions ─────────────────────────────────────────────────
     private calculateDeductions(grossPay: number, config: any) {
-        const cppEmployee = Math.round(grossPay * config.cppEmployeeRate * 100) / 100;
-        const eiEmployee = Math.round(grossPay * config.eiEmployeeRate * 100) / 100;
-        const federalTax = Math.round(grossPay * config.federalTaxRate * 100) / 100;
-        const provincialTax = Math.round(grossPay * config.provincialTaxRate * 100) / 100;
-        const totalDeductions = cppEmployee + eiEmployee + federalTax + provincialTax;
-        const netPay = Math.round((grossPay - totalDeductions) * 100) / 100;
-
-        return { cppEmployee, eiEmployee, federalTax, provincialTax, totalDeductions, netPay };
+        return {
+            cppEmployee: 0,
+            eiEmployee: 0,
+            federalTax: 0,
+            provincialTax: 0,
+            totalDeductions: 0,
+            netPay: Math.round(grossPay * 100) / 100,
+        };
     }
 
     // ─── Calculate employer cost ──────────────────────────────────────────────

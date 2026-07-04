@@ -1,6 +1,7 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole } from '../../generated/prisma/client';
+import PDFDocument from 'pdfkit';
 import {
   GenerateReportDto,
   ExportReportDto,
@@ -20,9 +21,238 @@ export class ReportsService {
     return { start, end };
   }
 
+  private formatMoney(value: number | null | undefined) {
+    return `$${(value ?? 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+
+  private toReportTitle(type: ReportType) {
+    switch (type) {
+      case ReportType.payroll:
+        return 'Payroll Report';
+      case ReportType.project_invoices:
+        return 'Project Invoices Report';
+      case ReportType.worker_performance:
+        return 'Worker Performance Report';
+      case ReportType.expense:
+        return 'Expense Report';
+      default:
+        return 'Report';
+    }
+  }
+
+  private async buildPdfBuffer(report: any) {
+    const doc = new PDFDocument({ size: 'A4', margin: 40, bufferPages: true });
+    const chunks: Buffer[] = [];
+
+    const buffer = await new Promise<Buffer>((resolve, reject) => {
+      doc.on('data', (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+      this.writeReportToPdf(doc, report);
+      this.decoratePdfPages(doc);
+      doc.end();
+    });
+
+    return buffer;
+  }
+
+  private decoratePdfPages(doc: any) {
+    const range = doc.bufferedPageRange();
+
+    for (let i = 0; i < range.count; i += 1) {
+      doc.switchToPage(i);
+      const { width, height, margins } = doc.page;
+      const footerY = height - (margins.bottom ?? 40) + 10;
+
+      doc.save();
+      doc.lineWidth(1);
+      doc.strokeColor('#E5E7EB');
+      doc.moveTo(margins.left, footerY - 14);
+      doc.lineTo(width - (margins.right ?? 40), footerY - 14);
+      doc.stroke();
+
+      doc.fontSize(9).fillColor('#6B7280');
+      doc.text('PremierDD Reports', margins.left, footerY, {
+        width: width - margins.left - (margins.right ?? 40),
+        align: 'left',
+      });
+      doc.text(`Page ${i + 1} of ${range.count}`, margins.left, footerY, {
+        width: width - margins.left - (margins.right ?? 40),
+        align: 'right',
+      });
+      doc.restore();
+    }
+  }
+
+  private drawHeader(doc: any, report: any) {
+    const title = this.toReportTitle(report.type);
+    const companyLabel = report.type === ReportType.project_invoices
+      ? 'Company / Project Insights'
+      : report.type === ReportType.payroll
+        ? 'Payroll Overview'
+        : report.type === ReportType.worker_performance
+          ? 'Workforce Overview'
+          : 'Expense Overview';
+
+    doc.save();
+    doc.roundedRect(40, 38, 515, 82, 16).fillAndStroke('#1D4F6D', '#1D4F6D');
+    doc.fillColor('#FFFFFF');
+    doc.fontSize(18).font('Helvetica-Bold').text('PremierDD', 60, 56);
+    doc.fontSize(9).font('Helvetica').text(companyLabel, 60, 82);
+    doc.fontSize(20).font('Helvetica-Bold').text(title, 270, 54, {
+      width: 250,
+      align: 'right',
+    });
+    doc.fontSize(9).font('Helvetica').text(`Generated ${new Date(report.generatedAt ?? Date.now()).toLocaleString()}`, 270, 82, {
+      width: 250,
+      align: 'right',
+    });
+    doc.restore();
+
+    doc.moveDown(5.5);
+  }
+
+  private drawSectionTitle(doc: any, title: string, subtitle?: string) {
+    doc.moveDown(0.5);
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#111827').text(title);
+    if (subtitle) {
+      doc.fontSize(9).font('Helvetica').fillColor('#6B7280').text(subtitle);
+    }
+    doc.moveDown(0.4);
+  }
+
+  private drawMetricCard(doc: any, x: number, y: number, width: number, label: string, value: string, accent: string) {
+    doc.save();
+    doc.roundedRect(x, y, width, 58, 12).fillAndStroke('#F9FAFB', '#E5E7EB');
+    doc.fontSize(8).fillColor('#6B7280').text(label.toUpperCase(), x + 12, y + 10, {
+      width: width - 24,
+      align: 'left',
+    });
+    doc.fontSize(15).font('Helvetica-Bold').fillColor(accent).text(value, x + 12, y + 26, {
+      width: width - 24,
+      align: 'left',
+    });
+    doc.restore();
+  }
+
+  private writeReportToPdf(doc: any, report: any) {
+    this.drawHeader(doc, report);
+    const periodStart = report.period?.start ? new Date(report.period.start).toLocaleDateString() : 'N/A';
+    const periodEnd = report.period?.end ? new Date(report.period.end).toLocaleDateString() : 'N/A';
+
+    doc.fontSize(10).fillColor('#6B7280').text(`Period: ${periodStart} - ${periodEnd}`);
+    doc.moveDown(1);
+
+    const summary = report.summary ?? {};
+    this.drawSectionTitle(doc, 'Summary', 'Key metrics for the selected range');
+
+    const summaryItems: Array<{ label: string; value: string; accent: string }> = [];
+
+    const summaryEntries = Object.entries(summary).filter(([key]) => key !== 'byStatus' && key !== 'byCategory');
+    summaryEntries.slice(0, 4).forEach(([key, value]) => {
+      const label = key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ');
+      const displayValue = typeof value === 'number' ? this.formatMoney(value) : String(value);
+      summaryItems.push({ label, value: displayValue, accent: '#1D4F6D' });
+    });
+
+    const cardWidth = 120;
+    const gap = 10;
+    const startX = 40;
+    const cardY = doc.y + 4;
+    summaryItems.forEach((item, index) => {
+      this.drawMetricCard(doc, startX + (index * (cardWidth + gap)), cardY, cardWidth, item.label, item.value, item.accent);
+    });
+    if (summaryItems.length > 0) {
+      doc.y = cardY + 68;
+    }
+
+    const byStatus = (summary as any).byStatus;
+    if (byStatus && typeof byStatus === 'object') {
+      this.drawSectionTitle(doc, 'Status Breakdown');
+      Object.entries(byStatus).forEach(([key, value]) => {
+        doc.fontSize(10).fillColor('#374151').text(`${key}: ${value}`);
+      });
+    }
+
+    const byCategory = (summary as any).byCategory;
+    if (byCategory && typeof byCategory === 'object') {
+      this.drawSectionTitle(doc, 'Category Breakdown');
+      Object.entries(byCategory).forEach(([key, value]) => {
+        doc.fontSize(10).fillColor('#374151').text(`${key}: ${this.formatMoney(Number(value))}`);
+      });
+    }
+
+    this.drawSectionTitle(doc, 'Details', 'Top items from the selected period');
+
+    if (report.type === 'payroll') {
+      (report.workers ?? []).slice(0, 12).forEach((worker: any, index: number) => {
+        doc.fontSize(11).font('Helvetica-Bold').fillColor('#1D4F6D').text(`${index + 1}. ${worker.worker?.fullName ?? 'Worker'}`);
+        doc.fontSize(9).font('Helvetica').fillColor('#374151').text(
+          `Attendance: ${worker.attendance?.attendanceRate ?? '0%'} | Tasks: ${worker.tasks?.completed ?? 0}/${worker.tasks?.total ?? 0} | Score: ${worker.performanceScore ?? '0%'}`
+        );
+        doc.text(
+          `Gross: ${this.formatMoney(worker.totalGrossPay)} | Net: ${this.formatMoney(worker.totalNetPay)} | Deductions: ${this.formatMoney(worker.totalDeductions)}`
+        );
+        doc.moveDown(0.5);
+      });
+    } else if (report.type === 'project_invoices') {
+      (report.projects ?? []).slice(0, 12).forEach((project: any, index: number) => {
+        doc.fontSize(11).font('Helvetica-Bold').fillColor('#1D4F6D').text(`${index + 1}. ${project.name}`);
+        doc.fontSize(9).font('Helvetica').fillColor('#374151').text(
+          `Company: ${project.company?.name ?? 'N/A'} | Status: ${project.status ?? 'N/A'} | Progress: ${project.progress ?? 0}%`
+        );
+        doc.text(
+          `Budget: ${this.formatMoney(project.budget)} | Spent: ${this.formatMoney(project.spent)} | Remaining: ${this.formatMoney(project.remaining)}`
+        );
+        doc.moveDown(0.5);
+      });
+    } else if (report.type === 'worker_performance') {
+      (report.workers ?? []).slice(0, 12).forEach((worker: any, index: number) => {
+        doc.fontSize(11).font('Helvetica-Bold').fillColor('#1D4F6D').text(`${index + 1}. ${worker.worker?.fullName ?? 'Worker'}`);
+        doc.fontSize(9).font('Helvetica').fillColor('#374151').text(
+          `Attendance: ${worker.attendance?.attendanceRate ?? '0%'} | Tasks: ${worker.tasks?.completed ?? 0}/${worker.tasks?.total ?? 0} | Reports: ${worker.reports?.approved ?? 0}/${worker.reports?.total ?? 0}`
+        );
+        doc.text(`Performance Score: ${worker.performanceScore ?? '0%'}`);
+        doc.moveDown(0.5);
+      });
+    } else if (report.type === 'expense') {
+      (report.expenses ?? []).slice(0, 15).forEach((expense: any, index: number) => {
+        doc.fontSize(11).font('Helvetica-Bold').fillColor('#1D4F6D').text(`${index + 1}. ${expense.description}`);
+        doc.fontSize(9).font('Helvetica').fillColor('#374151').text(
+          `Worker: ${expense.worker?.fullName ?? 'N/A'} | Project: ${expense.project?.name ?? 'N/A'} | Status: ${expense.status ?? 'N/A'}`
+        );
+        doc.text(`Category: ${expense.category ?? 'N/A'} | Amount: ${this.formatMoney(expense.amount)}`);
+        doc.moveDown(0.5);
+      });
+    }
+  }
+
   // ─── Access filter ────────────────────────────────────────────────────────
   private async getCompanyIds(userId: string, userRole: string, companyId?: string) {
-    if (companyId) return [companyId];
+    if (companyId) {
+      if (userRole === UserRole.super_admin) {
+        return [companyId];
+      }
+
+      const company = await this.prisma.company.findFirst({
+        where: {
+          id: companyId,
+          ownerId: userId,
+        },
+        select: { id: true },
+      });
+
+      if (!company) {
+        throw new ForbiddenException('You do not have access to this company');
+      }
+
+      return [company.id];
+    }
 
     const companies = await this.prisma.company.findMany({
       where: userRole === UserRole.super_admin ? {} : { ownerId: userId },
@@ -228,7 +458,23 @@ export class ReportsService {
     companyIds: string[],
     dto: GenerateReportDto,
   ) {
-    // Accepted invitation থেকে worker ids আনো
+    if (companyIds.length === 0) {
+      return {
+        type:        'worker_performance',
+        frequency:   dto.frequency,
+        period:      { start, end },
+        generatedAt: new Date(),
+        summary: {
+          totalWorkers:      0,
+          avgAttendanceRate: '0%',
+          avgTaskCompletion: '0%',
+          topPerformer:      null,
+        },
+        workers: [],
+      };
+    }
+
+    // Company scoped worker ids from accepted invitations + active project work + payroll history
     const acceptedInvitations = await this.prisma.invitation.findMany({
       where: {
         role:       'worker',
@@ -246,6 +492,35 @@ export class ReportsService {
       where: {
         id:   { in: workerIds },
         role: 'worker',
+        OR: [
+          {
+            assignedTasks: {
+              some: {
+                project: {
+                  companyId: { in: companyIds },
+                },
+              },
+            },
+          },
+          {
+            taskReports: {
+              some: {
+                task: {
+                  project: {
+                    companyId: { in: companyIds },
+                  },
+                },
+              },
+            },
+          },
+          {
+            payrolls: {
+              some: {
+                companyId: { in: companyIds },
+              },
+            },
+          },
+        ],
       },
       select: {
         id:        true,
@@ -389,6 +664,9 @@ export class ReportsService {
     const expenses = await this.prisma.expense.findMany({
       where: {
         ...(dto.projectId && { projectId: dto.projectId }),
+        project: {
+          companyId: { in: companyIds },
+        },
         date: { gte: start, lte: end },
       },
       include: {
@@ -467,7 +745,6 @@ export class ReportsService {
   ) {
     const start      = dto.startDate ? new Date(dto.startDate) : new Date(new Date().getFullYear(), 0, 1);
     const end        = dto.endDate   ? new Date(dto.endDate)   : new Date();
-    const companyIds = await this.getCompanyIds(userId, userRole, dto.companyId);
 
     const generateDto = {
       type:      dto.type,
@@ -482,6 +759,20 @@ export class ReportsService {
     return {
       exportedAt: new Date(),
       ...report,
+    };
+  }
+
+  async exportReportPdf(
+    dto: ExportReportDto,
+    userId: string,
+    userRole: string,
+  ) {
+    const report = await this.exportAllData(dto, userId, userRole);
+    const buffer = await this.buildPdfBuffer(report);
+
+    return {
+      filename: `${report.type}-report-${new Date().toISOString().slice(0, 10)}.pdf`,
+      buffer,
     };
   }
 }

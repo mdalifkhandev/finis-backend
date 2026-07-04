@@ -1,69 +1,50 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Query,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { ReportsService } from './reports.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { UserRole } from '../../generated/prisma/client';
-import { GenerateReportDto, ExportReportDto } from './dto/reports.dto';
+import { ReportsService } from '../../super-admin/reports/reports.service';
+import { AdminExportReportDto, AdminGenerateReportDto } from './dto/admin-reports.dto';
 
-@Controller('super_admin/reports')
+@Controller('admin/reports')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.super_admin)
-export class ReportsController {
-  constructor(private reportsService: ReportsService) {}
+@Roles(UserRole.admin)
+export class AdminReportsController {
+  constructor(private readonly reportsService: ReportsService) {}
 
-  /** GET /super_admin/reports/generate
-   *  type: payroll | project_invoices | worker_performance | expense
+  /** GET /admin/reports/generate
+   *  admin নিজের সব company/project/workers/payroll/report data দেখবে
    */
   @Get('generate')
-  generateReportQuery(
-    @Query() dto: GenerateReportDto,
+  generateReport(
+    @Query() dto: AdminGenerateReportDto,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
   ) {
     return this.reportsService.generateReport(dto, userId, userRole);
   }
 
-  /** GET /super_admin/reports
+  /** GET /admin/reports
    *  alias for generate
    */
   @Get()
   generateReportAlias(
-    @Query() dto: GenerateReportDto,
+    @Query() dto: AdminGenerateReportDto,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
   ) {
     return this.reportsService.generateReport(dto, userId, userRole);
   }
 
-  /** POST /super_admin/reports/generate
-   *  type: payroll | project_invoices | worker_performance | expense
-   */
-  @Post('generate')
-  generateReport(
-    @Body() dto: GenerateReportDto,
-    @CurrentUser('id') userId: string,
-    @CurrentUser('role') userRole: string,
-  ) {
-    return this.reportsService.generateReport(dto, userId, userRole);
-  }
-
-  /** GET /super_admin/reports/export
-   *  type: payroll | project_invoices | worker_performance | expense
+  /** GET /admin/reports/export
+   *  admin নিজের সব company/project/workers/payroll/report data export করবে
    */
   @Get('export')
   exportAllData(
-    @Query() dto: ExportReportDto,
+    @Query() dto: AdminExportReportDto,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
     @Res() res: Response,
