@@ -711,6 +711,7 @@ export class TaskService {
         status: true,
         date: true,
         receiptUrl: true,
+        projectId: true,
         taskId: true,
         worker: { select: { id: true, fullName: true } },
       },
@@ -727,6 +728,7 @@ export class TaskService {
         status: expense.status,
         date: expense.date,
         receiptUrl: expense.receiptUrl,
+        projectId: expense.projectId,
         taskId: expense.taskId,
         reporter: expense.worker,
       })),
@@ -1178,7 +1180,7 @@ export class TaskService {
           amount: Number.isFinite(normalizedAmount) ? normalizedAmount : 0,
           receiptUrl: file?.filename ?? null,
           date: new Date(),
-          status: 'pending',
+          status: 'approved',
         },
       });
     }
@@ -1616,6 +1618,7 @@ export class TaskService {
     dto: ReviewTaskDto,
     userId: string,
     userRole: string,
+    file?: { filename: string },
   ) {
     await this.verifyTaskAccess(taskId, userId, userRole);
 
@@ -1639,32 +1642,67 @@ export class TaskService {
       },
     });
 
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: { projectId: true },
+    });
+
     const expenseAmount =
       typeof dto.expenseAmount === 'number' && Number.isFinite(dto.expenseAmount)
         ? dto.expenseAmount
         : null;
 
     if (dto.reviewDecision === 'approved' && expenseAmount != null) {
-      await this.prisma.expense.upsert({
-        where: { taskId },
-        update: {
-          amount: expenseAmount,
-          reviewNotes: reviewText,
-          reviewedBy: userId,
-          reviewedAt: new Date(),
-          status: 'pending',
-        },
-        create: {
-          workerId: report.workerId,
-          projectId: report.subTask?.taskId ? undefined : null,
-          taskId,
-          description: reviewText ?? 'Task expense',
-          category: 'other',
-          amount: expenseAmount,
-          date: new Date(),
-          status: 'pending',
-        },
-      });
+      if (report.subTaskId) {
+        await this.prisma.expense.upsert({
+          where: { subTaskId: report.subTaskId },
+          update: {
+            projectId: task?.projectId ?? null,
+            amount: expenseAmount,
+            reviewNotes: reviewText,
+            reviewedBy: userId,
+            reviewedAt: new Date(),
+            receiptUrl: file?.filename ?? undefined,
+            status: 'approved',
+          },
+          create: {
+            workerId: report.workerId,
+            projectId: task?.projectId ?? null,
+            taskId: null,
+            subTaskId: report.subTaskId,
+            description: reviewText ?? 'Task expense',
+            category: 'other',
+            amount: expenseAmount,
+            receiptUrl: file?.filename ?? null,
+            date: new Date(),
+            status: 'approved',
+          },
+        });
+      } else {
+        await this.prisma.expense.upsert({
+          where: { taskId },
+          update: {
+            projectId: task?.projectId ?? null,
+            amount: expenseAmount,
+            reviewNotes: reviewText,
+            reviewedBy: userId,
+            reviewedAt: new Date(),
+            receiptUrl: file?.filename ?? undefined,
+            status: 'approved',
+          },
+          create: {
+            workerId: report.workerId,
+            projectId: task?.projectId ?? null,
+            taskId,
+            description: reviewText ?? 'Task expense',
+            category: 'other',
+            amount: expenseAmount,
+            receiptUrl: file?.filename ?? null,
+            date: new Date(),
+            status: 'approved',
+          },
+        });
+      }
     }
 
     await this.notificationsService.send({

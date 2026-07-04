@@ -43,8 +43,9 @@ export class GenerateReportDto {
 }
 
 export class ExportReportDto {
+  @IsOptional()
   @IsEnum(ReportType)
-  type!: ReportType;
+  type?: ReportType;
 
   @IsOptional()
   @IsDateString()

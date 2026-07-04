@@ -70,6 +70,8 @@ export class ReportsService {
       const footerY = height - (margins.bottom ?? 40) + 10;
 
       doc.save();
+      doc.x = margins.left;
+      doc.y = margins.top ?? 40;
       doc.lineWidth(1);
       doc.strokeColor('#E5E7EB');
       doc.moveTo(margins.left, footerY - 14);
@@ -77,13 +79,17 @@ export class ReportsService {
       doc.stroke();
 
       doc.fontSize(9).fillColor('#6B7280');
-      doc.text('PremierDD Reports', margins.left, footerY, {
+      doc.text('Finis Pro Reports', margins.left, footerY, {
         width: width - margins.left - (margins.right ?? 40),
         align: 'left',
+        lineBreak: false,
+        height: 12,
       });
       doc.text(`Page ${i + 1} of ${range.count}`, margins.left, footerY, {
         width: width - margins.left - (margins.right ?? 40),
         align: 'right',
+        lineBreak: false,
+        height: 12,
       });
       doc.restore();
     }
@@ -100,30 +106,43 @@ export class ReportsService {
           : 'Expense Overview';
 
     doc.save();
-    doc.roundedRect(40, 38, 515, 82, 16).fillAndStroke('#1D4F6D', '#1D4F6D');
+    doc.roundedRect(40, 38, 515, 96, 18).fillAndStroke('#1D4F6D', '#1D4F6D');
     doc.fillColor('#FFFFFF');
-    doc.fontSize(18).font('Helvetica-Bold').text('PremierDD', 60, 56);
-    doc.fontSize(9).font('Helvetica').text(companyLabel, 60, 82);
-    doc.fontSize(20).font('Helvetica-Bold').text(title, 270, 54, {
-      width: 250,
-      align: 'right',
+    doc.fontSize(24).font('Helvetica-Bold').text('Finis Pro', 60, 54, {
+      width: 360,
+      align: 'left',
     });
-    doc.fontSize(9).font('Helvetica').text(`Generated ${new Date(report.generatedAt ?? Date.now()).toLocaleString()}`, 270, 82, {
-      width: 250,
+    doc.fontSize(11).font('Helvetica').text(companyLabel, 60, 82, {
+      width: 360,
+      align: 'left',
+    });
+    doc.fontSize(18).font('Helvetica-Bold').text(title, 60, 106, {
+      width: 360,
+      align: 'left',
+    });
+    doc.fontSize(9).font('Helvetica').text(`Generated ${new Date(report.generatedAt ?? Date.now()).toLocaleString()}`, 380, 56, {
+      width: 150,
       align: 'right',
     });
     doc.restore();
 
-    doc.moveDown(5.5);
+    doc.y = 150;
   }
 
-  private drawSectionTitle(doc: any, title: string, subtitle?: string) {
-    doc.moveDown(0.5);
-    doc.fontSize(14).font('Helvetica-Bold').fillColor('#111827').text(title);
+  private drawSectionTitle(doc: any, title: string, subtitle?: string) {        
+    doc.x = 40;
+    doc.moveDown(0.15);
+    doc.fontSize(16).font('Helvetica-Bold').fillColor('#111827').text(title, 40, doc.y, {
+      width: 515,
+      align: 'left',
+    });
     if (subtitle) {
-      doc.fontSize(9).font('Helvetica').fillColor('#6B7280').text(subtitle);
+      doc.fontSize(10).font('Helvetica').fillColor('#6B7280').text(subtitle, 40, doc.y, {
+        width: 515,
+        align: 'left',
+      });
     }
-    doc.moveDown(0.4);
+    doc.moveDown(0.2);
   }
 
   private drawMetricCard(doc: any, x: number, y: number, width: number, label: string, value: string, accent: string) {
@@ -140,95 +159,158 @@ export class ReportsService {
     doc.restore();
   }
 
+  private ensureSpace(doc: any, heightNeeded: number) {
+    const bottomLimit = doc.page.height - (doc.page.margins.bottom ?? 40) - 30;
+    if (doc.y + heightNeeded > bottomLimit) {
+      doc.addPage();
+      doc.y = 40;
+    }
+  }
+
+  private drawTable(
+    doc: any,
+    headers: string[],
+    rows: string[][],
+    widths: number[],
+    options?: { rowHeight?: number },
+  ) {
+    const rowHeight = options?.rowHeight ?? 22;
+    const startX = 40;
+    const tableWidth = widths.reduce((sum, width) => sum + width, 0);
+
+    this.ensureSpace(doc, rowHeight + 28);
+    doc.x = startX;
+    doc.y = Math.max(doc.y, 40);
+
+    doc.save();
+    doc.fillColor('#1D4F6D').font('Helvetica-Bold').fontSize(9);
+    const headerY = doc.y;
+    let x = startX;
+    headers.forEach((header, index) => {
+      doc.text(header.toUpperCase(), x + 6, headerY + 5, {
+        width: widths[index] - 12,
+        align: 'left',
+        lineBreak: false,
+        height: rowHeight - 8,
+      });
+      x += widths[index];
+    });
+    doc.moveTo(startX, headerY + rowHeight - 2).lineTo(startX + tableWidth, headerY + rowHeight - 2).strokeColor('#CBD5E1').stroke();
+    doc.restore();
+    doc.y = headerY + rowHeight;
+
+    rows.forEach((row, rowIndex) => {
+      this.ensureSpace(doc, rowHeight + 6);
+      const bg = rowIndex % 2 === 0 ? '#F9FAFB' : '#FFFFFF';
+      const rowY = doc.y;
+      doc.save();
+      doc.rect(startX, rowY, tableWidth, rowHeight).fillAndStroke(bg, '#E5E7EB');
+      doc.fillColor('#111827').font('Helvetica').fontSize(9);
+      let cellX = startX;
+      row.forEach((cell, cellIndex) => {
+        doc.text(cell, cellX + 6, rowY + 5, {
+          width: widths[cellIndex] - 12,
+          height: rowHeight - 8,
+          ellipsis: true,
+          lineBreak: false,
+        });
+        cellX += widths[cellIndex];
+      });
+      doc.restore();
+      doc.y = rowY + rowHeight;
+    });
+
+    doc.y += 10;
+  }
+
   private writeReportToPdf(doc: any, report: any) {
     this.drawHeader(doc, report);
     const periodStart = report.period?.start ? new Date(report.period.start).toLocaleDateString() : 'N/A';
     const periodEnd = report.period?.end ? new Date(report.period.end).toLocaleDateString() : 'N/A';
 
-    doc.fontSize(10).fillColor('#6B7280').text(`Period: ${periodStart} - ${periodEnd}`);
-    doc.moveDown(1);
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#6B7280').text(`Period: ${periodStart} - ${periodEnd}`, 40, 164, {
+      width: 515,
+      align: 'left',
+    });
 
     const summary = report.summary ?? {};
+    doc.y = 194;
     this.drawSectionTitle(doc, 'Summary', 'Key metrics for the selected range');
 
-    const summaryItems: Array<{ label: string; value: string; accent: string }> = [];
-
+    const summaryRows: string[][] = [];
     const summaryEntries = Object.entries(summary).filter(([key]) => key !== 'byStatus' && key !== 'byCategory');
-    summaryEntries.slice(0, 4).forEach(([key, value]) => {
+    summaryEntries.slice(0, 6).forEach(([key, value]) => {
       const label = key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ');
       const displayValue = typeof value === 'number' ? this.formatMoney(value) : String(value);
-      summaryItems.push({ label, value: displayValue, accent: '#1D4F6D' });
+      summaryRows.push([label, displayValue]);
     });
-
-    const cardWidth = 120;
-    const gap = 10;
-    const startX = 40;
-    const cardY = doc.y + 4;
-    summaryItems.forEach((item, index) => {
-      this.drawMetricCard(doc, startX + (index * (cardWidth + gap)), cardY, cardWidth, item.label, item.value, item.accent);
-    });
-    if (summaryItems.length > 0) {
-      doc.y = cardY + 68;
+    if (summaryRows.length > 0) {
+      this.drawTable(doc, ['Metric', 'Value'], summaryRows, [260, 255], { rowHeight: 24 });
     }
 
     const byStatus = (summary as any).byStatus;
-    if (byStatus && typeof byStatus === 'object') {
+    if (byStatus && typeof byStatus === 'object' && Object.keys(byStatus).length > 0) {
       this.drawSectionTitle(doc, 'Status Breakdown');
-      Object.entries(byStatus).forEach(([key, value]) => {
-        doc.fontSize(10).fillColor('#374151').text(`${key}: ${value}`);
-      });
+      const statusRows = Object.entries(byStatus).map(([key, value]) => [key, String(value)]);
+      this.drawTable(doc, ['Status', 'Count'], statusRows, [260, 255], { rowHeight: 22 });
     }
 
     const byCategory = (summary as any).byCategory;
-    if (byCategory && typeof byCategory === 'object') {
+    if (byCategory && typeof byCategory === 'object' && Object.keys(byCategory).length > 0) {
       this.drawSectionTitle(doc, 'Category Breakdown');
-      Object.entries(byCategory).forEach(([key, value]) => {
-        doc.fontSize(10).fillColor('#374151').text(`${key}: ${this.formatMoney(Number(value))}`);
-      });
+      const categoryRows = Object.entries(byCategory).map(([key, value]) => [key, this.formatMoney(Number(value))]);
+      this.drawTable(doc, ['Category', 'Amount'], categoryRows, [260, 255], { rowHeight: 22 });
     }
 
-    this.drawSectionTitle(doc, 'Details', 'Top items from the selected period');
+    const payrollRows = report.type === 'payroll' ? (report.workers ?? []) : [];
+    const projectRows = report.type === 'project_invoices' ? (report.projects ?? []) : [];
+    const performanceRows = report.type === 'worker_performance' ? (report.workers ?? []) : [];
+    const expenseRows = report.type === 'expense' ? (report.expenses ?? []) : [];
+    const hasDetails = payrollRows.length > 0 || projectRows.length > 0 || performanceRows.length > 0 || expenseRows.length > 0;
+
+    if (hasDetails) {
+      this.drawSectionTitle(doc, 'Details', 'Top items from the selected period');
+    }
 
     if (report.type === 'payroll') {
-      (report.workers ?? []).slice(0, 12).forEach((worker: any, index: number) => {
-        doc.fontSize(11).font('Helvetica-Bold').fillColor('#1D4F6D').text(`${index + 1}. ${worker.worker?.fullName ?? 'Worker'}`);
-        doc.fontSize(9).font('Helvetica').fillColor('#374151').text(
-          `Attendance: ${worker.attendance?.attendanceRate ?? '0%'} | Tasks: ${worker.tasks?.completed ?? 0}/${worker.tasks?.total ?? 0} | Score: ${worker.performanceScore ?? '0%'}`
-        );
-        doc.text(
-          `Gross: ${this.formatMoney(worker.totalGrossPay)} | Net: ${this.formatMoney(worker.totalNetPay)} | Deductions: ${this.formatMoney(worker.totalDeductions)}`
-        );
-        doc.moveDown(0.5);
-      });
+      const rows = payrollRows.slice(0, 12).map((worker: any, index: number) => ([
+        `${index + 1}. ${worker.worker?.fullName ?? 'Worker'}`,
+        worker.attendance?.attendanceRate ?? '0%',
+        `${worker.tasks?.completed ?? 0}/${worker.tasks?.total ?? 0}`,
+        worker.performanceScore ?? '0%',
+        this.formatMoney(worker.totalGrossPay),
+        this.formatMoney(worker.totalNetPay),
+      ]));
+      this.drawTable(doc, ['Worker', 'Attendance', 'Tasks', 'Score', 'Gross', 'Net'], rows, [150, 70, 75, 65, 80, 75], { rowHeight: 24 });
     } else if (report.type === 'project_invoices') {
-      (report.projects ?? []).slice(0, 12).forEach((project: any, index: number) => {
-        doc.fontSize(11).font('Helvetica-Bold').fillColor('#1D4F6D').text(`${index + 1}. ${project.name}`);
-        doc.fontSize(9).font('Helvetica').fillColor('#374151').text(
-          `Company: ${project.company?.name ?? 'N/A'} | Status: ${project.status ?? 'N/A'} | Progress: ${project.progress ?? 0}%`
-        );
-        doc.text(
-          `Budget: ${this.formatMoney(project.budget)} | Spent: ${this.formatMoney(project.spent)} | Remaining: ${this.formatMoney(project.remaining)}`
-        );
-        doc.moveDown(0.5);
-      });
+      const rows = projectRows.slice(0, 12).map((project: any) => ([
+        project.name,
+        project.company?.name ?? 'N/A',
+        `${project.progress ?? 0}%`,
+        this.formatMoney(project.budget),
+        this.formatMoney(project.spent),
+        this.formatMoney(project.remaining),
+      ]));
+      this.drawTable(doc, ['Project', 'Company', 'Progress', 'Budget', 'Spent', 'Remaining'], rows, [140, 110, 60, 70, 70, 65], { rowHeight: 24 });
     } else if (report.type === 'worker_performance') {
-      (report.workers ?? []).slice(0, 12).forEach((worker: any, index: number) => {
-        doc.fontSize(11).font('Helvetica-Bold').fillColor('#1D4F6D').text(`${index + 1}. ${worker.worker?.fullName ?? 'Worker'}`);
-        doc.fontSize(9).font('Helvetica').fillColor('#374151').text(
-          `Attendance: ${worker.attendance?.attendanceRate ?? '0%'} | Tasks: ${worker.tasks?.completed ?? 0}/${worker.tasks?.total ?? 0} | Reports: ${worker.reports?.approved ?? 0}/${worker.reports?.total ?? 0}`
-        );
-        doc.text(`Performance Score: ${worker.performanceScore ?? '0%'}`);
-        doc.moveDown(0.5);
-      });
+      const rows = performanceRows.slice(0, 12).map((worker: any) => ([
+        worker.worker?.fullName ?? 'Worker',
+        worker.attendance?.attendanceRate ?? '0%',
+        `${worker.subTasks?.completed ?? 0}/${worker.subTasks?.total ?? 0}`,
+        `${worker.reports?.approved ?? 0}/${worker.reports?.total ?? 0}`,
+        worker.performanceScore ?? '0%',
+      ]));
+      this.drawTable(doc, ['Worker', 'Attendance', 'Sub-task', 'Reports', 'Score'], rows, [170, 75, 90, 90, 90], { rowHeight: 24 });
     } else if (report.type === 'expense') {
-      (report.expenses ?? []).slice(0, 15).forEach((expense: any, index: number) => {
-        doc.fontSize(11).font('Helvetica-Bold').fillColor('#1D4F6D').text(`${index + 1}. ${expense.description}`);
-        doc.fontSize(9).font('Helvetica').fillColor('#374151').text(
-          `Worker: ${expense.worker?.fullName ?? 'N/A'} | Project: ${expense.project?.name ?? 'N/A'} | Status: ${expense.status ?? 'N/A'}`
-        );
-        doc.text(`Category: ${expense.category ?? 'N/A'} | Amount: ${this.formatMoney(expense.amount)}`);
-        doc.moveDown(0.5);
-      });
+      const rows = expenseRows.slice(0, 15).map((expense: any) => ([
+        expense.description ?? 'N/A',
+        expense.worker?.fullName ?? 'N/A',
+        expense.project?.name ?? 'N/A',
+        expense.category ?? 'N/A',
+        this.formatMoney(expense.amount),
+        expense.status ?? 'N/A',
+      ]));
+      this.drawTable(doc, ['Description', 'Worker', 'Project', 'Category', 'Amount', 'Status'], rows, [145, 100, 100, 60, 65, 45], { rowHeight: 24 });
     }
   }
 
@@ -242,7 +324,17 @@ export class ReportsService {
       const company = await this.prisma.company.findFirst({
         where: {
           id: companyId,
-          ownerId: userId,
+          OR: [
+            { ownerId: userId },
+            {
+              members: {
+                some: {
+                  userId,
+                  role: 'admin',
+                },
+              },
+            },
+          ],
         },
         select: { id: true },
       });
@@ -254,11 +346,31 @@ export class ReportsService {
       return [company.id];
     }
 
-    const companies = await this.prisma.company.findMany({
-      where: userRole === UserRole.super_admin ? {} : { ownerId: userId },
+    if (userRole === UserRole.super_admin) {
+      const companies = await this.prisma.company.findMany({
+        select: { id: true },
+      });
+      return companies.map((c) => c.id);
+    }
+
+    const accessibleCompanies = await this.prisma.company.findMany({
+      where: {
+        OR: [
+          { ownerId: userId },
+          {
+            members: {
+              some: {
+                userId,
+                role: 'admin',
+              },
+            },
+          },
+        ],
+      },
       select: { id: true },
     });
-    return companies.map((c) => c.id);
+
+    return accessibleCompanies.map((c) => c.id);
   }
 
   // ─── MAIN: Generate Report ────────────────────────────────────────────────
@@ -551,6 +663,25 @@ export class ReportsService {
             dueDate:      true,
           },
         },
+        taskAssignees: {
+          where: {
+            task: {
+              project: {
+                companyId: { in: companyIds },
+              },
+            },
+          },
+          select: {
+            subTasks: {
+              where: {
+                createdAt: { gte: start, lte: end },
+              },
+              select: {
+                status: true,
+              },
+            },
+          },
+        },
         taskReports: {
           where: {
             submittedAt: { gte: start, lte: end },
@@ -576,6 +707,14 @@ export class ReportsService {
       const inProgressTasks = w.assignedTasks.filter((t) => t.status === 'in_progress').length;
       const taskCompletion  = totalTasks > 0
         ? Math.round((completedTasks / totalTasks) * 100)
+        : 0;
+
+      const allSubTasks = w.taskAssignees.flatMap((assignee) => assignee.subTasks ?? []);
+      const totalSubTasks = allSubTasks.length;
+      const completedSubTasks = allSubTasks.filter((subTask) => subTask.status === 'completed').length;
+      const inProgressSubTasks = allSubTasks.filter((subTask) => subTask.status === 'in_progress').length;
+      const subTaskCompletion = totalSubTasks > 0
+        ? Math.round((completedSubTasks / totalSubTasks) * 100)
         : 0;
 
       const approvedReports = w.taskReports.filter((r) => r.reviewDecision === 'approved').length;
@@ -608,6 +747,12 @@ export class ReportsService {
           completed:    completedTasks,
           inProgress:   inProgressTasks,
           completionRate: `${taskCompletion}%`,
+        },
+        subTasks: {
+          total:        totalSubTasks,
+          completed:    completedSubTasks,
+          inProgress:   inProgressSubTasks,
+          completionRate: `${subTaskCompletion}%`,
         },
         reports: {
           total:        w.taskReports.length,
@@ -777,7 +922,7 @@ export class ReportsService {
     const end        = dto.endDate   ? new Date(dto.endDate)   : new Date();
 
     const generateDto = {
-      type:      dto.type,
+      type:      dto.type ?? ReportType.expense,
       frequency: 'monthly' as any,
       startDate: start.toISOString(),
       endDate:   end.toISOString(),

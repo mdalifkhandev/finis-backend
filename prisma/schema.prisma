@@ -478,6 +478,7 @@ model SubTask {
   creator               User           @relation("SubTaskCreator", fields: [createdBy], references: [id])
   reports               TaskReport[]
   inventories           TaskInventory[]
+  expense               Expense?
   subTaskUnits          SubTaskUnit[]
 
   @@index([taskId, unitId])
@@ -695,6 +696,7 @@ model Expense {
   workerId    String          @map("worker_id") @db.Uuid
   projectId   String?         @map("project_id") @db.Uuid
   taskId      String?         @map("task_id") @db.Uuid
+  subTaskId   String?         @unique @map("sub_task_id") @db.Uuid
   description String
   category    ExpenseCategory
   amount      Float
@@ -707,6 +709,7 @@ model Expense {
   createdAt   DateTime        @default(now()) @map("created_at")
   project     Project?        @relation(fields: [projectId], references: [id])
   task        Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  subTask     SubTask?        @relation(fields: [subTaskId], references: [id], onDelete: SetNull)
   worker      User            @relation(fields: [workerId], references: [id])
 
   @@unique([taskId])

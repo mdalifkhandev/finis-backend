@@ -1,4 +1,4 @@
-import { IsDateString, IsEnum } from 'class-validator';
+import { IsDateString, IsEnum, IsOptional } from 'class-validator';
 import { PeriodFrequency, ReportType } from '../../../super-admin/reports/dto/reports.dto';
 
 export class AdminGenerateReportDto {
@@ -16,8 +16,9 @@ export class AdminGenerateReportDto {
 }
 
 export class AdminExportReportDto {
+  @IsOptional()
   @IsEnum(ReportType)
-  type!: ReportType;
+  type?: ReportType;
 
   @IsDateString()
   startDate!: string;

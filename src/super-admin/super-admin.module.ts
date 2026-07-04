@@ -13,8 +13,6 @@ import { TeamManagementController } from './team-management/team-management.cont
 import { TeamManagementService } from './team-management/team-management.service';
 import { PayrollManagementController } from './payroll-management/payroll-management.controller';
 import { PayrollManagementService } from './payroll-management/payroll-management.service';
-import { ExpenseManagementController } from './expense-management/expense-management.controller';
-import { ExpenseManagementService } from './expense-management/expense-management.service';
 import { ReportsController } from './reports/reports.controller';
 import { ReportsService } from './reports/reports.service';
 import { SubscriptionModule } from './subscription/subscription.module';
@@ -28,7 +26,6 @@ import { AuthModule } from '../auth/auth.module';
     SuperAdminProjectController,
     TeamManagementController,
     PayrollManagementController,
-    ExpenseManagementController,
     ReportsController,
     SuperAdminUsersController,
   ],
@@ -39,7 +36,6 @@ import { AuthModule } from '../auth/auth.module';
     SuperAdminProjectService,
     TeamManagementService,
     PayrollManagementService,
-    ExpenseManagementService,
     ReportsService,
   ],
   exports: [],
