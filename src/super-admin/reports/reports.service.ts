@@ -278,7 +278,7 @@ export class ReportsService {
       case ReportType.worker_performance:
         return this.generateWorkerPerformanceReport(start, end, companyIds, dto);
       case ReportType.expense:
-        return this.generateExpenseReport(start, end, companyIds, dto);
+        return this.generateExpenseReport(start, end, companyIds, dto, userId, userRole);
       default:
         throw new BadRequestException('Invalid report type');
     }
@@ -314,9 +314,10 @@ export class ReportsService {
       orderBy: { createdAt: 'desc' },
     });
 
+    const paidPayrolls      = payrolls.filter((p) => p.status === 'paid');
     const totalGrossPay     = payrolls.reduce((s, p) => s + p.grossPay,        0);
-    const totalNetPay       = payrolls.reduce((s, p) => s + p.netPay,          0);
-    const totalDeductions   = payrolls.reduce((s, p) => s + p.deductions,      0);
+    const totalNetPay       = paidPayrolls.reduce((s, p) => s + p.grossPay,     0);
+    const totalDeductions   = 0;
     const totalEmployerCost = payrolls.reduce((s, p) => s + (p.employerCost ?? 0), 0);
     const totalHours        = payrolls.reduce((s, p) => s + p.regularHours + p.overtimeHours, 0);
 
@@ -342,15 +343,15 @@ export class ReportsService {
       }
       const entry = workerMap.get(key);
       entry.totalGrossPay   += p.grossPay;
-      entry.totalNetPay     += p.netPay;
-      entry.totalDeductions += p.deductions;
+      entry.totalNetPay     += p.status === 'paid' ? p.grossPay : 0;
+      entry.totalDeductions += 0;
       entry.totalHours      += p.regularHours + p.overtimeHours;
       entry.payrolls.push({
         payrollId:  p.id,
         period:     `${p.payPeriodStart.toLocaleDateString()} - ${p.payPeriodEnd.toLocaleDateString()}`,
         grossPay:   p.grossPay,
-        deductions: p.deductions,
-        netPay:     p.netPay,
+        deductions: 0,
+        netPay:     p.status === 'paid' ? p.grossPay : 0,
         status:     p.status,
       });
     }
@@ -660,13 +661,42 @@ export class ReportsService {
     end: Date,
     companyIds: string[],
     dto: GenerateReportDto,
+    userId: string,
+    userRole: string,
   ) {
+    const expenseAccessFilter =
+      userRole === UserRole.super_admin
+        ? {}
+        : {
+            OR: [
+              {
+                project: {
+                  companyId: { in: companyIds },
+                },
+              },
+              {
+                worker: {
+                  companyMembers: {
+                    some: {
+                      companyId: { in: companyIds },
+                    },
+                  },
+                },
+              },
+              ...(userRole === UserRole.admin
+                ? [
+                    {
+                      workerId: userId,
+                    },
+                  ]
+                : []),
+            ],
+          };
+
     const expenses = await this.prisma.expense.findMany({
       where: {
         ...(dto.projectId && { projectId: dto.projectId }),
-        project: {
-          companyId: { in: companyIds },
-        },
+        ...expenseAccessFilter,
         date: { gte: start, lte: end },
       },
       include: {

@@ -888,7 +888,6 @@ export class PayrollService {
     const updatedRegularHours = dto.regularHours ?? payroll.regularHours;
     const updatedOvertimeHours = dto.overtimeHours ?? payroll.overtimeHours;
     const updatedRatePerHour = dto.ratePerHour ?? payroll.ratePerHour;
-    const updatedNetPay = dto.netPay ?? undefined;
 
     const computed = this.calculatePayrollFields(
       updatedRegularHours,
@@ -913,8 +912,8 @@ export class PayrollService {
         overtimeHours: updatedOvertimeHours,
         ratePerHour: updatedRatePerHour,
         grossPay: computed.grossPay,
-        deductions: computed.deductions,
-        netPay: updatedNetPay ?? computed.netPay,
+        deductions: 0,
+        netPay: computed.grossPay,
         employerCost: computed.employerCost,
       },
       include: {
@@ -991,9 +990,9 @@ export class PayrollService {
         grossPay: payroll.grossPay,
       },
       deductions: {
-        totalDeductions: payroll.deductions,
+        totalDeductions: 0,
       },
-      netPay: payroll.netPay,
+      netPay: payroll.grossPay,
       employerCost: payroll.employerCost,
       status: payroll.status,
       processedAt: payroll.processedAt,
@@ -1511,9 +1510,11 @@ export class PayrollService {
       }),
     ]);
 
+    const paidPayrolls = payrolls.filter((payroll) => payroll.status === 'paid');
     const totalHours = payrolls.reduce((sum, payroll) => sum + payroll.regularHours + payroll.overtimeHours, 0);
-    const totalPay = payrolls.reduce((sum, payroll) => sum + payroll.grossPay, 0);
+    const totalPay = paidPayrolls.reduce((sum, payroll) => sum + payroll.grossPay, 0);
     const pending = payrolls.filter((payroll) => payroll.status === 'draft').length;
+    const paid = paidPayrolls.length;
 
     return {
       subscription,
@@ -1522,6 +1523,7 @@ export class PayrollService {
         totalHoursDisplay: this.formatMinutes(Math.floor(totalHours * 60)),
         totalPay: Math.round(totalPay * 100) / 100,
         pending,
+        paid,
         inventoryAlerts,
         activeWorkers,
       },

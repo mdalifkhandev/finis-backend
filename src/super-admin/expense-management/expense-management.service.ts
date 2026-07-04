@@ -17,13 +17,25 @@ export class ExpenseManagementService {
     if (userRole === UserRole.super_admin) return {};
     if (userRole === UserRole.admin) {
       return {
-        worker: {
-          companyMembers: {
-            some: {
-              company: { ownerId: userId },
+        OR: [
+          {
+            worker: {
+              companyMembers: {
+                some: {
+                  company: { ownerId: userId },
+                },
+              },
             },
           },
-        },
+          {
+            project: {
+              managerId: userId,
+            },
+          },
+          {
+            reviewedBy: userId,
+          },
+        ],
       };
     }
 
@@ -132,7 +144,10 @@ export class ExpenseManagementService {
       const project = await this.prisma.project.findFirst({
         where: {
           id: dto.projectId,
-          company: { ownerId: userId },
+          OR: [
+            { company: { ownerId: userId } },
+            { managerId: userId },
+          ],
         },
         select: { id: true },
       });
@@ -185,7 +200,9 @@ export class ExpenseManagementService {
         amount: dto.amount,
         receiptUrl: dto.receiptUrl ?? null,
         date: new Date(dto.date),
-        status: 'pending',
+        status: 'approved',
+        reviewedBy: userId,
+        reviewedAt: new Date(),
       },
       include: {
         worker: {

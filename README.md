@@ -72,6 +72,7 @@ Most endpoints return an envelope like:
 }
 ```
 
+
 Some endpoints may return raw JSON or binary responses, such as PDF downloads.
 
 ### Date Format
