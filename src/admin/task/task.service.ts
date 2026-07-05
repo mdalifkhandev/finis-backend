@@ -1736,7 +1736,16 @@ export class TaskService {
 
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
-      include: { subTasks: true },
+      include: {
+        subTasks: true,
+        assignee: { select: { id: true, fullName: true } },
+        taskAssignees: {
+          select: {
+            userId: true,
+            user: { select: { id: true, fullName: true } },
+          },
+        },
+      },
     });
 
     if (!task) throw new NotFoundException('Task not found');
@@ -1768,6 +1777,26 @@ export class TaskService {
         status: 'in_progress',
       },
     });
+
+    const workerTargets = Array.from(
+      new Set([
+        task.assignee?.id,
+        ...task.taskAssignees.map((assignee) => assignee.userId),
+      ].filter(Boolean)),
+    );
+
+    await Promise.all(
+      workerTargets.map((workerId) =>
+        this.notificationsService.send({
+          userId: workerId,
+          title: 'Task Rejected',
+          body: dto.reviewDescription ?? 'Your task has been rejected and sent back for revision.',
+          type: 'task',
+          refId: taskId,
+          refType: 'task',
+        }),
+      ),
+    );
 
     return { message: 'Task sent back to in progress' };
   }

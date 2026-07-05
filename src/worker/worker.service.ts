@@ -113,6 +113,20 @@ export class WorkerService {
     }
   }
 
+  private preserveExistingUrl(
+    uploadedFile: Express.Multer.File[] | undefined,
+    existingUrl?: string | null,
+    fallbackUrl?: string | null,
+  ) {
+    const uploadedUrl = uploadedFile?.[0]?.filename?.trim();
+    if (uploadedUrl) return uploadedUrl;
+
+    const fallback = typeof fallbackUrl === 'string' ? fallbackUrl.trim() : '';
+    if (fallback) return fallback;
+
+    return existingUrl ?? null;
+  }
+
   private workerTaskWhere(workerId: string) {
     return {
       OR: [
@@ -918,15 +932,9 @@ export class WorkerService {
       subTaskId: subTask.id,
       workerId,
       notes: dto.note ?? dto.notes ?? null,
-      beforePhotoUrl: files?.beforePhoto?.[0]?.filename
-        ? files.beforePhoto[0].filename
-        : existingReport?.beforePhotoUrl ?? dto.beforePhotoUrl ?? null,
-      afterPhotoUrl: files?.afterPhoto?.[0]?.filename
-        ? files.afterPhoto[0].filename
-        : existingReport?.afterPhotoUrl ?? dto.afterPhotoUrl ?? null,
-      receiptUrl: files?.receipt?.[0]?.filename
-        ? files.receipt[0].filename
-        : existingReport?.receiptUrl ?? dto.receiptUrl ?? null,
+      beforePhotoUrl: this.preserveExistingUrl(files?.beforePhoto, existingReport?.beforePhotoUrl, dto.beforePhotoUrl),
+      afterPhotoUrl: this.preserveExistingUrl(files?.afterPhoto, existingReport?.afterPhotoUrl, dto.afterPhotoUrl),
+      receiptUrl: this.preserveExistingUrl(files?.receipt, existingReport?.receiptUrl, dto.receiptUrl),
       reviewDecision: 'pending' as const,
     };
 
@@ -1068,15 +1076,9 @@ export class WorkerService {
 
     const reportData = {
       notes: body?.note ?? body?.notes ?? body?.description ?? null,
-      beforePhotoUrl: files?.beforePhoto?.[0]?.filename
-        ? files.beforePhoto[0].filename
-        : report?.beforePhotoUrl ?? body?.beforePhotoUrl ?? null,
-      afterPhotoUrl: files?.afterPhoto?.[0]?.filename
-        ? files.afterPhoto[0].filename
-        : report?.afterPhotoUrl ?? body?.afterPhotoUrl ?? null,
-      receiptUrl: files?.receipt?.[0]?.filename
-        ? files.receipt[0].filename
-        : report?.receiptUrl ?? body?.receiptUrl ?? null,
+      beforePhotoUrl: this.preserveExistingUrl(files?.beforePhoto, report?.beforePhotoUrl, body?.beforePhotoUrl),
+      afterPhotoUrl: this.preserveExistingUrl(files?.afterPhoto, report?.afterPhotoUrl, body?.afterPhotoUrl),
+      receiptUrl: this.preserveExistingUrl(files?.receipt, report?.receiptUrl, body?.receiptUrl),
       reviewDecision: 'pending' as const,
     };
 
