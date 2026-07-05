@@ -1349,7 +1349,7 @@ export class ProjectService {
     }
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, managerId: true },
+      select: { id: true, name: true, managerId: true },
     });
     if (!project) throw new NotFoundException('Project not found');
 
@@ -1395,6 +1395,40 @@ export class ProjectService {
           }
         }
       }
+
+      if (role === 'worker') {
+        await this.notificationsService.send({
+          userId,
+          title: 'Project Assigned',
+          body: `You have been assigned to project: ${project.name}`,
+          type: 'project',
+          refId: projectId,
+          refType: 'project',
+        });
+
+        if (managerId && managerId !== userId) {
+          await this.notificationsService.send({
+            userId: managerId,
+            title: 'Worker Assigned',
+            body: `${member.user.fullName} has been assigned to project: ${project.name}`,
+            type: 'project',
+            refId: projectId,
+            refType: 'project',
+          });
+        }
+      }
+
+      if (role === 'manager') {
+        await this.notificationsService.send({
+          userId,
+          title: 'Project Manager Added',
+          body: `You have been added as manager to project: ${project.name}`,
+          type: 'project',
+          refId: projectId,
+          refType: 'project',
+        });
+      }
+
       return { message: `${role} added successfully`, member: { memberId: member.id, ...member.user } };
     } catch (error: any) {
       if (error?.code === 'P2002') {
