@@ -15,6 +15,7 @@ import {
 
 type NotificationRole = 'super_admin' | 'admin' | 'manager' | 'worker' | 'viewer';
 type PushPayload = Record<string, string | undefined>;
+type NotificationType = 'task' | 'report' | 'payroll' | 'inventory' | 'message' | 'geofence' | 'expense' | 'attendance' | 'general';
 
 const DEFAULT_ANDROID_CHANNEL_ID = 'default';
 const DEFAULT_NOTIFICATION_SOUND = 'default';
@@ -29,6 +30,30 @@ export class NotificationsService {
     private readonly gateway: NotificationsGateway,
   ) {
     this.messaging = this.initFirebaseMessaging();
+  }
+
+  private normalizeNotificationType(type?: string): NotificationType {
+    const normalized = (type ?? 'general').toLowerCase();
+
+    if (
+      normalized === 'task' ||
+      normalized === 'report' ||
+      normalized === 'payroll' ||
+      normalized === 'inventory' ||
+      normalized === 'message' ||
+      normalized === 'geofence' ||
+      normalized === 'expense' ||
+      normalized === 'attendance' ||
+      normalized === 'general'
+    ) {
+      return normalized;
+    }
+
+    if (normalized === 'success' || normalized === 'info' || normalized === 'warning' || normalized === 'error') {
+      return 'general';
+    }
+
+    return 'general';
   }
 
   async send(dto: {
@@ -55,7 +80,7 @@ export class NotificationsService {
         userId: dto.userId!,
         title: dto.title,
         body: dto.body,
-        type: (dto.type as any) ?? 'general',
+        type: this.normalizeNotificationType(dto.type),
         refId: dto.refId,
         refType: dto.refType,
       },
@@ -102,7 +127,7 @@ export class NotificationsService {
             userId: user.id,
             title: dto.title,
             body: dto.body,
-            type: (dto.type as any) ?? 'general',
+            type: this.normalizeNotificationType(dto.type),
             refId: dto.refId,
             refType: dto.refType,
           },
