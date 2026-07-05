@@ -298,12 +298,20 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
   // ═════════════════════════════════════════════
 
   @SubscribeMessage('message:read')
-  handleMarkRead(
+  async handleMarkRead(
     @MessageBody() data: { threadId: string },
     @ConnectedSocket() client: Socket,
   ) {
+    const userId = client.data.userId;
+    if (!userId) return;
+
+    await this.prisma.message.updateMany({
+      where: { threadId: data.threadId, senderId: { not: userId }, isRead: false },
+      data: { isRead: true },
+    });
+
     client.to(`thread:${data.threadId}`).emit('message:read', {
-      userId:   client.data.userId,
+      userId,
       threadId: data.threadId,
     });
   }

@@ -179,6 +179,14 @@ export class MessageService {
     };
   }
 
+  private sortThreadsByLastMessage<T extends { lastMessage: { sentAt?: Date | string | null } | null }>(threads: T[]) {
+    return [...threads].sort((a, b) => {
+      const aTime = a.lastMessage?.sentAt ? new Date(a.lastMessage.sentAt).getTime() : 0;
+      const bTime = b.lastMessage?.sentAt ? new Date(b.lastMessage.sentAt).getTime() : 0;
+      return bTime - aTime;
+    });
+  }
+
   private async getDirectThreadBlockState(thread: {
     participants: Array<{
       userId: string;
@@ -339,7 +347,7 @@ export class MessageService {
     );
 
     return {
-      data: filtered,
+      data: this.sortThreadsByLastMessage(filtered),
       meta: { total: filtered.length },
     };
   }
@@ -618,7 +626,7 @@ export class MessageService {
     );
 
     return {
-      data: filtered,
+      data: this.sortThreadsByLastMessage(filtered),
       meta: { total: filtered.length },
     };
   }
@@ -682,7 +690,7 @@ export class MessageService {
       });
 
     return {
-      data: filtered,
+      data: this.sortThreadsByLastMessage(filtered),
       meta: { total: filtered.length },
     };
   }

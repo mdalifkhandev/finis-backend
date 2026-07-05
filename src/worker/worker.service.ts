@@ -947,16 +947,33 @@ export class WorkerService {
           data: reportPayload,
         });
 
-    if (subTask.task.project.company.ownerId) {
-      await this.notificationsService.send({
-        userId: subTask.task.project.company.ownerId,
-        title: 'New Subtask Report Submitted',
-        body: `A worker submitted a report for task: ${subTask.task.title}`,
-        type: 'report',
-        refId: subTask.id,
-        refType: 'sub_task',
-      });
-    }
+    const projectReviewRecipients = await this.prisma.projectMember.findMany({
+      where: {
+        projectId: subTask.task.projectId,
+        role: { in: ['manager', 'worker'] },
+      },
+      select: { userId: true, role: true },
+    });
+
+    const recipientIds = new Set<string>([
+      subTask.task.project.company.ownerId,
+      ...projectReviewRecipients.map((member) => member.userId),
+    ]);
+
+    await Promise.all(
+      [...recipientIds]
+        .filter(Boolean)
+        .map((userId) =>
+          this.notificationsService.send({
+            userId,
+            title: 'New Subtask Report Submitted',
+            body: `A worker submitted a report for task: ${subTask.task.title}`,
+            type: 'report',
+            refId: subTask.id,
+            refType: 'sub_task',
+          }),
+        ),
+    );
 
     await this.prisma.subTask.update({
       where: { id: subTask.id },
@@ -984,7 +1001,10 @@ export class WorkerService {
   ) {
     const subTask = await this.prisma.subTask.findUnique({
       where: { id: taskId },
-      include: { taskAssignee: true },
+      include: {
+        task: { include: { project: { include: { company: true } } } },
+        taskAssignee: true,
+      },
     });
 
     if (!subTask) throw new NotFoundException('Task not found');
@@ -1095,6 +1115,34 @@ export class WorkerService {
             ...reportData,
           },
         });
+
+    const projectReviewRecipients = await this.prisma.projectMember.findMany({
+      where: {
+        projectId: subTask.taskId,
+        role: { in: ['manager', 'worker'] },
+      },
+      select: { userId: true, role: true },
+    });
+
+    const recipientIds = new Set<string>([
+      subTask.task.project.company.ownerId,
+      ...projectReviewRecipients.map((member) => member.userId),
+    ]);
+
+    await Promise.all(
+      [...recipientIds]
+        .filter(Boolean)
+        .map((userId) =>
+          this.notificationsService.send({
+            userId,
+            title: 'Task Report Updated',
+            body: `A worker updated a report for task: ${subTask.task.title}`,
+            type: 'report',
+            refId: subTask.id,
+            refType: 'sub_task',
+          }),
+        ),
+    );
 
     return {
       message: 'Task report updated successfully. Task remains pending review.',

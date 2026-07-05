@@ -27,6 +27,8 @@ type PaginationInput = {
   limit?: number | string;
 };
 
+type TaskNotificationRole = 'admin' | 'manager' | 'worker';
+
 @Injectable()
 export class TaskService {
   constructor(
@@ -38,6 +40,95 @@ export class TaskService {
     const page = Math.max(1, Number(query.page ?? 1) || 1);
     const limit = Math.max(1, Number(query.limit ?? 10) || 10);
     return { page, limit, skip: (page - 1) * limit };
+  }
+
+  private async getProjectNotificationRecipients(
+    projectId: string,
+    roles: TaskNotificationRole[],
+    excludeUserIds: string[] = [],
+  ) {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        managerId: true,
+        company: { select: { ownerId: true } },
+        teamMembers: {
+          select: {
+            userId: true,
+            role: true,
+          },
+        },
+      },
+    });
+
+    if (!project) {
+      return [];
+    }
+
+    const recipientIds = new Set<string>();
+    const roleSet = new Set<TaskNotificationRole>(roles);
+
+    if (roleSet.has('admin')) {
+      recipientIds.add(project.company.ownerId);
+    }
+
+    if (roleSet.has('manager')) {
+      if (project.managerId) {
+        recipientIds.add(project.managerId);
+      }
+      for (const member of project.teamMembers) {
+        if (member.role === 'manager') {
+          recipientIds.add(member.userId);
+        }
+      }
+    }
+
+    if (roleSet.has('worker')) {
+      for (const member of project.teamMembers) {
+        if (member.role === 'worker') {
+          recipientIds.add(member.userId);
+        }
+      }
+    }
+
+    for (const excludeUserId of excludeUserIds) {
+      recipientIds.delete(excludeUserId);
+    }
+
+    if (!recipientIds.size) {
+      return [];
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: [...recipientIds] } },
+      select: { id: true, role: true },
+    });
+
+    return users
+      .filter((user) => roleSet.has(user.role as TaskNotificationRole))
+      .map((user) => user.id);
+  }
+
+  private async notifyProjectRecipients(
+    projectId: string,
+    roles: TaskNotificationRole[],
+    payload: { title: string; body: string; type: 'task' | 'report'; refId: string; refType: string },
+    excludeUserIds: string[] = [],
+  ) {
+    const recipientIds = await this.getProjectNotificationRecipients(projectId, roles, excludeUserIds);
+
+    await Promise.all(
+      recipientIds.map((userId) =>
+        this.notificationsService.send({
+          userId,
+          title: payload.title,
+          body: payload.body,
+          type: payload.type,
+          refId: payload.refId,
+          refType: payload.refType,
+        }),
+      ),
+    );
   }
 
   private async getProjectIdsForUser(userId: string, userRole: string) {
@@ -611,6 +702,19 @@ export class TaskService {
         subTasks: true,
       },
     });
+
+    await this.notifyProjectRecipients(
+      dto.projectId,
+      [UserRole.admin, UserRole.manager, UserRole.worker],
+      {
+        title: 'Task Created',
+        body: `New task created: ${task.title}`,
+        type: 'task',
+        refId: task.id,
+        refType: 'task',
+      },
+      [userId],
+    );
 
     return this.toTaskResponse(created);
   }
@@ -1218,6 +1322,24 @@ export class TaskService {
           status: 'pending',
         },
       });
+      const approvedTask = await this.prisma.task.findUnique({
+        where: { id: taskId },
+        select: { title: true },
+      });
+      if (approvedTask) {
+        await this.notifyProjectRecipients(
+          taskId,
+          [UserRole.admin, UserRole.manager, UserRole.worker],
+          {
+            title: 'Task Approved',
+            body: `Task approved: ${approvedTask.title}`,
+            type: 'task',
+            refId: taskId,
+            refType: 'task',
+          },
+          [userId],
+        );
+      }
       return { message: 'Task approved' };
     }
 
@@ -1231,6 +1353,24 @@ export class TaskService {
         status: 'cancelled',
       },
     });
+    const rejectedTask = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: { title: true },
+    });
+    if (rejectedTask) {
+      await this.notifyProjectRecipients(
+        taskId,
+        [UserRole.admin, UserRole.manager, UserRole.worker],
+        {
+          title: 'Task Rejected',
+          body: dto.reviewDescription ?? `Task rejected: ${rejectedTask.title}`,
+          type: 'task',
+          refId: taskId,
+          refType: 'task',
+        },
+        [userId],
+      );
+    }
     return { message: 'Task rejected' };
   }
 
@@ -1435,6 +1575,19 @@ export class TaskService {
       ),
     );
 
+    await this.notifyProjectRecipients(
+      task.projectId,
+      [UserRole.admin, UserRole.manager, UserRole.worker],
+      {
+        title: 'Task Assigned',
+        body: `Task assigned: ${task.title}`,
+        type: 'task',
+        refId: taskId,
+        refType: 'task',
+      },
+      [userId],
+    );
+
     return this.toTaskResponse(updated);
   }
 
@@ -1556,6 +1709,19 @@ export class TaskService {
       },
     });
 
+    await this.notifyProjectRecipients(
+      taskId,
+      [UserRole.admin, UserRole.manager, UserRole.worker],
+      {
+        title: 'Subtask Created',
+        body: `New subtask created for task: ${task.title}`,
+        type: 'task',
+        refId: taskId,
+        refType: 'sub_task',
+      },
+      [userId],
+    );
+
     return {
       message: `${createdSubTasks.length} subtasks created`,
       data: this.toTaskWithSubTasksResponse(updatedTask),
@@ -1609,6 +1775,19 @@ export class TaskService {
         refType: 'sub_task',
       });
     }
+
+    await this.notifyProjectRecipients(
+      taskId,
+      [UserRole.admin, UserRole.manager],
+      {
+        title: dto.reviewDecision === 'approved' ? 'Subtask Approved' : 'Subtask Rejected',
+        body: reviewText ?? '',
+        type: 'task',
+        refId: subTaskId,
+        refType: 'sub_task',
+      },
+      [userId, subTask.taskAssignee?.userId].filter(Boolean) as string[],
+    );
 
     return { message: `Sub task ${dto.reviewDecision}` };
   }
@@ -1715,6 +1894,19 @@ export class TaskService {
       refType: 'task_report',
     });
 
+    await this.notifyProjectRecipients(
+      taskId,
+      [UserRole.admin, UserRole.manager],
+      {
+        title: 'Task Report Submitted',
+        body: `A report was submitted for task review.`,
+        type: 'report',
+        refId: reportId,
+        refType: 'task_report',
+      },
+      [userId, report.workerId],
+    );
+
     if (report.subTaskId) {
       await this.prisma.subTask.update({
         where: { id: report.subTaskId },
@@ -1764,6 +1956,20 @@ export class TaskService {
           status: 'completed',
         },
       });
+
+      await this.notifyProjectRecipients(
+        taskId,
+        [UserRole.admin, UserRole.manager, UserRole.worker],
+        {
+          title: 'Task Approved',
+          body: `Task approved: ${task.title}`,
+          type: 'task',
+          refId: taskId,
+          refType: 'task',
+        },
+        [userId],
+      );
+
       return { message: 'Task completed' };
     }
 
@@ -1782,7 +1988,7 @@ export class TaskService {
       new Set([
         task.assignee?.id,
         ...task.taskAssignees.map((assignee) => assignee.userId),
-      ].filter(Boolean)),
+      ].filter((id): id is string => Boolean(id))),
     );
 
     await Promise.all(
@@ -1796,6 +2002,19 @@ export class TaskService {
           refType: 'task',
         }),
       ),
+    );
+
+    await this.notifyProjectRecipients(
+      taskId,
+      [UserRole.admin, UserRole.manager],
+      {
+        title: 'Task Rejected',
+        body: dto.reviewDescription ?? 'Your task has been rejected and sent back for revision.',
+        type: 'task',
+        refId: taskId,
+        refType: 'task',
+      },
+      [userId, ...workerTargets],
     );
 
     return { message: 'Task sent back to in progress' };
