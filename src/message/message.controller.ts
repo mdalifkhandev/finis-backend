@@ -159,10 +159,11 @@ export class MessageController {
   ) {
     return this.messageService.sendMessage(req.user.id, dto).then(async (result: any) => {
       const participantIds = result.participantIds ?? [];
-      this.messageGateway.joinOnlineParticipantsToThread(dto.threadId, participantIds);
-      this.messageGateway.emitToThread(dto.threadId, 'message:new', result.message, participantIds);
-      this.messageGateway.emitToThread(dto.threadId, 'thread:updated', {
-        threadId: dto.threadId,
+      const threadId = result.threadId ?? dto.threadId;
+      this.messageGateway.joinOnlineParticipantsToThread(threadId, participantIds);
+      this.messageGateway.emitToThread(threadId, 'message:new', result.message, participantIds);
+      this.messageGateway.emitToThread(threadId, 'thread:updated', {
+        threadId,
         lastMessage: result.message,
       }, participantIds);
       return result.message;

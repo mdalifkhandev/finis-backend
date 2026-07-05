@@ -846,7 +846,7 @@ export class MessageService {
       select: { role: true },
     });
 
-    const thread = await this.prisma.messageThread.findUnique({
+    let thread = await this.prisma.messageThread.findUnique({
       where: { id: threadId },
       include: {
         participants: {
@@ -856,36 +856,42 @@ export class MessageService {
     });
     if (!thread) throw new NotFoundException('Thread not found');
 
-    const otherParticipantIds = thread.participants
+    let otherParticipantIds = thread.participants
       .filter((p) => p.userId !== senderId)
       .map((p) => p.userId);
-    const otherParticipants = thread.participants.filter((p) => p.userId !== senderId);
-    const otherRoles = otherParticipants.map((p) => p.user.role);
+    let otherParticipants = thread.participants.filter((p) => p.userId !== senderId);
+    let otherRoles = otherParticipants.map((p) => p.user.role);
     const isSupportThread = otherRoles.includes('super_admin') && otherRoles.some((role) => role !== 'super_admin');
 
-    if (!isSupportThread) {
-      for (const otherId of otherParticipantIds) {
-        if (await this.isBlockedBetween(senderId, otherId)) {
-          throw new ForbiddenException('You cannot send messages to this user');
-        }
-      }
-    }
-
-    // super_admin can only send in support threads.
-    if (sender?.role === 'super_admin' && !isSupportThread) {
-      throw new ForbiddenException('Super admin can only send messages in Support threads');
-    }
-
     if (otherRoles.includes('super_admin') && !isSupportThread) {
-      throw new ForbiddenException('Use the Support tab to contact the administrator');
+      if (sender?.role === 'super_admin') {
+        throw new ForbiddenException('Super admin can only send messages in Support threads');
+      }
+
+      thread = await this.getOrCreateSupportThread(senderId);
+      otherParticipantIds = thread.participants
+        .filter((p) => p.userId !== senderId)
+        .map((p) => p.userId);
+      otherParticipants = thread.participants.filter((p) => p.userId !== senderId);
+      otherRoles = otherParticipants.map((p) => p.user.role);
     }
 
-    if (sender?.role === 'worker' && !isSupportThread) {
+    const effectiveIsSupportThread = otherRoles.includes('super_admin') && otherRoles.some((role) => role !== 'super_admin');
+
+    if (sender?.role === 'worker' && !effectiveIsSupportThread) {
       const hasAdminParticipant = otherRoles.includes('admin');
       const hasManagerParticipant = otherRoles.includes('manager');
 
       if (!hasManagerParticipant && !hasAdminParticipant) {
         throw new ForbiddenException('Workers can only chat with managers');
+      }
+    }
+
+    for (const otherId of thread.participants
+      .filter((p) => p.userId !== senderId)
+      .map((p) => p.userId)) {
+      if (await this.isBlockedBetween(senderId, otherId)) {
+        throw new ForbiddenException('You cannot send messages to this user');
       }
     }
 
@@ -917,6 +923,7 @@ export class MessageService {
     return {
       message,
       participantIds: thread.participants.map((participant) => participant.userId),
+      threadId: thread.id,
     };
   }
 

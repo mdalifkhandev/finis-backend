@@ -174,6 +174,7 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
         });
         message = result.message;
         participantIds = Array.isArray(result.participantIds) ? result.participantIds : [];
+        dto.threadId = result.threadId ?? dto.threadId;
       }
 
       if (participantIds.length === 0) {
