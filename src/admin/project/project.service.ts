@@ -176,19 +176,23 @@ export class ProjectService {
       throw new ForbiddenException('Your subscription could not be verified.');
     }
 
+    const isExpired =
+      tenant.currentPeriodEnd != null &&
+      new Date(tenant.currentPeriodEnd).getTime() < Date.now();
+
     if (tenant.status === 'suspended')
       throw new ForbiddenException('Your account is suspended. Please contact support.');
     if (tenant.status === 'cancelled')
       throw new ForbiddenException('Your subscription has been cancelled.');
-    if (tenant.status === 'trial')
+    if (tenant.subscriptionStatus !== 'active' || isExpired)
       throw new ForbiddenException('Please activate a subscription before creating a project.');
 
     const max = tenant.plan.maxProjects;
     if (max === null || max === undefined) return; // unlimited
 
-    // company → ownerId দিয়ে সব project count
+    // Tenant-wide project count so every company under the same subscription is included
     const currentCount = await this.prisma.project.count({
-      where: { company: { ownerId: adminId } },
+      where: { company: { tenantId: admin.tenantId } },
     });
 
     if (currentCount >= max) {
