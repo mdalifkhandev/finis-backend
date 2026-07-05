@@ -961,12 +961,33 @@ export class MessageService {
   }
 
   async unblockUser(blockerId: string, dto: BlockUserDto) {
-    return this.prisma.messageBlock.deleteMany({
+    const target = await this.prisma.user.findUnique({
+      where: { id: dto.targetUserId },
+      select: { id: true, fullName: true },
+    });
+
+    const result = await this.prisma.messageBlock.deleteMany({
       where: {
         blockerId,
         blockedUserId: dto.targetUserId,
       },
     });
+
+    if (result.count > 0 && target) {
+      await this.notificationsService.send({
+        userId: dto.targetUserId,
+        title: 'You were unblocked',
+        body: `You can now send messages again${target.fullName ? ` to ${target.fullName}` : ''}.`,
+        type: 'success',
+        refType: 'message_block',
+        refId: blockerId,
+      });
+    }
+
+    return {
+      message: 'User unblocked successfully',
+      deletedCount: result.count,
+    };
   }
 
   async getBlockedUsers(userId: string) {

@@ -4,6 +4,7 @@ import {
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
+  Ack,
   OnGatewayConnection,
   OnGatewayDisconnect,
   WsException,
@@ -144,6 +145,7 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
   async handleSendMessage(
     @MessageBody() dto: SocketMessageDto,
     @ConnectedSocket() client: Socket,
+    @Ack() ack?: (response: any) => void,
   ) {
     try {
       const userId = client.data.userId;
@@ -184,10 +186,14 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
         lastMessage: message,
       });
 
-      return { status: 'ok', message };
+      const response = { status: 'ok', message };
+      ack?.(response);
+      return response;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'An error occurred';
-      client.emit('error', { message: msg });
+      const response = { status: 'error', message: msg };
+      ack?.(response);
+      return response;
     }
   }
 
