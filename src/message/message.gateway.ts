@@ -152,6 +152,7 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
       if (!userId) throw new WsException('Unauthorized');
 
       let message: any;
+      let participantIds: string[] = [];
 
       if (client.data.role === 'super_admin') {
         // super_admin এর জন্য আলাদা service method
@@ -164,17 +165,23 @@ export class MessageGateway implements OnGatewayConnection, OnGatewayDisconnect 
         });
       } else {
         // Regular user
-        message = await this.messageService.sendMessage(userId, {
+        const result = await this.messageService.sendMessage(userId, {
           threadId:  dto.threadId,
           content:   dto.content,
           mediaUrl:  dto.mediaUrl,
           mediaType: dto.mediaType,
           locationUrl: dto.locationUrl,
         });
+        message = result.message;
+        participantIds = Array.isArray(result.participantIds) ? result.participantIds : [];
       }
 
-      const thread = await this.messageService.getThreadById(dto.threadId, userId);
-      const participantIds = thread.participants.map((participant) => participant.userId);
+      if (participantIds.length === 0) {
+        const thread = await this.messageService.getThreadById(dto.threadId, userId);
+        participantIds = Array.isArray(thread.participants)
+          ? thread.participants.map((participant) => participant.userId)
+          : [];
+      }
       this.joinOnlineParticipantsToThread(dto.threadId, participantIds);
 
       // Thread room এ সবাইকে নতুন message পাঠানো
