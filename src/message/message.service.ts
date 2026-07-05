@@ -808,31 +808,28 @@ export class MessageService {
     const otherParticipantIds = thread.participants
       .filter((p) => p.userId !== senderId)
       .map((p) => p.userId);
-    for (const otherId of otherParticipantIds) {
-      if (await this.isBlockedBetween(senderId, otherId)) {
-        throw new ForbiddenException('You cannot send messages to this user');
+    const otherParticipants = thread.participants.filter((p) => p.userId !== senderId);
+    const otherRoles = otherParticipants.map((p) => p.user.role);
+    const isSupportThread = otherRoles.includes('super_admin') && otherRoles.some((role) => role !== 'super_admin');
+
+    if (!isSupportThread) {
+      for (const otherId of otherParticipantIds) {
+        if (await this.isBlockedBetween(senderId, otherId)) {
+          throw new ForbiddenException('You cannot send messages to this user');
+        }
       }
     }
 
     // super_admin can only send in support threads.
-    if (sender?.role === 'super_admin') {
-      const otherParticipants = thread?.participants.filter((p) => p.userId !== senderId);
-      const allOthersAreSuperAdmin = otherParticipants?.every(
-        (p) => p.user.role === 'super_admin',
-      );
-      if (allOthersAreSuperAdmin) {
-        throw new ForbiddenException('Super admin can only send messages in Support threads');
-      }
+    if (sender?.role === 'super_admin' && !isSupportThread) {
+      throw new ForbiddenException('Super admin can only send messages in Support threads');
     }
 
-    const otherParticipants = thread.participants.filter((p) => p.userId !== senderId);
-    const otherRoles = otherParticipants.map((p) => p.user.role);
-
-    if (otherRoles.includes('super_admin')) {
+    if (otherRoles.includes('super_admin') && !isSupportThread) {
       throw new ForbiddenException('Use the Support tab to contact the administrator');
     }
 
-    if (sender?.role === 'worker') {
+    if (sender?.role === 'worker' && !isSupportThread) {
       const hasAdminParticipant = otherRoles.includes('admin');
       const hasManagerParticipant = otherRoles.includes('manager');
 
