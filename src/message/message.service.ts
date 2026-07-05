@@ -895,10 +895,15 @@ export class MessageService {
       }
     }
 
+    const effectiveThread = thread;
+    if (!effectiveThread) {
+      throw new NotFoundException('Thread not found');
+    }
+
 
     const message = await this.prisma.message.create({
       data: {
-        threadId,
+        threadId: effectiveThread.id,
         senderId,
         content: content ?? null,
         mediaUrl: finalMediaUrl,
@@ -914,16 +919,16 @@ export class MessageService {
     });
 
     await this.notifyUnreadThreadParticipants(
-      threadId,
+      effectiveThread.id,
       senderId,
       message.sender?.fullName ?? 'New message',
       message.content ?? (locationUrl ? 'Shared a location' : ''),
-      thread.participants.map((participant) => participant.userId),
+      effectiveThread.participants.map((participant) => participant.userId),
     );
     return {
       message,
-      participantIds: thread.participants.map((participant) => participant.userId),
-      threadId: thread.id,
+      participantIds: effectiveThread.participants.map((participant) => participant.userId),
+      threadId: effectiveThread.id,
     };
   }
 
@@ -962,10 +967,14 @@ export class MessageService {
       throw new ForbiddenException('Super admin can only send messages in Support threads');
     }
 
+    if (!thread) {
+      throw new NotFoundException('Thread not found');
+    }
+
 
     const message = await this.prisma.message.create({
       data: {
-        threadId,
+        threadId: thread.id,
         senderId: adminId,
         content: content ?? null,
         mediaUrl: finalMediaUrl,
@@ -980,7 +989,7 @@ export class MessageService {
     });
 
     await this.notifyUnreadThreadParticipants(
-      threadId,
+      thread.id,
       adminId,
       message.sender?.fullName ?? 'New message',
       message.content ?? (locationUrl ? 'Shared a location' : ''),
