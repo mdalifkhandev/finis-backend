@@ -179,6 +179,43 @@ export class MessageService {
     };
   }
 
+  private async getDirectThreadBlockState(thread: {
+    participants: Array<{
+      userId: string;
+      user: { id: string; role: string };
+    }>;
+  }, currentUserId: string) {
+    const otherParticipantIds = thread.participants
+      .map((participant) => participant.userId)
+      .filter((participantId) => participantId !== currentUserId);
+
+    if (!otherParticipantIds.length) {
+      return {
+        isBlocked: false,
+        blockedByMe: false,
+        blockedByOther: false,
+      };
+    }
+
+    const block = await this.prisma.messageBlock.findFirst({
+      where: {
+        OR: otherParticipantIds.map((otherUserId) => ({
+          OR: [
+            { blockerId: currentUserId, blockedUserId: otherUserId },
+            { blockerId: otherUserId, blockedUserId: currentUserId },
+          ],
+        })),
+      },
+      select: { blockerId: true, blockedUserId: true },
+    });
+
+    return {
+      isBlocked: !!block,
+      blockedByMe: block?.blockerId === currentUserId,
+      blockedByOther: block?.blockedUserId === currentUserId,
+    };
+  }
+
   // ─────────────────────────────────────────────
   // CONTACTS
   // ─────────────────────────────────────────────
@@ -259,7 +296,8 @@ export class MessageService {
       },
     });
 
-    const filtered = threads
+    const filtered = await Promise.all(
+      threads
       .filter((thread) => {
         // শুধু user-to-user thread — কোনো super_admin নেই
         const others = thread.participants.filter((p) => p.userId !== userId);
@@ -277,11 +315,12 @@ export class MessageService {
         const name = others[0]?.user?.fullName ?? '';
         return name.toLowerCase().includes(search.toLowerCase());
       })
-      .map((thread) => {
+      .map(async (thread) => {
         const others = thread.participants.filter((p) => p.userId !== userId);
         const unreadCount = thread.messages.filter(
           (m) => !m.isRead && m.senderId !== userId,
         ).length;
+        const blockState = await this.getDirectThreadBlockState(thread, userId);
         return {
           id: thread.id,
           type: thread.type,
@@ -289,13 +328,15 @@ export class MessageService {
           isActive: thread.isActive,
           lastMessage: thread.messages[0] ?? null,
           unreadCount,
+          ...blockState,
           participants: others.map((p) => ({
             ...p.user,
             ...this.getPresence(p.user.id, null),
           })),
           isReadOnly: false,
         };
-      });
+      }),
+    );
 
     return {
       data: filtered,
@@ -339,6 +380,7 @@ export class MessageService {
     if (!thread) return { data: null };
 
     const others = thread.participants.filter((p) => p.userId !== userId);
+    const blockState = await this.getDirectThreadBlockState(thread, userId);
     return {
       data: {
         id: thread.id,
@@ -347,6 +389,7 @@ export class MessageService {
         isActive: thread.isActive,
         lastMessage: thread.messages[0] ?? null,
         unreadCount: 0,
+        ...blockState,
         participants: others.map((p) => ({
           ...p.user,
           ...this.getPresence(p.user.id, null),
@@ -539,7 +582,8 @@ export class MessageService {
       },
     });
 
-    const filtered = threads
+    const filtered = await Promise.all(
+      threads
       .filter((thread) => {
         // Support thread = super_admin + non-super_admin participant আছে
         const roles = thread.participants.map((p) => p.user.role);
@@ -550,11 +594,12 @@ export class MessageService {
         const names = thread.participants.map((p) => p.user.fullName).join(' ');
         return names.toLowerCase().includes(search.toLowerCase());
       })
-      .map((thread) => {
+      .map(async (thread) => {
         const others = thread.participants.filter((p) => p.userId !== adminId);
         const unreadCount = thread.messages.filter(
           (m) => !m.isRead && m.senderId !== adminId,
         ).length;
+        const blockState = await this.getDirectThreadBlockState(thread, adminId);
         return {
           id: thread.id,
           type: thread.type,
@@ -562,13 +607,15 @@ export class MessageService {
           isActive: thread.isActive,
           lastMessage: thread.messages[0] ?? null,
           unreadCount,
-        participants: others.map((p) => ({
-          ...p.user,
-          ...this.getPresence(p.user.id, null),
-        })),
+          ...blockState,
+          participants: others.map((p) => ({
+            ...p.user,
+            ...this.getPresence(p.user.id, null),
+          })),
           isReadOnly: false,
         };
-      });
+      }),
+    );
 
     return {
       data: filtered,
@@ -618,6 +665,7 @@ export class MessageService {
           ...p.user,
           ...this.getPresence(p.user.id, null),
         }));
+        const blockState = false;
         return {
           id: thread.id,
           type: thread.type,
@@ -625,6 +673,9 @@ export class MessageService {
           isActive: thread.isActive,
           lastMessage: thread.messages[0] ?? null,
           unreadCount: 0,
+          isBlocked: blockState,
+          blockedByMe: false,
+          blockedByOther: false,
           participants,
           isReadOnly: true, // super_admin chat thread এ শুধু read করতে পারবে
         };
