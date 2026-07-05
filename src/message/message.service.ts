@@ -1020,7 +1020,19 @@ export class MessageService {
       throw new ForbiddenException('You cannot block this user');
     }
 
-    return this.prisma.messageBlock.upsert({
+    const existingBlock = await this.prisma.messageBlock.findUnique({
+      where: {
+        blockerId_blockedUserId: {
+          blockerId,
+          blockedUserId: dto.targetUserId,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const result = await this.prisma.messageBlock.upsert({
       where: {
         blockerId_blockedUserId: {
           blockerId,
@@ -1033,6 +1045,19 @@ export class MessageService {
         blockedUserId: dto.targetUserId,
       },
     });
+
+    if (!existingBlock) {
+      await this.notificationsService.send({
+        userId: dto.targetUserId,
+        title: 'You were blocked',
+        body: 'You can no longer send messages to this user.',
+        type: 'message',
+        refType: 'message_block',
+        refId: blockerId,
+      });
+    }
+
+    return result;
   }
 
   async unblockUser(blockerId: string, dto: BlockUserDto) {
