@@ -99,6 +99,18 @@ export class WorkerController {
   }
 
   /**
+   * GET /worker/main-tasks/:id
+   * Dedicated main task detail
+   */
+  @Get('main-tasks/:id')
+  getMainTaskDetail(
+    @Param('id', ParseUUIDPipe) taskId: string,
+    @CurrentUser('id') workerId: string,
+  ) {
+    return this.workerService.getMainTaskDetail(taskId, workerId);
+  }
+
+  /**
    * POST /worker/tasks/:id/subtasks
    * Worker creates a subtask inside the unit/task
    */
@@ -135,6 +147,29 @@ export class WorkerController {
   }
 
   /**
+   * POST /worker/main-tasks/:id/start
+   * Main task start now -> status: pending -> in_progress
+   */
+  @Post('main-tasks/:id/start')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [{ name: 'beforePhoto', maxCount: 1 }],
+      { storage: memoryStorage() },
+    ),
+  )
+  async startMainTask(
+    @Param('id', ParseUUIDPipe) taskId: string,
+    @CurrentUser('id') workerId: string,
+    @UploadedFiles()
+    files?: {
+      beforePhoto?: Express.Multer.File[];
+    },
+  ) {
+    const uploadedFiles = await this.uploadTaskReportFiles(files);
+    return this.workerService.startMainTask(taskId, workerId, uploadedFiles);
+  }
+
+  /**
    * POST /worker/subtasks/:id/report
    * Dedicated subtask report submit
    */
@@ -165,6 +200,36 @@ export class WorkerController {
   }
 
   /**
+   * POST /worker/main-tasks/:id/report
+   * Dedicated main task report submit
+   */
+  @Post('main-tasks/:id/report')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'beforePhoto', maxCount: 1 },
+        { name: 'afterPhoto', maxCount: 1 },
+        { name: 'receipt', maxCount: 1 },
+      ],
+      { storage: memoryStorage() },
+    ),
+  )
+  async submitMainTaskReport(
+    @Param('id', ParseUUIDPipe) taskId: string,
+    @CurrentUser('id') workerId: string,
+    @Body() dto: SubmitTaskReportDto,
+    @UploadedFiles()
+    files?: {
+      beforePhoto?: Express.Multer.File[];
+      afterPhoto?: Express.Multer.File[];
+      receipt?: Express.Multer.File[];
+    },
+  ) {
+    const uploadedFiles = await this.uploadTaskReportFiles(files);
+    return this.workerService.submitMainTaskReport(taskId, workerId, dto, uploadedFiles);
+  }
+
+  /**
    * PUT /worker/subtasks/:id/report
    * Subtask report update (screen-shot friendly route)
    */
@@ -192,6 +257,36 @@ export class WorkerController {
   ) {
     const uploadedFiles = await this.uploadTaskReportFiles(files);
     return this.workerService.updateTaskReport(subTaskId, workerId, body, uploadedFiles);
+  }
+
+  /**
+   * PUT /worker/main-tasks/:id/report
+   * Main task report update
+   */
+  @Put('main-tasks/:id/report')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'beforePhoto', maxCount: 1 },
+        { name: 'afterPhoto', maxCount: 1 },
+        { name: 'receipt', maxCount: 1 },
+      ],
+      { storage: memoryStorage() },
+    ),
+  )
+  async updateMainTaskReport(
+    @Param('id', ParseUUIDPipe) taskId: string,
+    @CurrentUser('id') workerId: string,
+    @Body() body: any,
+    @UploadedFiles()
+    files?: {
+      beforePhoto?: Express.Multer.File[];
+      afterPhoto?: Express.Multer.File[];
+      receipt?: Express.Multer.File[];
+    },
+  ) {
+    const uploadedFiles = await this.uploadTaskReportFiles(files);
+    return this.workerService.updateMainTaskReport(taskId, workerId, body, uploadedFiles);
   }
 
   /**
@@ -279,6 +374,37 @@ export class WorkerController {
   ) {
     return this.workerService.updateTaskInventoryItem(
       subTaskId,
+      inventoryId,
+      workerId,
+      dto,
+    );
+  }
+
+  /**
+   * GET /worker/main-tasks/:id/inventory
+   * Dedicated main task inventory items
+   */
+  @Get('main-tasks/:id/inventory')
+  getMainTaskInventoryItems(
+    @Param('id', ParseUUIDPipe) taskId: string,
+    @CurrentUser('id') workerId: string,
+  ) {
+    return this.workerService.getMainTaskInventoryItems(taskId, workerId);
+  }
+
+  /**
+   * PATCH /worker/main-tasks/:id/inventory/:inventoryId
+   * Dedicated main task inventory usage update
+   */
+  @Patch('main-tasks/:id/inventory/:inventoryId')
+  updateMainTaskInventoryItem(
+    @Param('id', ParseUUIDPipe) taskId: string,
+    @Param('inventoryId', ParseUUIDPipe) inventoryId: string,
+    @CurrentUser('id') workerId: string,
+    @Body() dto: UpdateTaskInventoryDto,
+  ) {
+    return this.workerService.updateMainTaskInventoryItem(
+      taskId,
       inventoryId,
       workerId,
       dto,

@@ -37,6 +37,63 @@ export class WorkerService {
     return `${h}h ${m}m`;
   }
 
+  private buildWorkflowSnapshot(entity: any) {
+    const latestReport = entity?.reports?.[0] ?? entity?.latestReport ?? null;
+    const status = entity?.status ?? 'pending';
+    const startedAt = entity?.startedAt ?? null;
+    const submittedAt = entity?.submittedAt ?? latestReport?.submittedAt ?? null;
+
+    const hasStarted = Boolean(startedAt) || ['in_progress', 'review', 'completed'].includes(status);
+    const hasBeforePhoto = Boolean(latestReport?.beforePhotoUrl);
+    const hasAfterPhoto = Boolean(latestReport?.afterPhotoUrl);
+    const hasUpload = Boolean(
+      latestReport?.beforePhotoUrl || latestReport?.afterPhotoUrl || latestReport?.receiptUrl,
+    );
+    const hasSubmitted = Boolean(submittedAt) || ['review', 'completed'].includes(status);
+
+    const steps = [
+      { key: 'start', label: 'Start', completed: hasStarted },
+      { key: 'uploadPhoto', label: 'Upload Photo', completed: hasUpload },
+      {
+        key: 'beforePhoto',
+        label: 'Before Photo',
+        completed: hasBeforePhoto,
+        url: latestReport?.beforePhotoUrl ?? null,
+      },
+      {
+        key: 'afterPhoto',
+        label: 'After Photo',
+        completed: hasAfterPhoto,
+        url: latestReport?.afterPhotoUrl ?? null,
+      },
+      { key: 'submit', label: 'Submit', completed: hasSubmitted },
+    ];
+
+    const completedSteps = steps.filter((step) => step.completed).length;
+
+    return {
+      summary: {
+        label: `Completed: ${completedSteps} / ${steps.length}`,
+        completedSteps,
+        totalSteps: steps.length,
+      },
+      steps,
+      latestReport: latestReport
+        ? {
+            id: latestReport.id ?? null,
+            notes: latestReport.notes ?? null,
+            beforePhotoUrl: latestReport.beforePhotoUrl ?? null,
+            afterPhotoUrl: latestReport.afterPhotoUrl ?? null,
+            receiptUrl: latestReport.receiptUrl ?? null,
+            reviewDecision: latestReport.reviewDecision ?? null,
+            reviewDescription: latestReport.reviewDescription ?? null,
+            reviewAttachmentUrl: latestReport.reviewAttachmentUrl ?? null,
+            submittedAt: latestReport.submittedAt ?? null,
+          }
+        : null,
+    };
+  }
+
   private toWorkerSubTaskDetailResponse(subTask: any) {
     const latestReport = subTask.reports?.[0] ?? null;
     const inventoryUsed = (subTask.inventories ?? []).map((item: any) => ({
@@ -85,6 +142,18 @@ export class WorkerService {
               ? 'Low Priority'
               : 'Medium Priority',
       },
+      mainTask: subTask.task
+        ? {
+            id: subTask.task.id,
+            title: subTask.task.title,
+            priority: subTask.task.priority,
+            dueDate: subTask.task.dueDate,
+            status: subTask.task.status,
+            approvalDecision: subTask.task.approvalDecision,
+            project: subTask.task.project ?? null,
+            workflow: this.buildWorkflowSnapshot(subTask.task),
+          }
+        : null,
       beforePhotoUrl: latestReport?.beforePhotoUrl ?? null,
       afterPhotoUrl: latestReport?.afterPhotoUrl ?? null,
       receiptUrl: latestReport?.receiptUrl ?? null,
@@ -94,6 +163,7 @@ export class WorkerService {
       availableInventory: subTask.task?.project?.inventoryItems ?? [],
       inventoryUsed,
       latestReport,
+      workflow: this.buildWorkflowSnapshot(subTask),
     };
   }
 
@@ -110,6 +180,27 @@ export class WorkerService {
   private ensureSubTaskApproved(subTask: { approvalDecision?: string }, actionLabel: string) {
     if (subTask.approvalDecision !== 'approved') {
       throw new BadRequestException(`Subtask must be approved before ${actionLabel}`);
+    }
+  }
+
+  private isTaskAssigned(
+    task: {
+      createdBy?: string;
+      assignedTo?: string | null;
+      taskAssignees?: Array<{ userId: string }>;
+    },
+    workerId: string,
+  ) {
+    return (
+      task.createdBy === workerId ||
+      task.assignedTo === workerId ||
+      (task.taskAssignees ?? []).some((assignee) => assignee.userId === workerId)
+    );
+  }
+
+  private ensureTaskApproved(task: { approvalDecision?: string }, actionLabel: string) {
+    if (task.approvalDecision !== 'approved') {
+      throw new BadRequestException(`Main task must be approved before ${actionLabel}`);
     }
   }
 
@@ -271,6 +362,21 @@ export class WorkerService {
               priority: true,
               dueDate: true,
               status: true,
+              reports: {
+                orderBy: { submittedAt: 'desc' },
+                take: 1,
+                select: {
+                  id: true,
+                  notes: true,
+                  beforePhotoUrl: true,
+                  afterPhotoUrl: true,
+                  receiptUrl: true,
+                  reviewDecision: true,
+                  reviewDescription: true,
+                  reviewAttachmentUrl: true,
+                  submittedAt: true,
+                },
+              },
               project: { select: { id: true, name: true } },
               unit: { select: { id: true, name: true } },
             },
@@ -327,6 +433,7 @@ export class WorkerService {
           project: subTask.task.project,
           scheduledLabel: thisWeekSchedule[0]?.schedule?.name ?? null,
           floors: [],
+          workflow: this.buildWorkflowSnapshot(subTask.task),
         };
 
         let floorEntry = taskEntry.floors.find((item: any) => item.id === floor?.id);
@@ -372,8 +479,9 @@ export class WorkerService {
               ? 'start'
               : subTask.status === 'in_progress'
                 ? 'continue'
-                : 'view',
+          : 'view',
           reportCount: subTask._count?.reports ?? 0,
+          workflow: this.buildWorkflowSnapshot(subTask),
         });
 
         taskMap.set(taskId, taskEntry);
@@ -447,6 +555,21 @@ export class WorkerService {
               priority: true,
               dueDate: true,
               status: true,
+              reports: {
+                orderBy: { submittedAt: 'desc' },
+                take: 1,
+                select: {
+                  id: true,
+                  notes: true,
+                  beforePhotoUrl: true,
+                  afterPhotoUrl: true,
+                  receiptUrl: true,
+                  reviewDecision: true,
+                  reviewDescription: true,
+                  reviewAttachmentUrl: true,
+                  submittedAt: true,
+                },
+              },
               project: { select: { id: true, name: true } },
             },
           },
@@ -482,7 +605,7 @@ export class WorkerService {
         const floor = subTask.unit?.floor ?? null;
         const unit = subTask.unit ?? null;
 
-        const existing = map.get(taskId) ?? {
+          const existing = map.get(taskId) ?? {
           id: taskId,
           title: subTask.task.title,
           priority: subTask.task.priority,
@@ -491,6 +614,7 @@ export class WorkerService {
           project: subTask.task.project,
           scheduledLabel: null,
           floors: [],
+          workflow: this.buildWorkflowSnapshot(subTask.task),
         };
 
         let floorEntry = existing.floors.find((item: any) => item.id === floor?.id);
@@ -540,8 +664,9 @@ export class WorkerService {
               ? 'start'
               : subTask.status === 'in_progress'
                 ? 'continue'
-                : 'view',
+          : 'view',
           reportCount: subTask._count?.reports ?? 0,
+          workflow: this.buildWorkflowSnapshot(subTask),
         });
 
         map.set(taskId, existing);
@@ -582,6 +707,21 @@ export class WorkerService {
             dueDate: true,
             status: true,
             approvalDecision: true,
+            reports: {
+              orderBy: { submittedAt: 'desc' },
+              take: 1,
+              select: {
+                id: true,
+                notes: true,
+                beforePhotoUrl: true,
+                afterPhotoUrl: true,
+                receiptUrl: true,
+                reviewDecision: true,
+                reviewDescription: true,
+                reviewAttachmentUrl: true,
+                submittedAt: true,
+              },
+            },
             project: {
               select: {
                 id: true,
@@ -660,6 +800,138 @@ export class WorkerService {
     return this.getTaskDetail(subTaskId, workerId);
   }
 
+  async getMainTaskDetail(taskId: string, workerId: string) {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        project: {
+          select: {
+            id: true,
+            name: true,
+            location: true,
+            inventoryItems: {
+              select: {
+                id: true,
+                name: true,
+                category: true,
+                unit: true,
+                currentQty: true,
+                minStockQty: true,
+                location: true,
+              },
+            },
+          },
+        },
+        creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        assignee: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        taskAssignees: {
+          include: {
+            user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+            unit: { select: { id: true, name: true } },
+          },
+        },
+        reports: {
+          orderBy: { submittedAt: 'desc' },
+          take: 5,
+          select: {
+            id: true,
+            notes: true,
+            beforePhotoUrl: true,
+            afterPhotoUrl: true,
+            receiptUrl: true,
+            reviewDecision: true,
+            reviewDescription: true,
+            reviewAttachmentUrl: true,
+            submittedAt: true,
+          },
+        },
+        taskInventories: {
+          include: {
+            inventory: {
+              select: {
+                id: true,
+                name: true,
+                category: true,
+                unit: true,
+                currentQty: true,
+                minStockQty: true,
+                location: true,
+              },
+            },
+            subTask: { select: { id: true, title: true } },
+          },
+        },
+      },
+    });
+
+    if (!task) throw new NotFoundException('Task not found');
+    if (!this.isTaskAssigned(task, workerId)) {
+      throw new ForbiddenException('This task is not assigned to you');
+    }
+
+    const latestReport = task.reports?.[0] ?? null;
+
+    return {
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      priority: task.priority,
+      status: task.status,
+      approvalDecision: task.approvalDecision,
+      startedAt: latestReport?.submittedAt ?? null,
+      submittedAt: latestReport?.submittedAt ?? null,
+      completedAt: task.status === 'completed' ? task.updatedAt : null,
+      taskDetails: {
+        project: task.project ?? null,
+        assignedTo: task.assignee ?? task.creator ?? null,
+        projectName: task.project?.name ?? null,
+        location: task.project?.location ?? null,
+        date: task.dueDate ?? task.createdAt ?? null,
+        dueDate: task.dueDate ?? null,
+        startTime: latestReport?.submittedAt ?? task.createdAt ?? null,
+        endTime: task.dueDate ?? task.createdAt ?? null,
+        estimatedHours: task.estimatedHours ?? null,
+        priority: task.priority,
+        priorityLabel:
+          task.priority === 'high'
+            ? 'High Priority'
+            : task.priority === 'low'
+              ? 'Low Priority'
+              : 'Medium Priority',
+      },
+      mainTask: {
+        id: task.id,
+        title: task.title,
+        priority: task.priority,
+        dueDate: task.dueDate,
+        status: task.status,
+        approvalDecision: task.approvalDecision,
+        project: task.project ?? null,
+        workflow: this.buildWorkflowSnapshot(task),
+      },
+      beforePhotoUrl: latestReport?.beforePhotoUrl ?? null,
+      afterPhotoUrl: latestReport?.afterPhotoUrl ?? null,
+      receiptUrl: latestReport?.receiptUrl ?? null,
+      note: latestReport?.notes ?? null,
+      reviewDecision: latestReport?.reviewDecision ?? null,
+      reviewDescription: latestReport?.reviewDescription ?? null,
+      availableInventory: task.project?.inventoryItems ?? [],
+      inventoryUsed: (task.taskInventories ?? []).map((item: any) => ({
+        id: item.id,
+        inventoryId: item.inventory?.id ?? null,
+        name: item.inventory?.name ?? null,
+        category: item.inventory?.category ?? null,
+        unit: item.inventory?.unit ?? null,
+        qtyUsed: item.qtyUsed,
+        currentQty: item.inventory?.currentQty ?? null,
+        minStockQty: item.inventory?.minStockQty ?? null,
+        location: item.inventory?.location ?? null,
+      })),
+      latestReport,
+      workflow: this.buildWorkflowSnapshot(task),
+    };
+  }
+
   async startTask(
     taskId: string,
     workerId: string,
@@ -721,6 +993,58 @@ export class WorkerService {
         unit: { select: { id: true, name: true } },
       },
     });
+  }
+
+  async startMainTask(
+    taskId: string,
+    workerId: string,
+    files?: {
+      beforePhoto?: Express.Multer.File[];
+    },
+  ) {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        project: { select: { id: true, company: { select: { ownerId: true } } } },
+        taskAssignees: { select: { userId: true } },
+        assignee: { select: { id: true } },
+        creator: { select: { id: true } },
+        reports: { orderBy: { submittedAt: 'desc' }, take: 1 },
+      },
+    });
+
+    if (!task) throw new NotFoundException('Task not found');
+    if (!this.isTaskAssigned(task, workerId)) {
+      throw new ForbiddenException('This task is not assigned to you');
+    }
+    this.ensureTaskApproved(task, 'starting work');
+
+    if (task.status === 'in_progress') {
+      return this.getMainTaskDetail(taskId, workerId);
+    }
+    if (task.status !== 'pending' && task.status !== 'review' && task.status !== 'in_active') {
+      throw new BadRequestException(`Task is already ${task.status}`);
+    }
+
+    const beforePhotoUrl = files?.beforePhoto?.[0]?.filename ?? null;
+    if (beforePhotoUrl) {
+      await this.prisma.taskReport.create({
+        data: {
+          taskId,
+          workerId,
+          beforePhotoUrl,
+          notes: 'Start task photo',
+          reviewDecision: 'pending',
+        },
+      });
+    }
+
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: { status: 'in_progress' },
+    });
+
+    return this.getMainTaskDetail(taskId, workerId);
   }
 
   async createSubTask(
@@ -989,6 +1313,148 @@ export class WorkerService {
     };
   }
 
+  async submitMainTaskReport(
+    taskId: string,
+    workerId: string,
+    dto: SubmitTaskReportDto,
+    files?: {
+      beforePhoto?: Express.Multer.File[];
+      afterPhoto?: Express.Multer.File[];
+      receipt?: Express.Multer.File[];
+    },
+  ) {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        project: { include: { company: true } },
+        taskAssignees: { select: { userId: true } },
+        assignee: { select: { id: true } },
+        creator: { select: { id: true } },
+      },
+    });
+
+    if (!task) throw new NotFoundException('Task not found');
+    if (!this.isTaskAssigned(task, workerId)) {
+      throw new ForbiddenException('This task is not assigned to you');
+    }
+    this.ensureTaskApproved(task, 'submitting a report');
+    if (task.status === 'completed') {
+      throw new BadRequestException('Task is already completed');
+    }
+
+    if (dto.inventoryUsed && dto.inventoryUsed.length > 0) {
+      for (const item of dto.inventoryUsed) {
+        const inv = await this.prisma.inventoryItem.findUnique({
+          where: { id: item.inventoryId },
+        });
+        if (!inv) throw new NotFoundException(`Inventory item not found: ${item.inventoryId}`);
+        if (inv.currentQty < item.qtyUsed) {
+          throw new BadRequestException(`Not enough stock for: ${inv.name}`);
+        }
+
+        const existingTaskInventory = await this.prisma.taskInventory.findFirst({
+          where: {
+            taskId,
+            subTaskId: null,
+            inventoryId: item.inventoryId,
+          },
+        });
+
+        await this.prisma.$transaction([
+          this.prisma.inventoryItem.update({
+            where: { id: item.inventoryId },
+            data: { currentQty: { decrement: item.qtyUsed } },
+          }),
+          this.prisma.inventoryUsageLog.create({
+            data: {
+              inventoryId: item.inventoryId,
+              userId: workerId,
+              projectId: task.project.id,
+              qtyChange: -item.qtyUsed,
+              reason: `Used in task: ${task.title}`,
+            },
+          }),
+          existingTaskInventory
+            ? this.prisma.taskInventory.update({
+                where: { id: existingTaskInventory.id },
+                data: { qtyUsed: item.qtyUsed },
+              })
+            : this.prisma.taskInventory.create({
+                data: {
+                  taskId,
+                  subTaskId: null,
+                  inventoryId: item.inventoryId,
+                  qtyUsed: item.qtyUsed,
+                },
+              }),
+        ]);
+      }
+    }
+
+    const existingReport = await this.prisma.taskReport.findFirst({
+      where: { taskId, subTaskId: null, workerId },
+      orderBy: { submittedAt: 'desc' },
+    });
+
+    const reportPayload = {
+      taskId,
+      subTaskId: null,
+      workerId,
+      notes: dto.note ?? dto.notes ?? null,
+      beforePhotoUrl: this.preserveExistingUrl(files?.beforePhoto, existingReport?.beforePhotoUrl, dto.beforePhotoUrl),
+      afterPhotoUrl: this.preserveExistingUrl(files?.afterPhoto, existingReport?.afterPhotoUrl, dto.afterPhotoUrl),
+      receiptUrl: this.preserveExistingUrl(files?.receipt, existingReport?.receiptUrl, dto.receiptUrl),
+      reviewDecision: 'pending' as const,
+    };
+
+    const report = existingReport
+      ? await this.prisma.taskReport.update({
+          where: { id: existingReport.id },
+          data: reportPayload,
+        })
+      : await this.prisma.taskReport.create({
+          data: reportPayload,
+        });
+
+    const projectReviewRecipients = await this.prisma.projectMember.findMany({
+      where: {
+        projectId: task.projectId,
+        role: { in: ['manager', 'worker'] },
+      },
+      select: { userId: true, role: true },
+    });
+
+    const recipientIds = new Set<string>([
+      task.project.company.ownerId,
+      ...projectReviewRecipients.map((member) => member.userId),
+    ]);
+
+    await Promise.all(
+      [...recipientIds]
+        .filter(Boolean)
+        .map((userId) =>
+          this.notificationsService.send({
+            userId,
+            title: 'New Main Task Report Submitted',
+            body: `A worker submitted a report for task: ${task.title}`,
+            type: 'report',
+            refId: task.id,
+            refType: 'task',
+          }),
+        ),
+    );
+
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: { status: 'review' },
+    });
+
+    return {
+      message: 'Main task report submitted successfully. Task is now waiting for review.',
+      report,
+    };
+  }
+
   async updateTaskReport(
     taskId: string,
     workerId: string,
@@ -1150,6 +1616,169 @@ export class WorkerService {
     };
   }
 
+  async updateMainTaskReport(
+    taskId: string,
+    workerId: string,
+    body: any,
+    files?: {
+      beforePhoto?: Express.Multer.File[];
+      afterPhoto?: Express.Multer.File[];
+      receipt?: Express.Multer.File[];
+    },
+  ) {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        project: { include: { company: true } },
+        taskAssignees: { select: { userId: true } },
+        assignee: { select: { id: true } },
+        creator: { select: { id: true } },
+      },
+    });
+
+    if (!task) throw new NotFoundException('Task not found');
+    if (!this.isTaskAssigned(task, workerId)) {
+      throw new ForbiddenException('This task is not assigned to you');
+    }
+    this.ensureTaskApproved(task, 'updating the report');
+
+    const report = await this.prisma.taskReport.findFirst({
+      where: { taskId, subTaskId: null, workerId },
+      orderBy: { submittedAt: 'desc' },
+    });
+
+    const inventoryUsed = (() => {
+      const raw = body?.inventoryUsed ?? body?.inventory_used;
+      if (!raw) return [];
+      if (Array.isArray(raw)) return raw;
+      if (typeof raw === 'string') {
+        try {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    })() as Array<{ inventoryId: string; qtyUsed: number; reason?: string }>;
+
+    if (inventoryUsed.length > 0) {
+      for (const item of inventoryUsed) {
+        const inv = await this.prisma.inventoryItem.findUnique({
+          where: { id: item.inventoryId },
+        });
+        if (!inv) throw new NotFoundException(`Inventory item not found: ${item.inventoryId}`);
+
+        const currentTaskInventory = await this.prisma.taskInventory.findFirst({
+          where: { taskId, subTaskId: null, inventoryId: item.inventoryId },
+        });
+
+        const previousQty = currentTaskInventory?.qtyUsed ?? 0;
+        const nextQty = Number(item.qtyUsed) || 0;
+        const stockDelta = nextQty - previousQty;
+
+        if (stockDelta > 0 && inv.currentQty < stockDelta) {
+          throw new BadRequestException(
+            `Not enough stock for: ${inv.name}. Available: ${inv.currentQty}, requested additional: ${stockDelta}`,
+          );
+        }
+
+        await this.prisma.$transaction(async (tx) => {
+          await tx.inventoryItem.update({
+            where: { id: item.inventoryId },
+            data: {
+              currentQty:
+                stockDelta > 0
+                  ? { decrement: stockDelta }
+                  : { increment: Math.abs(stockDelta) },
+            },
+          });
+
+          await tx.inventoryUsageLog.create({
+            data: {
+              inventoryId: item.inventoryId,
+              userId: workerId,
+              projectId: task.projectId,
+              qtyChange: -stockDelta,
+              reason: item.reason ?? `Updated main task inventory for ${task.title}`,
+            },
+          });
+
+          if (currentTaskInventory) {
+            await tx.taskInventory.update({
+              where: { id: currentTaskInventory.id },
+              data: { qtyUsed: nextQty },
+            });
+          } else {
+            await tx.taskInventory.create({
+              data: {
+                taskId,
+                subTaskId: null,
+                inventoryId: item.inventoryId,
+                qtyUsed: nextQty,
+              },
+            });
+          }
+        });
+      }
+    }
+
+    const reportData = {
+      notes: body?.note ?? body?.notes ?? body?.description ?? null,
+      beforePhotoUrl: this.preserveExistingUrl(files?.beforePhoto, report?.beforePhotoUrl, body?.beforePhotoUrl),
+      afterPhotoUrl: this.preserveExistingUrl(files?.afterPhoto, report?.afterPhotoUrl, body?.afterPhotoUrl),
+      receiptUrl: this.preserveExistingUrl(files?.receipt, report?.receiptUrl, body?.receiptUrl),
+      reviewDecision: 'pending' as const,
+    };
+
+    const updatedReport = report
+      ? await this.prisma.taskReport.update({
+          where: { id: report.id },
+          data: reportData,
+        })
+      : await this.prisma.taskReport.create({
+          data: {
+            taskId,
+            subTaskId: null,
+            workerId,
+            ...reportData,
+          },
+        });
+
+    const projectReviewRecipients = await this.prisma.projectMember.findMany({
+      where: {
+        projectId: task.projectId,
+        role: { in: ['manager', 'worker'] },
+      },
+      select: { userId: true, role: true },
+    });
+
+    const recipientIds = new Set<string>([
+      task.project.company.ownerId,
+      ...projectReviewRecipients.map((member) => member.userId),
+    ]);
+
+    await Promise.all(
+      [...recipientIds]
+        .filter(Boolean)
+        .map((userId) =>
+          this.notificationsService.send({
+            userId,
+            title: 'Main Task Report Updated',
+            body: `A worker updated a report for task: ${task.title}`,
+            type: 'report',
+            refId: task.id,
+            refType: 'task',
+          }),
+        ),
+    );
+
+    return {
+      message: 'Main task report updated successfully. Task remains pending review.',
+      report: updatedReport,
+    };
+  }
+
   async getTaskInventoryItems(taskId: string, workerId: string) {
     const subTask = await this.prisma.subTask.findUnique({
       where: { id: taskId },
@@ -1166,6 +1795,38 @@ export class WorkerService {
     return this.prisma.inventoryItem.findMany({
       where: {
         projectId: subTask.task.projectId,
+        currentQty: { gt: 0 },
+      },
+      select: {
+        id: true,
+        name: true,
+        category: true,
+        currentQty: true,
+        unit: true,
+        location: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async getMainTaskInventoryItems(taskId: string, workerId: string) {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        project: { include: { company: true } },
+        taskAssignees: { select: { userId: true } },
+        assignee: { select: { id: true } },
+        creator: { select: { id: true } },
+      },
+    });
+    if (!task) throw new NotFoundException('Task not found');
+    if (!this.isTaskAssigned(task, workerId)) {
+      throw new ForbiddenException('This task is not assigned to you');
+    }
+
+    return this.prisma.inventoryItem.findMany({
+      where: {
+        projectId: task.projectId,
         currentQty: { gt: 0 },
       },
       select: {
@@ -1273,6 +1934,118 @@ export class WorkerService {
 
     return {
       message: 'Task inventory updated successfully',
+      data: {
+        id: result.taskInventory.id,
+        taskId: result.taskInventory.taskId,
+        inventoryId: result.taskInventory.inventoryId,
+        qtyUsed: result.taskInventory.qtyUsed,
+        inventory: {
+          id: result.updatedInventory.id,
+          name: result.updatedInventory.name,
+          category: result.updatedInventory.category,
+          currentQty: result.updatedInventory.currentQty,
+          unit: result.updatedInventory.unit,
+          location: result.updatedInventory.location,
+        },
+      },
+    };
+  }
+
+  async updateMainTaskInventoryItem(
+    taskId: string,
+    inventoryId: string,
+    workerId: string,
+    dto: UpdateTaskInventoryDto,
+  ) {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        project: { select: { id: true, company: { select: { ownerId: true } } } },
+        taskAssignees: { select: { userId: true } },
+        assignee: { select: { id: true } },
+        creator: { select: { id: true } },
+      },
+    });
+
+    if (!task) throw new NotFoundException('Task not found');
+    if (!this.isTaskAssigned(task, workerId)) {
+      throw new ForbiddenException('This task is not assigned to you');
+    }
+    this.ensureTaskApproved(task, 'updating task inventory');
+
+    if (task.status === 'completed') {
+      throw new BadRequestException('Completed task inventory cannot be updated');
+    }
+
+    const inventory = await this.prisma.inventoryItem.findFirst({
+      where: {
+        id: inventoryId,
+        projectId: task.projectId,
+      },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException('Inventory item not found');
+    }
+
+    const existingTaskInventory = await this.prisma.taskInventory.findFirst({
+      where: {
+        taskId,
+        subTaskId: null,
+        inventoryId,
+      },
+    });
+
+    const previousQty = existingTaskInventory?.qtyUsed ?? 0;
+    const nextQty = dto.qtyUsed;
+    const stockDelta = nextQty - previousQty;
+
+    if (stockDelta > 0 && inventory.currentQty < stockDelta) {
+      throw new BadRequestException(
+        `Not enough stock for: ${inventory.name}. Available: ${inventory.currentQty}, requested additional: ${stockDelta}`,
+      );
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updatedInventory = await tx.inventoryItem.update({
+        where: { id: inventoryId },
+        data: {
+          currentQty:
+            stockDelta > 0
+              ? { decrement: stockDelta }
+              : { increment: Math.abs(stockDelta) },
+        },
+      });
+
+      await tx.inventoryUsageLog.create({
+        data: {
+          inventoryId,
+          userId: workerId,
+          projectId: task.projectId,
+          qtyChange: -stockDelta,
+          reason: dto.reason ?? `Updated main task inventory for ${task.title}`,
+        },
+      });
+
+      const taskInventory = existingTaskInventory
+        ? await tx.taskInventory.update({
+            where: { id: existingTaskInventory.id },
+            data: { qtyUsed: nextQty },
+          })
+        : await tx.taskInventory.create({
+            data: {
+              taskId,
+              subTaskId: null,
+              inventoryId,
+              qtyUsed: nextQty,
+            },
+          });
+
+      return { taskInventory, updatedInventory };
+    });
+
+    return {
+      message: 'Main task inventory updated successfully',
       data: {
         id: result.taskInventory.id,
         taskId: result.taskInventory.taskId,
