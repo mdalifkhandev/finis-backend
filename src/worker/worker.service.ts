@@ -906,6 +906,7 @@ export class WorkerService {
         dueDate: task.dueDate,
         status: task.status,
         approvalDecision: task.approvalDecision,
+        allowSubTaskCreation: (task as any).allowSubTaskCreation,
         project: task.project ?? null,
         workflow: this.buildWorkflowSnapshot(task),
       },
@@ -1068,6 +1069,9 @@ export class WorkerService {
     if (!task) throw new NotFoundException('Task not found');
     if (task.approvalDecision !== 'approved') {
       throw new BadRequestException('Main task must be approved first');
+    }
+    if (!(task as any).allowSubTaskCreation) {
+      throw new BadRequestException('Subtask creation is disabled for this main task');
     }
 
     const unitIds = Array.from(new Set([...(dto.unitIds ?? []), ...(dto.unitId ? [dto.unitId] : [])]));

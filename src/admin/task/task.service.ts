@@ -407,6 +407,7 @@ export class TaskService {
         description: rest.description,
         priority: rest.priority,
         status: rest.status,
+        allowSubTaskCreation: rest.allowSubTaskCreation,
         approvalDecision: rest.approvalDecision,
         approvalNotes: rest.approvalNotes,
         completionDecision: rest.completionDecision,
@@ -742,9 +743,10 @@ export class TaskService {
         approvalDecision,
         approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
         approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
+        allowSubTaskCreation: (dto as any).allowSubTaskCreation ?? true,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         estimatedHours: dto.estimatedHours ?? null,
-      },
+      } as any,
     });
 
     if (floorIds.length) {
@@ -1830,6 +1832,9 @@ export class TaskService {
     const task = await this.verifyTaskAccess(taskId, userId, userRole);
     if (task.approvalDecision !== 'approved') {
       throw new BadRequestException('Task must be approved before creating subtasks');
+    }
+    if (!(task as any).allowSubTaskCreation) {
+      throw new BadRequestException('Subtask creation is disabled for this main task');
     }
 
     const unitIds = Array.from(new Set([...(dto.unitIds ?? []), ...(dto.unitId ? [dto.unitId] : [])]));

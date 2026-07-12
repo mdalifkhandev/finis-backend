@@ -4,6 +4,7 @@ import {
   IsString,
   IsOptional,
   IsNumber,
+  IsBoolean,
   IsEnum,
   IsUUID,
   ValidateNested,
@@ -161,6 +162,10 @@ export class CreateSubTaskDto {
   @IsOptional()
   @IsNumber()
   estimatedHours?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  allowSubTaskCreation?: boolean;
 }
 
 export class ReviewTaskDto {

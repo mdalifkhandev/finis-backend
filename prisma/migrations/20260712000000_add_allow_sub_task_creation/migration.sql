@@ -1,0 +1,2 @@
+ALTER TABLE "tasks"
+ADD COLUMN IF NOT EXISTS "allow_sub_task_creation" BOOLEAN NOT NULL DEFAULT TRUE;
