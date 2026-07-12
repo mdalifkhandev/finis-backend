@@ -429,7 +429,7 @@ model Task {
   completionReviewedBy String?     @map("completion_reviewed_by") @db.Uuid
   completionReviewedAt DateTime?    @map("completion_reviewed_at")
   completionNotes  String?         @map("completion_notes")
-  allowSubTaskCreation Boolean     @default(true) @map("allow_sub_task_creation")
+  allowSubTaskCreation Boolean     @default(false) @map("allow_sub_task_creation")
   dueDate         DateTime?       @map("due_date") @db.Date
   estimatedHours  Int?            @map("estimated_hours")
   actualHours     Float?          @map("actual_hours")
