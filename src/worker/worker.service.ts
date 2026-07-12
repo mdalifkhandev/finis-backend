@@ -204,6 +204,16 @@ export class WorkerService {
     }
   }
 
+  private countAssignedWorkers(task: any) {
+    const uniqueWorkerIds = new Set(
+      (task.taskAssignees ?? [])
+        .map((assignee: any) => assignee?.user?.id ?? assignee?.userId ?? null)
+        .filter(Boolean),
+    );
+
+    return uniqueWorkerIds.size;
+  }
+
   private preserveExistingUrl(
     uploadedFile: Express.Multer.File[] | undefined,
     existingUrl?: string | null,
@@ -520,6 +530,193 @@ export class WorkerService {
     limit = 10,
   ) {
     const skip = (page - 1) * limit;
+    const assignedTaskWhere: any = {
+      OR: [
+        { createdBy: workerId },
+        { assignedTo: workerId },
+        { taskAssignees: { some: { userId: workerId } } },
+      ],
+      ...(status && {
+        OR: [
+          { status: status as any },
+          { status: 'review' },
+          { status: 'in_progress' },
+          { status: 'pending' },
+        ],
+      }),
+      ...(search && {
+        OR: [
+          { title: { contains: search, mode: 'insensitive' } },
+          { description: { contains: search, mode: 'insensitive' } },
+        ],
+      }),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.task.findMany({
+        where: assignedTaskWhere,
+        include: {
+          project: { select: { id: true, name: true } },
+          taskFloors: {
+            include: { floor: { select: { id: true, name: true, floorNumber: true } } },
+          },
+          taskUnits: {
+            include: {
+              unit: {
+                select: {
+                  id: true,
+                  name: true,
+                  floorId: true,
+                  floor: { select: { id: true, name: true, floorNumber: true } },
+                },
+              },
+            },
+          },
+          taskAssignees: {
+            include: {
+              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+              unit: { select: { id: true, name: true } },
+            },
+          },
+          subTasks: {
+            orderBy: { createdAt: 'desc' },
+            include: {
+              unit: { select: { id: true, name: true } },
+              taskAssignee: {
+                include: {
+                  user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+                  unit: { select: { id: true, name: true } },
+                },
+              },
+              reports: {
+                orderBy: { submittedAt: 'desc' },
+                take: 1,
+                select: {
+                  id: true,
+                  notes: true,
+                  beforePhotoUrl: true,
+                  afterPhotoUrl: true,
+                  receiptUrl: true,
+                  reviewDecision: true,
+                  reviewDescription: true,
+                  reviewAttachmentUrl: true,
+                  submittedAt: true,
+                },
+              },
+            },
+          },
+          reports: {
+            orderBy: { submittedAt: 'desc' },
+            take: 1,
+            select: {
+              id: true,
+              notes: true,
+              beforePhotoUrl: true,
+              afterPhotoUrl: true,
+              receiptUrl: true,
+              reviewDecision: true,
+              reviewDescription: true,
+              reviewAttachmentUrl: true,
+              submittedAt: true,
+            },
+          },
+          _count: { select: { subTasks: true, reports: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.task.count({ where: assignedTaskWhere }),
+    ]);
+
+    return {
+      data: data.map((task: any) => {
+        const floorMap = new Map<
+          string,
+          { id: string; name: string; floorNumber: number | null; units: Array<{ id: string; name: string; status: string; approvalDecision: string; canCreateSubTask: boolean; subTasks: any[] }> }
+        >();
+
+        for (const entry of task.taskFloors ?? []) {
+          if (!entry.floor) continue;
+          if (!floorMap.has(entry.floor.id)) {
+            floorMap.set(entry.floor.id, {
+              id: entry.floor.id,
+              name: entry.floor.name,
+              floorNumber: entry.floor.floorNumber ?? null,
+              units: [],
+            });
+          }
+        }
+
+        for (const entry of task.taskUnits ?? []) {
+          const floor = entry.unit?.floor ?? null;
+          if (!floor?.id) continue;
+          if (!floorMap.has(floor.id)) {
+            floorMap.set(floor.id, {
+              id: floor.id,
+              name: floor.name ?? 'No Floor',
+              floorNumber: floor.floorNumber ?? null,
+              units: [],
+            });
+          }
+          const floorEntry = floorMap.get(floor.id)!;
+          if (!floorEntry.units.some((unit) => unit.id === entry.unit.id)) {
+            floorEntry.units.push({
+              id: entry.unit.id,
+              name: entry.unit.name,
+              status: task.status,
+              approvalDecision: task.approvalDecision,
+              canCreateSubTask: (task as any).allowSubTaskCreation ?? false,
+              subTasks: (task.subTasks ?? [])
+                .filter((subTask: any) => subTask.unitId === entry.unit.id)
+                .map((subTask: any) => ({
+                  id: subTask.id,
+                  title: subTask.title,
+                  status: subTask.status,
+                  approvalDecision: subTask.approvalDecision,
+                  action:
+                    subTask.status === 'pending'
+                      ? 'start'
+                      : subTask.status === 'in_progress'
+                        ? 'continue'
+                        : 'view',
+                  reportCount: subTask.reports?.length ?? 0,
+                  workflow: this.buildWorkflowSnapshot(subTask),
+                })),
+            });
+          }
+        }
+
+        return {
+          id: task.id,
+          title: task.title,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          status: task.status,
+          project: task.project,
+          scheduledLabel: null,
+          floors: Array.from(floorMap.values()),
+          workflow: this.buildWorkflowSnapshot(task),
+          allowSubTaskCreation: (task as any).allowSubTaskCreation ?? false,
+          subTaskCount: task._count?.subTasks ?? 0,
+          completedSubTaskCount:
+            (task.subTasks ?? []).filter((subTask: any) => subTask.status === 'completed').length ?? 0,
+          assignedWorkerCount: this.countAssignedWorkers(task),
+          latestReport: task.reports?.[0] ?? null,
+        };
+      }),
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  async getSubTasks(
+    workerId: string,
+    status?: string,
+    search?: string,
+    page = 1,
+    limit = 10,
+  ) {
+    const skip = (page - 1) * limit;
     const workerTaskFilter = this.workerTaskWhere(workerId);
 
     const andConditions: any[] = [];
@@ -605,7 +802,7 @@ export class WorkerService {
         const floor = subTask.unit?.floor ?? null;
         const unit = subTask.unit ?? null;
 
-          const existing = map.get(taskId) ?? {
+        const existing = map.get(taskId) ?? {
           id: taskId,
           title: subTask.task.title,
           priority: subTask.task.priority,
@@ -664,7 +861,7 @@ export class WorkerService {
               ? 'start'
               : subTask.status === 'in_progress'
                 ? 'continue'
-          : 'view',
+                : 'view',
           reportCount: subTask._count?.reports ?? 0,
           workflow: this.buildWorkflowSnapshot(subTask),
         });
@@ -683,16 +880,6 @@ export class WorkerService {
         totalPages: Math.ceil(total.length / limit),
       },
     };
-  }
-
-  async getSubTasks(
-    workerId: string,
-    status?: string,
-    search?: string,
-    page = 1,
-    limit = 10,
-  ) {
-    return this.getMyTasks(workerId, status, search, page, limit);
   }
 
   async getTaskDetail(taskId: string, workerId: string) {
