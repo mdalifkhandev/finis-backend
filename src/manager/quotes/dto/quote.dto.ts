@@ -1,4 +1,4 @@
-import { IsBoolean, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 export class CreateQuoteDto {
   @IsString()
@@ -17,6 +17,10 @@ export class CreateQuoteDto {
   @IsNumber()
   @Min(0)
   quantity?: number;
+
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
 
   @IsOptional()
   @IsString()
@@ -48,6 +52,10 @@ export class UpdateQuoteDto {
   @IsOptional()
   @IsString()
   unitType?: string;
+
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
 
   @IsOptional()
   @IsString()

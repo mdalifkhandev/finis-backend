@@ -37,9 +37,17 @@ export class QuotesService {
     const quantity = dto.quantity ?? 1;
     const unitPrice = dto.unitPrice ?? 0;
     const subtotal = Math.round(quantity * unitPrice * 100) / 100;
+    const categoryId = dto.categoryId?.trim() || null;
+
+    if (categoryId) {
+      const category = await this.prisma.quoteCategory.findUnique({ where: { id: categoryId } });
+      if (!category) throw new NotFoundException('Quote category not found');
+    }
 
     return this.prisma.quote.create({
       data: {
+        categoryId,
+        createdById: userId,
         projectType: dto.projectType,
         propertyType: dto.propertyType,
         unitType: dto.unitType,
@@ -50,25 +58,33 @@ export class QuotesService {
         subtotal,
         notes: dto.notes ?? null,
         isCustom: dto.isCustom ?? false,
-        createdBy: {
-          connect: { id: userId },
-        },
       },
       include: {
         createdBy: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        category: { select: { id: true, name: true, isActive: true, sortOrder: true } },
       },
     });
   }
 
-  async getQuotes(userId: string, filters?: { projectType?: string; propertyType?: string; unitType?: string }) {
+  async getActiveQuoteCategories() {
+    return this.prisma.quoteCategory.findMany({
+      where: { isActive: true },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      select: { id: true, name: true, isActive: true, sortOrder: true },
+    });
+  }
+
+  async getQuotes(userId: string, filters?: { projectType?: string; propertyType?: string; unitType?: string; categoryId?: string }) {
     const quotes = await this.prisma.quote.findMany({
       where: {
         ...(filters?.projectType && { projectType: filters.projectType }),
         ...(filters?.propertyType && { propertyType: filters.propertyType }),
         ...(filters?.unitType && { unitType: filters.unitType }),
+        ...(filters?.categoryId && { categoryId: filters.categoryId }),
       },
       include: {
         createdBy: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        category: { select: { id: true, name: true, isActive: true, sortOrder: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -88,6 +104,7 @@ export class QuotesService {
       where: { id: quote.id },
       include: {
         createdBy: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        category: { select: { id: true, name: true, isActive: true, sortOrder: true } },
       },
     });
   }
@@ -99,10 +116,17 @@ export class QuotesService {
     const quantity = dto.quantity ?? quote.quantity;
     const unitPrice = dto.unitPrice ?? quote.unitPrice;
     const subtotal = Math.round(quantity * unitPrice * 100) / 100;
+    const categoryId = dto.categoryId?.trim();
+
+    if (categoryId) {
+      const category = await this.prisma.quoteCategory.findUnique({ where: { id: categoryId } });
+      if (!category) throw new NotFoundException('Quote category not found');
+    }
 
     return this.prisma.quote.update({
       where: { id: quote.id },
       data: {
+        categoryId: categoryId ?? quote.categoryId,
         projectType: dto.projectType ?? quote.projectType,
         propertyType: dto.propertyType ?? quote.propertyType,
         unitType: dto.unitType ?? quote.unitType,
@@ -116,6 +140,7 @@ export class QuotesService {
       },
       include: {
         createdBy: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+        category: { select: { id: true, name: true, isActive: true, sortOrder: true } },
       },
     });
   }

@@ -27,8 +27,14 @@ export class QuotesController {
     @Query('projectType') projectType?: string,
     @Query('propertyType') propertyType?: string,
     @Query('unitType') unitType?: string,
+    @Query('categoryId') categoryId?: string,
   ) {
-    return this.quotesService.getQuotes(userId, { projectType, propertyType, unitType });
+    return this.quotesService.getQuotes(userId, { projectType, propertyType, unitType, categoryId });
+  }
+
+  @Get('categories')
+  getQuoteCategories() {
+    return this.quotesService.getActiveQuoteCategories();
   }
 
   @Get(':id')
