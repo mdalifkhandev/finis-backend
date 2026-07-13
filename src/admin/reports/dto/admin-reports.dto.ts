@@ -1,4 +1,4 @@
-import { IsDateString, IsEnum, IsOptional } from 'class-validator';
+import { IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
 import { PeriodFrequency, ReportType } from '../../../super-admin/reports/dto/reports.dto';
 
 export class AdminGenerateReportDto {
@@ -13,6 +13,16 @@ export class AdminGenerateReportDto {
 
   @IsDateString()
   endDate!: string;
+
+  // Optional scope filter: limit the report to one company the admin can access.
+  @IsOptional()
+  @IsString()
+  companyId?: string;
+
+  // Optional scope filter: limit the report to one project inside the selected company scope.
+  @IsOptional()
+  @IsString()
+  projectId?: string;
 }
 
 export class AdminExportReportDto {
@@ -25,4 +35,14 @@ export class AdminExportReportDto {
 
   @IsDateString()
   endDate!: string;
+
+  // Optional scope filter for PDF export.
+  @IsOptional()
+  @IsString()
+  companyId?: string;
+
+  // Optional project-level export filter.
+  @IsOptional()
+  @IsString()
+  projectId?: string;
 }

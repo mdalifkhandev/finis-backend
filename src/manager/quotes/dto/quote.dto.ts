@@ -1,26 +1,30 @@
 import { IsBoolean, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 export class CreateQuoteDto {
+  @IsOptional()
   @IsString()
   projectType!: string;
 
+  @IsOptional()
   @IsString()
   propertyType!: string;
 
+  @IsOptional()
   @IsString()
   unitType!: string;
 
+  @IsOptional()
   @IsString()
-  title!: string;
+  title?: string;
+
+  @IsOptional()
+  @IsUUID()
+  workItemId?: string;
 
   @IsOptional()
   @IsNumber()
   @Min(0)
   quantity?: number;
-
-  @IsOptional()
-  @IsUUID()
-  categoryId?: string;
 
   @IsOptional()
   @IsString()
@@ -54,12 +58,12 @@ export class UpdateQuoteDto {
   unitType?: string;
 
   @IsOptional()
-  @IsUUID()
-  categoryId?: string;
-
-  @IsOptional()
   @IsString()
   title?: string;
+
+  @IsOptional()
+  @IsUUID()
+  workItemId?: string;
 
   @IsOptional()
   @IsNumber()

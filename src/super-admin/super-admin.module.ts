@@ -17,8 +17,6 @@ import { ReportsController } from './reports/reports.controller';
 import { ReportsService } from './reports/reports.service';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { AuthModule } from '../auth/auth.module';
-import { QuoteCategoriesController } from './quote-categories/quote-categories.controller';
-import { QuoteCategoriesService } from './quote-categories/quote-categories.service';
 
 @Module({
   imports: [PrismaModule, SubscriptionModule, AuthModule, S3Module],
@@ -30,7 +28,6 @@ import { QuoteCategoriesService } from './quote-categories/quote-categories.serv
     PayrollManagementController,
     ReportsController,
     SuperAdminUsersController,
-    QuoteCategoriesController,
   ],
   providers: [
     SuperAdminDashboardService,
@@ -40,7 +37,6 @@ import { QuoteCategoriesService } from './quote-categories/quote-categories.serv
     TeamManagementService,
     PayrollManagementService,
     ReportsService,
-    QuoteCategoriesService,
   ],
   exports: [],
 })

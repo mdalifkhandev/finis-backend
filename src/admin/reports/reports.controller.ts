@@ -15,8 +15,10 @@ import { AdminExportReportDto, AdminGenerateReportDto } from './dto/admin-report
 export class AdminReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
-  /** GET /admin/reports/generate
-   *  admin নিজের সব company/project/workers/payroll/report data দেখবে
+  /**
+   * GET /admin/reports/generate
+   * Generates a report limited to the companies and projects the admin can access.
+   * Optional companyId/projectId filters let the admin narrow the report further.
    */
   @Get('generate')
   generateReport(
@@ -27,8 +29,9 @@ export class AdminReportsController {
     return this.reportsService.generateReport(dto, userId, userRole);
   }
 
-  /** GET /admin/reports
-   *  alias for generate
+  /**
+   * GET /admin/reports
+   * Convenience alias for the generate endpoint.
    */
   @Get()
   generateReportAlias(
@@ -39,8 +42,10 @@ export class AdminReportsController {
     return this.reportsService.generateReport(dto, userId, userRole);
   }
 
-  /** GET /admin/reports/export
-   *  admin নিজের সব company/project/workers/payroll/report data export করবে
+  /**
+   * GET /admin/reports/export
+   * Exports the same scoped data as a PDF file.
+   * The export respects the admin's access scope and any optional company/project filters.
    */
   @Get('export')
   exportAllData(

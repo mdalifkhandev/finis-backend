@@ -316,6 +316,7 @@ export class ReportsService {
 
   // ─── Access filter ────────────────────────────────────────────────────────
   private async getCompanyIds(userId: string, userRole: string, companyId?: string) {
+    // If a company is explicitly requested, verify that the caller is allowed to see it.
     if (companyId) {
       if (userRole === UserRole.super_admin) {
         return [companyId];
@@ -346,6 +347,7 @@ export class ReportsService {
       return [company.id];
     }
 
+    // Super admins can see every company when no company filter is supplied.
     if (userRole === UserRole.super_admin) {
       const companies = await this.prisma.company.findMany({
         select: { id: true },
@@ -380,6 +382,7 @@ export class ReportsService {
     userRole: string,
   ) {
     const { start, end } = this.getDateRange(dto.frequency, dto.startDate, dto.endDate);
+    // Resolve the accessible company scope first, then generate the selected report.
     const companyIds     = await this.getCompanyIds(userId, userRole, dto.companyId);
 
     switch (dto.type) {
@@ -921,12 +924,14 @@ export class ReportsService {
     const start      = dto.startDate ? new Date(dto.startDate) : new Date(new Date().getFullYear(), 0, 1);
     const end        = dto.endDate   ? new Date(dto.endDate)   : new Date();
 
+    // Reuse the normal report flow so export follows the same permissions and filters.
     const generateDto = {
       type:      dto.type ?? ReportType.expense,
       frequency: 'monthly' as any,
       startDate: start.toISOString(),
       endDate:   end.toISOString(),
       companyId: dto.companyId,
+      projectId: dto.projectId,
     };
 
     const report = await this.generateReport(generateDto, userId, userRole);

@@ -2,12 +2,12 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { QuotesController } from './quotes.controller';
 import { QuotesService } from './quotes.service';
+import { QuoteLibraryService } from './quote-library.service';
 
 @Module({
   imports: [PrismaModule],
   controllers: [QuotesController],
-  providers: [QuotesService],
+  providers: [QuotesService, QuoteLibraryService],
   exports: [QuotesService],
 })
 export class QuotesModule {}
-

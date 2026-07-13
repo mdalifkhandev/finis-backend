@@ -345,13 +345,15 @@ model Project {
 model Quote {
   id           String   @id @default(uuid()) @db.Uuid
   createdById  String   @map("created_by_id") @db.Uuid
-  categoryId   String?  @map("category_id") @db.Uuid
+  workItemId   String?  @map("work_item_id") @db.Uuid
+  workCategoryId String? @map("work_category_id") @db.Uuid
   projectType  String   @map("project_type")
   propertyType String   @map("property_type")
   unitType     String   @map("unit_type")
   title        String
   quantity     Float    @default(1)
   unit         String?
+  measurementType String? @map("measurement_type")
   unitPrice    Float    @default(0) @map("unit_price")
   subtotal     Float    @default(0)
   notes        String?
@@ -359,24 +361,63 @@ model Quote {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
   createdBy    User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
-  category     QuoteCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  workItem     QuoteWorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  workCategory QuoteWorkCategory? @relation(fields: [workCategoryId], references: [id], onDelete: SetNull)
 
   @@index([projectType, propertyType, unitType])
-  @@index([categoryId])
+  @@index([workCategoryId])
+  @@index([workItemId])
   @@map("quotes")
 }
 
-model QuoteCategory {
-  id         String   @id @default(uuid()) @db.Uuid
-  name       String   @unique
-  isActive   Boolean  @default(true) @map("is_active")
-  sortOrder  Int      @default(0) @map("sort_order")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-  quotes     Quote[]
+model QuoteWorkCategory {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  workItems   QuoteWorkItem[]
+  quotes      Quote[]
 
   @@index([isActive, sortOrder])
-  @@map("quote_categories")
+  @@map("quote_work_categories")
+}
+
+model QuoteWorkItem {
+  id              String   @id @default(uuid()) @db.Uuid
+  categoryId      String   @map("category_id") @db.Uuid
+  projectType     String   @map("project_type")
+  propertyType    String   @map("property_type")
+  unitType        String   @map("unit_type")
+  name            String
+  measurementType String   @map("measurement_type")
+  unitCost        Float?   @map("unit_cost")
+  isActive        Boolean  @default(true) @map("is_active")
+  sortOrder       Int      @default(0) @map("sort_order")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  category        QuoteWorkCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  quotes          Quote[]
+
+  @@unique([categoryId, projectType, propertyType, unitType, name])
+  @@index([categoryId, isActive, sortOrder])
+  @@index([projectType, propertyType, unitType, isActive])
+  @@map("quote_work_items")
+}
+
+model QuoteMeasurementType {
+  id        String   @id @default(uuid()) @db.Uuid
+  value     String   @unique
+  label     String
+  sortOrder Int      @default(0) @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive, sortOrder])
+  @@map("quote_measurement_types")
 }
 
 model ProjectMember {

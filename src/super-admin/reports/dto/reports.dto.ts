@@ -58,4 +58,8 @@ export class ExportReportDto {
   @IsOptional()
   @IsString()
   companyId?: string;
+
+  @IsOptional()
+  @IsString()
+  projectId?: string;
 }
