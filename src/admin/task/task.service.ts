@@ -743,7 +743,7 @@ export class TaskService {
         approvalDecision,
         approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
         approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
-        allowSubTaskCreation: (dto as any).allowSubTaskCreation ?? false,
+        allowSubTaskCreation: dto.allowSubTaskCreation ?? false,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         estimatedHours: dto.estimatedHours ?? null,
       } as any,

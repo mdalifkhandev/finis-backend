@@ -61,9 +61,9 @@ This module handles task creation, assignment, task status updates, task reports
 
 ## Multi Select
 
-- Task create/update supports multiple floors and multiple units.
+- Task create/update supports one main task with multiple floors and multiple units.
 - Use `floorIds` for floors.
-- Subtasks are always created under an existing main task.
+- Subtasks are optional and can only be created when `allowSubTaskCreation` is enabled on the main task.
 - Use `unitId` for one unit or `unitIds` for multiple units in the same task.
 - Legacy single `floorId` and `unitId` still work.
 - `POST /admin/tasks/:id/assign` body can use `workerId` for single assign or `workerIds` for multiple assign.

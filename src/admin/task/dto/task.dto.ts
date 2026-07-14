@@ -69,6 +69,10 @@ export class CreateTaskDto {
   @IsOptional()
   @IsNumber()
   estimatedHours?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  allowSubTaskCreation?: boolean;
 }
 
 export class UpdateTaskDto {
@@ -105,6 +109,10 @@ export class UpdateTaskDto {
   @IsOptional()
   @IsNumber()
   actualHours?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  allowSubTaskCreation?: boolean;
 
   @IsOptional()
   @IsString()
@@ -162,10 +170,6 @@ export class CreateSubTaskDto {
   @IsOptional()
   @IsNumber()
   estimatedHours?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  allowSubTaskCreation?: boolean;
 }
 
 export class ReviewTaskDto {
