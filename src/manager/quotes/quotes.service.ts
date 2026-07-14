@@ -29,11 +29,17 @@ export class QuotesService {
   }
 
   private async findQuoteByIdOrSlug(identifier: string) {
-    const byId = await this.prisma.quote.findUnique({
-      where: { id: identifier },
-    });
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      identifier,
+    );
 
-    if (byId) return byId;
+    if (isUuid) {
+      const byId = await this.prisma.quote.findUnique({
+        where: { id: identifier },
+      });
+
+      if (byId) return byId;
+    }
 
     const normalized = this.slugify(identifier);
     return this.prisma.quote.findFirst({
