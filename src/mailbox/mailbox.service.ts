@@ -91,20 +91,16 @@ export class MailboxService {
   }
 
   async sendMail(managerId: string, dto: SendMailDto, attachments?: MailboxAttachment[]) {
-    const conversationId = randomUUID();
-    const proxyAddress = this.buildProxyAddress(conversationId);
+    const normalizedClientEmail = dto.clientEmail.trim().toLowerCase();
     const bodyHtml = `<div>${dto.body.replace(/\n/g, '<br/>')}</div>`;
     const clientName = dto.clientName?.trim() || dto.clientEmail;
     const resend = this.getResendClient();
+    const conversationId = randomUUID();
 
-    const conversation = await this.prisma.conversation.create({
-      data: {
-        id: conversationId,
+    const existingConversation = await this.prisma.conversation.findFirst({
+      where: {
         managerId,
-        clientEmail: dto.clientEmail,
-        clientName,
-        proxyAddress,
-        status: 'active',
+        clientEmail: normalizedClientEmail,
       },
       include: {
         manager: {
@@ -113,13 +109,41 @@ export class MailboxService {
       },
     });
 
+    const conversation =
+      existingConversation ??
+      (await this.prisma.conversation.create({
+        data: {
+          id: conversationId,
+          managerId,
+          clientEmail: normalizedClientEmail,
+          clientName,
+          proxyAddress: this.buildProxyAddress(conversationId),
+          status: 'active',
+        },
+        include: {
+          manager: {
+            select: { id: true, fullName: true, email: true, role: true, avatarUrl: true },
+          },
+        },
+      }));
+
+    if (conversation.status !== 'active' || conversation.clientName !== clientName) {
+      await this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          status: 'active',
+          clientName,
+        },
+      });
+    }
+
     await this.prisma.mailboxMessage.create({
       data: {
         conversationId: conversation.id,
         senderId: managerId,
         direction: 'sent',
         fromEmail: this.fromEmail,
-        toEmail: dto.clientEmail,
+        toEmail: normalizedClientEmail,
         subject: dto.subject,
         bodyText: dto.body,
         bodyHtml,
@@ -130,8 +154,8 @@ export class MailboxService {
 
     const payload = {
       from: this.fromEmail,
-      to: dto.clientEmail,
-      replyTo: proxyAddress,
+      to: normalizedClientEmail,
+      replyTo: conversation.proxyAddress,
       subject: dto.subject,
       html: bodyHtml,
       attachments: this.normalizeAttachments(attachments),
@@ -154,7 +178,7 @@ export class MailboxService {
 
     return {
       conversation,
-      proxyAddress,
+      proxyAddress: conversation.proxyAddress,
       sender: this.formatUser(conversation.manager),
     };
   }

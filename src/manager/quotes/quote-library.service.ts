@@ -296,7 +296,7 @@ export class QuoteLibraryService {
     const search = params?.search?.trim();
     const selectorWhere = this.buildSelectorWhere(params);
 
-    return this.prisma.quoteWorkItem.findMany({
+    const workItems = await this.prisma.quoteWorkItem.findMany({
       where: {
         ...selectorWhere,
         ...(params?.categoryId && { categoryId: params.categoryId }),
@@ -317,6 +317,29 @@ export class QuoteLibraryService {
       },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
+
+    const grouped = Array.from(
+      workItems.reduce((map, item) => {
+        const key = item.category.id;
+        const current = map.get(key);
+
+        if (!current) {
+          map.set(key, {
+            category: item.category,
+            data: [item],
+          });
+          return map;
+        }
+
+        current.data.push(item);
+        return map;
+      }, new Map<string, { category: { id: string; name: string; isActive: boolean; sortOrder: number }; data: typeof workItems }>()),
+    );
+
+    return {
+      total: workItems.length,
+      data: grouped.map((group) => group[1]),
+    };
   }
 
   async getWorkItemById(id: string) {
