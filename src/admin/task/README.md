@@ -48,6 +48,7 @@ This module handles task creation, assignment, task status updates, task reports
 ## API Endpoints
 
 - `GET /admin/tasks`
+- `GET /admin/tasks/:id`
 - `GET /admin/tasks/:id/subtasks`
 - `GET /admin/subtasks`
 - `GET /admin/subtasks/:id`

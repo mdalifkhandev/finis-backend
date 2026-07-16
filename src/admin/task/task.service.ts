@@ -446,6 +446,85 @@ export class TaskService {
     };
   }
 
+  private toTaskReportResponse(report: any) {
+    if (!report) return null;
+
+    return {
+      id: report.id,
+      notes: report.notes ?? null,
+      beforePhotoUrl: report.beforePhotoUrl ?? null,
+      afterPhotoUrl: report.afterPhotoUrl ?? null,
+      receiptUrl: report.receiptUrl ?? null,
+      reviewDecision: report.reviewDecision ?? null,
+      reviewDescription: report.reviewDescription ?? null,
+      reviewAttachmentUrl: report.reviewAttachmentUrl ?? null,
+      reviewedBy: report.reviewedBy ?? null,
+      reviewedAt: report.reviewedAt ?? null,
+      submittedAt: report.submittedAt ?? null,
+      worker: report.worker ?? null,
+      subTask: report.subTask ?? null,
+    };
+  }
+
+  private toTaskDetailResponse(task: any, expenses: any[] = []) {
+    const base = this.toTaskResponse(task);
+    const latestReport = task.reports?.[0] ?? null;
+
+    return {
+      ...base,
+      creator: task.creator ?? null,
+      assignee: task.assignee ?? null,
+      assignees: (task.taskAssignees ?? []).map((assignee: any) => ({
+        id: assignee.id,
+        assignedAt: assignee.assignedAt ?? null,
+        user: assignee.user ?? null,
+        unit: assignee.unit ?? null,
+      })),
+      reports: (task.reports ?? []).map((report: any) => this.toTaskReportResponse(report)),
+      latestReport: this.toTaskReportResponse(latestReport),
+      subTasks: (task.subTasks ?? []).map((subTask: any) => ({
+        id: subTask.id,
+        title: subTask.title,
+        description: subTask.description,
+        priority: subTask.priority,
+        dueDate: subTask.dueDate,
+        estimatedHours: subTask.estimatedHours,
+        status: subTask.status,
+        approvalDecision: subTask.approvalDecision,
+        approvalNotes: subTask.approvalNotes ?? null,
+        startedAt: subTask.startedAt ?? null,
+        submittedAt: subTask.submittedAt ?? null,
+        completedAt: subTask.completedAt ?? null,
+        creator: subTask.creator ?? null,
+        taskAssignee: subTask.taskAssignee ?? null,
+        units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
+        reportSummary: subTask.reports?.[0]?.notes ?? null,
+        latestReport: this.toTaskReportResponse(subTask.reports?.[0] ?? null),
+        workflow: this.buildWorkflowSnapshot(subTask),
+      })),
+      taskInventories: (task.taskInventories ?? []).map((item: any) => ({
+        id: item.id,
+        inventory: item.inventory,
+        quantity: item.quantity ?? null,
+        subTask: item.subTask ?? null,
+      })),
+      expenses: expenses.map((expense) => ({
+        id: expense.id,
+        description: expense.description,
+        category: expense.category,
+        amount: expense.amount,
+        status: expense.status,
+        date: expense.date,
+        receiptUrl: expense.receiptUrl,
+        projectId: expense.projectId,
+        taskId: expense.taskId,
+        reporter: expense.worker,
+      })),
+      reportSummary: latestReport?.notes ?? null,
+      reportCount: (task.reports ?? []).length,
+    };
+  }
+
   private toSimpleSubTaskResponse(subTask: any) {
     if (!subTask) return null;
     const latestReport = subTask.reports?.[0] ?? null;
@@ -836,6 +915,8 @@ export class TaskService {
   }
 
   async getTaskDetails(taskId: string, userId: string, userRole: string) {
+    await this.verifyTaskAccess(taskId, userId, userRole);
+
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
       include: {
@@ -845,6 +926,7 @@ export class TaskService {
         floor: { select: { id: true, name: true, floorNumber: true } },
         unit: { select: { id: true, name: true } },
         creator: { select: { id: true, fullName: true, avatarUrl: true } },
+        assignee: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
         taskAssignees: {
           include: {
             user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
@@ -869,10 +951,16 @@ export class TaskService {
         subTasks: {
           orderBy: { createdAt: 'desc' },
           include: {
+            creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
             unit: { select: { id: true, name: true } },
             taskAssignee: {
               include: {
                 user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+                unit: { select: { id: true, name: true } },
+              },
+            },
+            subTaskUnits: {
+              include: {
                 unit: { select: { id: true, name: true } },
               },
             },
@@ -938,21 +1026,7 @@ export class TaskService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return {
-      ...this.toTaskResponse(task),
-      expenses: expenses.map((expense) => ({
-        id: expense.id,
-        description: expense.description,
-        category: expense.category,
-        amount: expense.amount,
-        status: expense.status,
-        date: expense.date,
-        receiptUrl: expense.receiptUrl,
-        projectId: expense.projectId,
-        taskId: expense.taskId,
-        reporter: expense.worker,
-      })),
-    };
+    return this.toTaskDetailResponse(task, expenses);
   }
 
   async getTaskLocations(taskId: string, userId: string, userRole: string) {
