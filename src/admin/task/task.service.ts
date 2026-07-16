@@ -34,7 +34,7 @@ export class TaskService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
-  ) {}
+  ) { }
 
   private normalizePagination(query: PaginationInput) {
     const page = Math.max(1, Number(query.page ?? 1) || 1);
@@ -377,16 +377,16 @@ export class TaskService {
       steps,
       latestReport: latestReport
         ? {
-            id: latestReport.id ?? null,
-            notes: latestReport.notes ?? null,
-            beforePhotoUrl: latestReport.beforePhotoUrl ?? null,
-            afterPhotoUrl: latestReport.afterPhotoUrl ?? null,
-            receiptUrl: latestReport.receiptUrl ?? null,
-            reviewDecision: latestReport.reviewDecision ?? null,
-            reviewDescription: latestReport.reviewDescription ?? null,
-            reviewAttachmentUrl: latestReport.reviewAttachmentUrl ?? null,
-            submittedAt: latestReport.submittedAt ?? null,
-          }
+          id: latestReport.id ?? null,
+          notes: latestReport.notes ?? null,
+          beforePhotoUrl: latestReport.beforePhotoUrl ?? null,
+          afterPhotoUrl: latestReport.afterPhotoUrl ?? null,
+          receiptUrl: latestReport.receiptUrl ?? null,
+          reviewDecision: latestReport.reviewDecision ?? null,
+          reviewDescription: latestReport.reviewDescription ?? null,
+          reviewAttachmentUrl: latestReport.reviewAttachmentUrl ?? null,
+          submittedAt: latestReport.submittedAt ?? null,
+        }
         : null,
     };
   }
@@ -467,41 +467,56 @@ export class TaskService {
   }
 
   private toTaskDetailResponse(task: any, expenses: any[] = []) {
-    const base = this.toTaskResponse(task);
     const latestReport = task.reports?.[0] ?? null;
 
     return {
-      ...base,
+      // ── Core fields (same structure as subtask) ──
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      priority: task.priority,
+      startDate: task.createdAt ?? null,
+      dueDate: task.dueDate,
+      estimatedHours: task.estimatedHours ?? null,
+      status: task.status,
+      approvalDecision: task.approvalDecision,
+      approvalNotes: task.approvalNotes ?? null,
+      completionDecision: task.completionDecision ?? null,
+      completionNotes: task.completionNotes ?? null,
+      allowSubTaskCreation: task.allowSubTaskCreation ?? false,
+      reportSummary: latestReport?.notes ?? null,
+
+      // ── Location ──
+      project: task.project ? { id: task.project.id, name: task.project.name } : null,
+      floors: this.buildTaskLocations(task),
+      units: (task.taskUnits ?? []).map((item: any) => item.unit),
+
+      // ── People ──
       creator: task.creator ?? null,
-      assignee: task.assignee ?? null,
-      assignees: (task.taskAssignees ?? []).map((assignee: any) => ({
+      taskAssignees: (task.taskAssignees ?? []).map((assignee: any) => ({
         id: assignee.id,
         assignedAt: assignee.assignedAt ?? null,
         user: assignee.user ?? null,
         unit: assignee.unit ?? null,
       })),
+
+      // ── Workflow ──
+      workflow: this.buildWorkflowSnapshot(task),
+
+      // ── Reports ──
       reports: (task.reports ?? []).map((report: any) => this.toTaskReportResponse(report)),
       latestReport: this.toTaskReportResponse(latestReport),
-      subTasks: (task.subTasks ?? []).map((subTask: any) => ({
-        id: subTask.id,
-        title: subTask.title,
-        description: subTask.description,
-        priority: subTask.priority,
-        dueDate: subTask.dueDate,
-        estimatedHours: subTask.estimatedHours,
-        status: subTask.status,
-        approvalDecision: subTask.approvalDecision,
-        approvalNotes: subTask.approvalNotes ?? null,
-        startedAt: subTask.startedAt ?? null,
-        submittedAt: subTask.submittedAt ?? null,
-        completedAt: subTask.completedAt ?? null,
-        creator: subTask.creator ?? null,
-        taskAssignee: subTask.taskAssignee ?? null,
-        units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
-        reportSummary: subTask.reports?.[0]?.notes ?? null,
-        latestReport: this.toTaskReportResponse(subTask.reports?.[0] ?? null),
-        workflow: this.buildWorkflowSnapshot(subTask),
-      })),
+      reportCount: (task.reports ?? []).length,
+
+      // ── Sub-tasks (optional) ──
+      subTaskCount: task.subTasks?.length ?? 0,
+      completedSubTaskCount:
+        (task.subTasks ?? []).filter((s: any) => s.status === 'completed').length,
+      subTasks: (task.subTasks ?? []).map((subTask: any) =>
+        this.toSimpleSubTaskResponse(subTask),
+      ),
+
+      // ── Extras ──
       taskInventories: (task.taskInventories ?? []).map((item: any) => ({
         id: item.id,
         inventory: item.inventory,
@@ -520,8 +535,6 @@ export class TaskService {
         taskId: expense.taskId,
         reporter: expense.worker,
       })),
-      reportSummary: latestReport?.notes ?? null,
-      reportCount: (task.reports ?? []).length,
     };
   }
 
@@ -546,9 +559,9 @@ export class TaskService {
       reportSummary: latestReport?.notes ?? null,
       task: subTask.task
         ? {
-            ...subTask.task,
-            workflow: this.buildWorkflowSnapshot(subTask.task),
-          }
+          ...subTask.task,
+          workflow: this.buildWorkflowSnapshot(subTask.task),
+        }
         : null,
       units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
       creator: subTask.creator ?? null,
@@ -564,11 +577,11 @@ export class TaskService {
     const taskProject = subTask.task?.project ?? null;
     const assignment = subTask.taskAssignee
       ? {
-          id: subTask.taskAssignee.id,
-          worker: subTask.taskAssignee.user ?? null,
-          unit: subTask.taskAssignee.unit ?? null,
-          assignedAt: subTask.taskAssignee.assignedAt ?? null,
-        }
+        id: subTask.taskAssignee.id,
+        worker: subTask.taskAssignee.user ?? null,
+        unit: subTask.taskAssignee.unit ?? null,
+        assignedAt: subTask.taskAssignee.assignedAt ?? null,
+      }
       : null;
 
     return {
@@ -592,9 +605,9 @@ export class TaskService {
       updatedAt: subTask.updatedAt,
       task: subTask.task
         ? {
-            ...subTask.task,
-            workflow: this.buildWorkflowSnapshot(subTask.task),
-          }
+          ...subTask.task,
+          workflow: this.buildWorkflowSnapshot(subTask.task),
+        }
         : null,
       project: taskProject,
       creator: subTask.creator ?? null,
@@ -607,15 +620,15 @@ export class TaskService {
       reportSummary: latestReport?.notes ?? null,
       report: latestReport
         ? {
-            id: latestReport.id,
-            notes: latestReport.notes ?? null,
-            reviewDecision: latestReport.reviewDecision ?? null,
-            reviewDescription: latestReport.reviewDescription ?? null,
-            reviewAttachmentUrl: latestReport.reviewAttachmentUrl ?? null,
-            reviewedBy: latestReport.reviewedBy ?? null,
-            reviewedAt: latestReport.reviewedAt ?? null,
-            submittedAt: latestReport.submittedAt ?? null,
-          }
+          id: latestReport.id,
+          notes: latestReport.notes ?? null,
+          reviewDecision: latestReport.reviewDecision ?? null,
+          reviewDescription: latestReport.reviewDescription ?? null,
+          reviewAttachmentUrl: latestReport.reviewAttachmentUrl ?? null,
+          reviewedBy: latestReport.reviewedBy ?? null,
+          reviewedAt: latestReport.reviewedAt ?? null,
+          submittedAt: latestReport.submittedAt ?? null,
+        }
         : null,
       review: {
         approvalDecision: subTask.approvalDecision,
@@ -641,7 +654,7 @@ export class TaskService {
         receiptUrl: expense.receiptUrl,
         reviewedBy: expense.reviewedBy,
         reviewedAt: expense.reviewedAt,
-          reviewNotes: expense.reviewNotes,
+        reviewNotes: expense.reviewNotes,
       })),
       units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
       taskAssignee: subTask.taskAssignee ?? null,
@@ -951,6 +964,33 @@ export class TaskService {
         subTasks: {
           orderBy: { createdAt: 'desc' },
           include: {
+            task: {
+              select: {
+                id: true,
+                title: true,
+                priority: true,
+                dueDate: true,
+                estimatedHours: true,
+                status: true,
+                approvalDecision: true,
+                reports: {
+                  orderBy: { submittedAt: 'desc' as const },
+                  take: 1,
+                  select: {
+                    id: true,
+                    notes: true,
+                    beforePhotoUrl: true,
+                    afterPhotoUrl: true,
+                    receiptUrl: true,
+                    reviewDecision: true,
+                    reviewDescription: true,
+                    reviewAttachmentUrl: true,
+                    submittedAt: true,
+                  },
+                },
+                project: { select: { id: true, name: true } },
+              },
+            },
             creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
             unit: { select: { id: true, name: true } },
             taskAssignee: {
@@ -965,7 +1005,7 @@ export class TaskService {
               },
             },
             reports: {
-              orderBy: { submittedAt: 'desc' },
+              orderBy: { submittedAt: 'desc' as const },
               include: { worker: { select: { id: true, fullName: true, avatarUrl: true } } },
             },
             inventories: {
@@ -1265,47 +1305,47 @@ export class TaskService {
       this.prisma.subTask.findMany({
         where,
         include: {
-        task: {
-          select: {
-            id: true,
-            title: true,
-            priority: true,
-            dueDate: true,
-            status: true,
-            approvalDecision: true,
-            reports: {
-              orderBy: { submittedAt: 'desc' },
-              take: 1,
-              select: {
-                id: true,
-                notes: true,
-                beforePhotoUrl: true,
-                afterPhotoUrl: true,
-                receiptUrl: true,
-                reviewDecision: true,
-                reviewDescription: true,
-                reviewAttachmentUrl: true,
-                submittedAt: true,
+          task: {
+            select: {
+              id: true,
+              title: true,
+              priority: true,
+              dueDate: true,
+              status: true,
+              approvalDecision: true,
+              reports: {
+                orderBy: { submittedAt: 'desc' },
+                take: 1,
+                select: {
+                  id: true,
+                  notes: true,
+                  beforePhotoUrl: true,
+                  afterPhotoUrl: true,
+                  receiptUrl: true,
+                  reviewDecision: true,
+                  reviewDescription: true,
+                  reviewAttachmentUrl: true,
+                  submittedAt: true,
+                },
               },
+              project: { select: { id: true, name: true } },
             },
-            project: { select: { id: true, name: true } },
           },
-        },
-        reports: {
-          orderBy: { submittedAt: 'desc' },
-          take: 1,
-          select: {
-            id: true,
-            notes: true,
-            beforePhotoUrl: true,
-            afterPhotoUrl: true,
-            receiptUrl: true,
-            reviewDecision: true,
-            reviewDescription: true,
-            reviewAttachmentUrl: true,
-            submittedAt: true,
+          reports: {
+            orderBy: { submittedAt: 'desc' },
+            take: 1,
+            select: {
+              id: true,
+              notes: true,
+              beforePhotoUrl: true,
+              afterPhotoUrl: true,
+              receiptUrl: true,
+              reviewDecision: true,
+              reviewDescription: true,
+              reviewAttachmentUrl: true,
+              submittedAt: true,
+            },
           },
-        },
           unit: { select: { id: true, name: true } },
           subTaskUnits: {
             include: {
@@ -1332,9 +1372,9 @@ export class TaskService {
         approvalDecision: subTask.approvalDecision,
         task: subTask.task
           ? {
-              ...subTask.task,
-              workflow: this.buildWorkflowSnapshot(subTask.task),
-            }
+            ...subTask.task,
+            workflow: this.buildWorkflowSnapshot(subTask.task),
+          }
           : null,
         units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
         workflow: this.buildWorkflowSnapshot(subTask),
