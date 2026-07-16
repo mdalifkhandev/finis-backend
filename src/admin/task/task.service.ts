@@ -200,9 +200,11 @@ export class TaskService {
   }
 
   private async resolveTaskAssignee(taskId: string, unitId: string, userId?: string) {
+    // Worker assignment is task-level now (not per-unit), so unitId is no
+    // longer part of the lookup — it's kept as a param for callers/back-compat.
     if (userId) {
       const assignee = await this.prisma.taskAssignee.findFirst({
-        where: { taskId, unitId: unitId, userId },
+        where: { taskId, userId },
         include: {
           user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
           unit: { select: { id: true, name: true } },
@@ -213,7 +215,7 @@ export class TaskService {
     }
 
     const firstAssignee = await this.prisma.taskAssignee.findFirst({
-      where: { taskId, unitId: unitId },
+      where: { taskId },
       orderBy: { assignedAt: 'asc' },
       include: {
         user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
@@ -222,7 +224,7 @@ export class TaskService {
     });
 
     if (!firstAssignee) {
-      throw new BadRequestException('No worker assigned for this unit');
+      throw new BadRequestException('No worker assigned for this task');
     }
 
     return firstAssignee;
@@ -1804,11 +1806,6 @@ export class TaskService {
       throw new BadRequestException('One or more workers are not members of this project');
     }
 
-    const taskUnits = await this.prisma.taskUnit.findMany({
-      where: { taskId },
-      include: { unit: { select: { id: true, name: true } } },
-    });
-
     await this.prisma.$transaction([
       this.prisma.taskAssignee.deleteMany({ where: { taskId } }),
       this.prisma.task.update({
@@ -1817,56 +1814,32 @@ export class TaskService {
       }),
     ]);
 
-    if (taskUnits.length > 0) {
-      const assigneeRows = workerIds.flatMap((workerId) =>
-        taskUnits.map((item) => ({
-          taskId,
-          userId: workerId,
-          unitId: item.unitId,
-        })),
-      );
-
-      await this.prisma.taskAssignee.createMany({
-        data: assigneeRows,
-        skipDuplicates: true,
-      });
-    } else {
-      await this.prisma.taskAssignee.createMany({
-        data: workerIds.map((workerId) => ({
-          taskId,
-          userId: workerId,
-          unitId: null,
-        })),
-        skipDuplicates: true,
-      });
-    }
+    // Task-level assignment only — one TaskAssignee row per worker.
+    // Floors/units are covered together under a single task; workers are
+    // NOT assigned separately per unit anymore.
+    await this.prisma.taskAssignee.createMany({
+      data: workerIds.map((workerId) => ({
+        taskId,
+        userId: workerId,
+        unitId: null,
+      })),
+      skipDuplicates: true,
+    });
 
     const taskAssignees = await this.prisma.taskAssignee.findMany({
       where: { taskId },
       orderBy: { assignedAt: 'asc' },
-      select: { id: true, unitId: true },
+      select: { id: true },
     });
 
-    const assigneeByUnitId = new Map(
-      taskAssignees
-        .filter((entry) => entry.unitId)
-        .map((entry) => [entry.unitId as string, entry.id]),
-    );
+    // Subtasks are unit-scoped and unaffected by this change; keep their
+    // taskAssigneeId pointing at the (single) task-level assignee.
+    const taskLevelAssigneeId = taskAssignees[0]?.id ?? null;
 
-    const existingSubTasks = await this.prisma.subTask.findMany({
+    await this.prisma.subTask.updateMany({
       where: { taskId },
-      select: { id: true, unitId: true },
+      data: { taskAssigneeId: taskLevelAssigneeId },
     });
-
-    await Promise.all(
-      existingSubTasks.map((subTask) => {
-        const taskAssigneeId = assigneeByUnitId.get(subTask.unitId) ?? null;
-        return this.prisma.subTask.update({
-          where: { id: subTask.id },
-          data: { taskAssigneeId },
-        });
-      }),
-    );
 
     const updated = await this.prisma.task.findUnique({
       where: { id: taskId },
@@ -1969,60 +1942,58 @@ export class TaskService {
     }
 
     const createdSubTasks: any[] = [];
+    const primaryUnitId = unitIds[0];
+    let taskAssignee: any = null;
 
-    for (const unitId of unitIds) {
-      let taskAssignee: any = null;
+    if (userRole === UserRole.worker) {
+      taskAssignee = await this.resolveTaskAssignee(taskId, primaryUnitId, userId);
+    } else {
+      taskAssignee = await this.prisma.taskAssignee.findFirst({
+        where: { taskId },
+        include: {
+          user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          unit: { select: { id: true, name: true } },
+        },
+        orderBy: { assignedAt: 'asc' },
+      });
+    }
 
-      if (userRole === UserRole.worker) {
-        taskAssignee = await this.resolveTaskAssignee(taskId, unitId, userId);
-      } else {
-        taskAssignee = await this.prisma.taskAssignee.findFirst({
-          where: { taskId, unitId },
+    const subTask = await this.prisma.subTask.create({
+      data: {
+        taskId,
+        unitId: primaryUnitId,
+        taskAssigneeId: taskAssignee?.id ?? null,
+        createdBy: userId,
+        title: dto.title,
+        description: dto.description ?? null,
+        priority: dto.priority ?? 'medium',
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        estimatedHours: dto.estimatedHours ?? null,
+        status: 'pending',
+        approvalDecision,
+        approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
+        approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
+      },
+      include: {
+        unit: { select: { id: true, name: true } },
+        task: { select: { id: true, title: true, priority: true, dueDate: true } },
+        taskAssignee: {
           include: {
             user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
             unit: { select: { id: true, name: true } },
           },
-          orderBy: { assignedAt: 'asc' },
-        });
-      }
-
-      const subTask = await this.prisma.subTask.create({
-        data: {
-          taskId,
-          unitId,
-          taskAssigneeId: taskAssignee?.id ?? null,
-          createdBy: userId,
-          title: dto.title,
-          description: dto.description ?? null,
-          priority: dto.priority ?? 'medium',
-          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
-          estimatedHours: dto.estimatedHours ?? null,
-          status: 'pending',
-          approvalDecision,
-          approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
-          approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
         },
-        include: {
-          unit: { select: { id: true, name: true } },
-          task: { select: { id: true, title: true, priority: true, dueDate: true } },
-          taskAssignee: {
-            include: {
-              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-              unit: { select: { id: true, name: true } },
-            },
-          },
-          reports: true,
-          inventories: true,
-        },
-      });
+        reports: true,
+        inventories: true,
+      },
+    });
 
-      await this.prisma.subTaskUnit.createMany({
-        data: [{ subTaskId: subTask.id, unitId }],
-        skipDuplicates: true,
-      });
+    await this.prisma.subTaskUnit.createMany({
+      data: unitIds.map((unitId) => ({ subTaskId: subTask.id, unitId })),
+      skipDuplicates: true,
+    });
 
-      createdSubTasks.push(subTask);
-    }
+    createdSubTasks.push(subTask);
 
     const updatedTask = await this.prisma.task.findUnique({
       where: { id: taskId },

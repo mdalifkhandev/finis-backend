@@ -530,27 +530,37 @@ export class WorkerService {
     limit = 10,
   ) {
     const skip = (page - 1) * limit;
-    const assignedTaskWhere: any = {
-      OR: [
-        { createdBy: workerId },
-        { assignedTo: workerId },
-        { taskAssignees: { some: { userId: workerId } } },
-      ],
-      ...(status && {
+    const andConditions: any[] = [
+      {
+        OR: [
+          { createdBy: workerId },
+          { assignedTo: workerId },
+          { taskAssignees: { some: { userId: workerId } } },
+        ],
+      },
+    ];
+
+    if (status) {
+      andConditions.push({
         OR: [
           { status: status as any },
           { status: 'review' },
           { status: 'in_progress' },
           { status: 'pending' },
         ],
-      }),
-      ...(search && {
+      });
+    }
+
+    if (search) {
+      andConditions.push({
         OR: [
           { title: { contains: search, mode: 'insensitive' } },
           { description: { contains: search, mode: 'insensitive' } },
         ],
-      }),
-    };
+      });
+    }
+
+    const assignedTaskWhere: any = { AND: andConditions };
 
     const [data, total] = await Promise.all([
       this.prisma.task.findMany({
@@ -582,6 +592,8 @@ export class WorkerService {
             orderBy: { createdAt: 'desc' },
             include: {
               unit: { select: { id: true, name: true } },
+              // grouped subtask — all units linked via SubTaskUnit junction table
+              subTaskUnits: { select: { unitId: true } },
               taskAssignee: {
                 include: {
                   user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
@@ -631,6 +643,76 @@ export class WorkerService {
 
     return {
       data: data.map((task: any) => {
+        const hasSubTasks = (task.subTasks ?? []).length > 0;
+        const allowSubTaskCreation = (task as any).allowSubTaskCreation ?? false;
+
+        // If this is a direct main-task (no subtasks), collapse all floors/units
+        // into a single task-level view so the worker only sees ONE report action.
+        if (!hasSubTasks) {
+          const allUnits: Array<{ id: string; name: string }> = [];
+          const floors: Array<{ id: string; name: string; floorNumber: number | null; units: typeof allUnits }> = [];
+
+          const floorMap = new Map<string, (typeof floors)[0]>();
+
+          for (const entry of task.taskFloors ?? []) {
+            if (!entry.floor) continue;
+            if (!floorMap.has(entry.floor.id)) {
+              const floorEntry = {
+                id: entry.floor.id,
+                name: entry.floor.name,
+                floorNumber: entry.floor.floorNumber ?? null,
+                units: [] as typeof allUnits,
+              };
+              floorMap.set(entry.floor.id, floorEntry);
+              floors.push(floorEntry);
+            }
+          }
+
+          for (const entry of task.taskUnits ?? []) {
+            const floor = entry.unit?.floor ?? null;
+            if (!floor?.id) continue;
+            if (!floorMap.has(floor.id)) {
+              const floorEntry = {
+                id: floor.id,
+                name: floor.name ?? 'No Floor',
+                floorNumber: floor.floorNumber ?? null,
+                units: [] as typeof allUnits,
+              };
+              floorMap.set(floor.id, floorEntry);
+              floors.push(floorEntry);
+            }
+            const fl = floorMap.get(floor.id)!;
+            if (!fl.units.some((u) => u.id === entry.unit.id)) {
+              fl.units.push({ id: entry.unit.id, name: entry.unit.name });
+            }
+          }
+
+          return {
+            id: task.id,
+            title: task.title,
+            priority: task.priority,
+            dueDate: task.dueDate,
+            status: task.status,
+            project: task.project,
+            scheduledLabel: null,
+            floors: Array.from(floorMap.values()),
+            workflow: this.buildWorkflowSnapshot(task),
+            allowSubTaskCreation,
+            subTaskCount: 0,
+            completedSubTaskCount: 0,
+            assignedWorkerCount: this.countAssignedWorkers(task),
+            latestReport: task.reports?.[0] ?? null,
+            // Single action for the whole task
+            action:
+              task.status === 'pending' || task.status === 'in_active'
+                ? 'start'
+                : task.status === 'in_progress'
+                  ? 'submit_report'
+                  : 'view',
+          };
+        }
+
+        // Has subtasks — keep the existing per-unit / per-subtask grouping
         const floorMap = new Map<
           string,
           { id: string; name: string; floorNumber: number | null; units: Array<{ id: string; name: string; status: string; approvalDecision: string; canCreateSubTask: boolean; subTasks: any[] }> }
@@ -666,9 +748,15 @@ export class WorkerService {
               name: entry.unit.name,
               status: task.status,
               approvalDecision: task.approvalDecision,
-              canCreateSubTask: (task as any).allowSubTaskCreation ?? false,
+              canCreateSubTask: allowSubTaskCreation,
               subTasks: (task.subTasks ?? [])
-                .filter((subTask: any) => subTask.unitId === entry.unit.id)
+                .filter((subTask: any) => {
+                  // Match primary unit OR any grouped unit via SubTaskUnit
+                  if (subTask.unitId === entry.unit.id) return true;
+                  return (subTask.subTaskUnits ?? []).some(
+                    (stu: any) => stu.unitId === entry.unit.id,
+                  );
+                })
                 .map((subTask: any) => ({
                   id: subTask.id,
                   title: subTask.title,
@@ -697,7 +785,7 @@ export class WorkerService {
           scheduledLabel: null,
           floors: Array.from(floorMap.values()),
           workflow: this.buildWorkflowSnapshot(task),
-          allowSubTaskCreation: (task as any).allowSubTaskCreation ?? false,
+          allowSubTaskCreation,
           subTaskCount: task._count?.subTasks ?? 0,
           completedSubTaskCount:
             (task.subTasks ?? []).filter((subTask: any) => subTask.status === 'completed').length ?? 0,
