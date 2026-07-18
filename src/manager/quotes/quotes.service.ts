@@ -57,7 +57,7 @@ export class QuotesService {
     if (dto.workItemId) {
       return this.quoteLibraryService.createQuoteFromWorkItem(dto.workItemId, userId, {
         quantity: dto.quantity,
-        unitPrice: dto.unitPrice,
+        unitCost: dto.unitPrice,
         notes: dto.notes,
         isCustom: dto.isCustom,
       });

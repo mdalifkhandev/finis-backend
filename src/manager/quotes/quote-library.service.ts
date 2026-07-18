@@ -474,10 +474,10 @@ export class QuoteLibraryService {
       'id' | 'categoryId' | 'projectType' | 'propertyType' | 'unitType' | 'name' | 'measurementType' | 'unitCost'
     >,
     userId: string,
-    dto: { quantity?: number; unitPrice?: number; notes?: string; isCustom?: boolean },
+    dto: { quantity?: number; unitCost?: number; notes?: string; isCustom?: boolean },
   ) {
     const quantity = dto.quantity ?? 1;
-    const unitPrice = dto.unitPrice ?? workItem.unitCost ?? 0;
+    const unitPrice = dto.unitCost ?? workItem.unitCost ?? 0;
     const subtotal = Math.round(quantity * unitPrice * 100) / 100;
 
     return {
@@ -564,7 +564,7 @@ export class QuoteLibraryService {
           unitType,
           name,
           measurementType: measurementType.value,
-          unitCost: dto.unitCost ?? dto.unitPrice ?? null,
+          unitCost: dto.unitCost ?? null,
           sortOrder: dto.sortOrder ?? 0,
           isActive: dto.isActive ?? true,
         },
@@ -584,7 +584,7 @@ export class QuoteLibraryService {
     return result;
   }
 
-  async createQuoteFromWorkItem(workItemId: string, userId: string, dto: { quantity?: number; unitPrice?: number; notes?: string; isCustom?: boolean }) {
+  async createQuoteFromWorkItem(workItemId: string, userId: string, dto: { quantity?: number; unitCost?: number; notes?: string; isCustom?: boolean }) {
     const workItem = await this.resolveWorkItemById(workItemId);
     return this.prisma.quote.create(this.mapWorkItemToQuoteInput(workItem, userId, dto));
   }

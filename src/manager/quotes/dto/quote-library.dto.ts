@@ -114,11 +114,6 @@ export class QuickAddQuoteWorkItemDto extends CreateQuoteWorkItemDto {
   quantity?: number;
 
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  unitPrice?: number;
-
-  @IsOptional()
   @IsString()
   notes?: string;
 }
