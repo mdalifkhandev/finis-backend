@@ -376,6 +376,8 @@ export class MailboxService {
     }
 
     const data = event?.data ?? event;
+    console.log('Webhook Event Received:', JSON.stringify(event, null, 2));
+
     const to = Array.isArray(data?.to) ? data.to[0] : data?.to;
     const from = Array.isArray(data?.from) ? data.from[0] : data?.from;
     const subject = data?.subject ?? '';
