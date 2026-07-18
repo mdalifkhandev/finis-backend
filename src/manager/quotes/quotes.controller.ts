@@ -134,7 +134,7 @@ export class QuotesController {
   }
 
   @Post('work-items')
-  @Roles(UserRole.admin, UserRole.super_admin)
+  @Roles(UserRole.admin, UserRole.super_admin )
   createWorkItem(@Body() dto: CreateQuoteWorkItemDto) {
     return this.quoteLibraryService.createWorkItem(dto);
   }
@@ -146,13 +146,13 @@ export class QuotesController {
   }
 
   @Put('work-items/:id')
-  @Roles(UserRole.admin, UserRole.super_admin)
+  @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
   updateWorkItem(@Param('id') id: string, @Body() dto: UpdateQuoteWorkItemDto) {
     return this.quoteLibraryService.updateWorkItem(id, dto);
   }
 
   @Delete('work-items/:id')
-  @Roles(UserRole.admin, UserRole.super_admin)
+  @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
   disableWorkItem(@Param('id') id: string) {
     return this.quoteLibraryService.disableWorkItem(id);
   }
