@@ -567,11 +567,14 @@ model TaskFloor {
 }
 
 model TaskUnit {
-  id      String @id @default(uuid()) @db.Uuid
-  taskId  String @map("task_id") @db.Uuid
-  unitId  String @map("unit_id") @db.Uuid
-  task    Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  unit    Unit   @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  id          String    @id @default(uuid()) @db.Uuid
+  taskId      String    @map("task_id") @db.Uuid
+  unitId      String    @map("unit_id") @db.Uuid
+  isCompleted Boolean   @default(false) @map("is_completed")
+  completedAt DateTime? @map("completed_at")
+  completedBy String?   @map("completed_by") @db.Uuid
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  unit        Unit      @relation(fields: [unitId], references: [id], onDelete: Cascade)
 
   @@unique([taskId, unitId])
   @@map("task_units")
@@ -1253,3 +1256,4 @@ enum ShiftDay {
   sat
   sun
 }
+

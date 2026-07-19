@@ -1,0 +1,4 @@
+ALTER TABLE "task_units"
+  ADD COLUMN IF NOT EXISTS "is_completed" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS "completed_at" TIMESTAMP(3),
+  ADD COLUMN IF NOT EXISTS "completed_by" UUID;

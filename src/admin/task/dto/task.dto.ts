@@ -193,3 +193,10 @@ export class ReviewTaskDto {
   @IsString()
   reviewAttachmentUrl?: string;
 }
+
+export class ToggleTaskUnitCompletionDto {
+  @IsOptional()
+  @IsBoolean()
+  completed?: boolean;
+}
+
