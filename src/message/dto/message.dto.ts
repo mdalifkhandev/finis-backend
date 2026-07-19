@@ -17,6 +17,7 @@ export enum MediaType {
   VIDEO = 'video',
   DOCUMENT = 'document',
   AUDIO = 'audio',
+  LOCATION = 'location',
 }
 
 // ─────────────────────────────────────────────
