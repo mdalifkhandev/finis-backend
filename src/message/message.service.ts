@@ -851,7 +851,7 @@ export class MessageService {
 
     const sender = await this.prisma.user.findUnique({
       where: { id: senderId },
-      select: { role: true },
+      select: { role: true, fullName: true },
     });
 
     let thread = await this.prisma.messageThread.findUnique({
@@ -915,7 +915,7 @@ export class MessageService {
         senderId,
         content: content ?? null,
         mediaUrl: finalMediaUrl,
-        mediaType: mediaType ?? null,
+        mediaType: mediaType === 'location' ? null : mediaType ?? null,
         isRead: false,
       },
 
@@ -929,7 +929,7 @@ export class MessageService {
     await this.notifyUnreadThreadParticipants(
       effectiveThread.id,
       senderId,
-      message.sender?.fullName ?? 'New message',
+      sender?.fullName ?? 'New message',
       message.content ?? (locationUrl ? 'Shared a location' : ''),
       effectiveThread.participants.map((participant) => participant.userId),
     );
@@ -986,7 +986,7 @@ export class MessageService {
         senderId: adminId,
         content: content ?? null,
         mediaUrl: finalMediaUrl,
-        mediaType: mediaType ?? null,
+        mediaType: mediaType === 'location' ? null : mediaType ?? null,
         isRead: false,
       },
       include: {
@@ -999,7 +999,7 @@ export class MessageService {
     await this.notifyUnreadThreadParticipants(
       thread.id,
       adminId,
-      message.sender?.fullName ?? 'New message',
+      'New message',
       message.content ?? (locationUrl ? 'Shared a location' : ''),
       thread!.participants.map((participant) => participant.userId),
     );
