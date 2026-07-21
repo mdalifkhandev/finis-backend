@@ -823,7 +823,7 @@ export class ReportsService {
                 },
               },
               {
-                worker: {
+                createdBy: {
                   companyMembers: {
                     some: {
                       companyId: { in: companyIds },
@@ -834,21 +834,21 @@ export class ReportsService {
               ...(userRole === UserRole.admin
                 ? [
                     {
-                      workerId: userId,
+                      createdById: userId,
                     },
                   ]
                 : []),
             ],
           };
 
-    const expenses = await this.prisma.expense.findMany({
+    const expenses = await this.prisma.reimbursementExpense.findMany({
       where: {
         ...(dto.projectId && { projectId: dto.projectId }),
         ...expenseAccessFilter,
-        date: { gte: start, lte: end },
+        expenseDate: { gte: start, lte: end },
       },
       include: {
-        worker: {
+        createdBy: {
           select: {
             id: true,
             fullName: true,
@@ -860,25 +860,25 @@ export class ReportsService {
           select: { id: true, name: true },
         },
       },
-      orderBy: { date: 'desc' },
+      orderBy: { expenseDate: 'desc' },
     });
 
-    const totalAmount    = expenses.reduce((s, e) => s + e.amount, 0);
+    const totalAmount    = expenses.reduce((s, e) => s + Number(e.amount), 0);
     const approvedAmount = expenses
-      .filter((e) => e.status === 'approved')
-      .reduce((s, e) => s + e.amount, 0);
+      .filter((e) => e.status === 'APPROVED' || e.status === 'PAID')
+      .reduce((s, e) => s + Number(e.amount), 0);
     const pendingAmount  = expenses
-      .filter((e) => e.status === 'pending')
-      .reduce((s, e) => s + e.amount, 0);
+      .filter((e) => e.status === 'DRAFT' || e.status === 'SUBMITTED')
+      .reduce((s, e) => s + Number(e.amount), 0);
     const rejectedAmount = expenses
-      .filter((e) => e.status === 'rejected')
-      .reduce((s, e) => s + e.amount, 0);
+      .filter((e) => e.status === 'REJECTED')
+      .reduce((s, e) => s + Number(e.amount), 0);
 
     // Category breakdown
     const categoryMap = new Map<string, number>();
     for (const e of expenses) {
       const cat = e.category as string;
-      categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + e.amount);
+      categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + Number(e.amount));
     }
 
     const byCategory = Object.fromEntries(
@@ -903,12 +903,12 @@ export class ReportsService {
       },
       expenses: expenses.map((e) => ({
         id:          e.id,
-        worker:      e.worker,
-        description: e.description,
+        worker:      e.createdBy,
+        description: e.title,
         category:    e.category,
-        amount:      e.amount,
+        amount:      Number(e.amount),
         project:     e.project,
-        date:        e.date,
+        date:        e.expenseDate,
         status:      e.status,
         receiptUrl:  e.receiptUrl,
       })),
