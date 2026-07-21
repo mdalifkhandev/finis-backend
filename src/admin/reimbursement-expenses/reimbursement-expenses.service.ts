@@ -7,8 +7,35 @@ import { CreateReimbursementExpenseDto, ReimbursementExpenseFilterDto, RejectRei
 export class ReimbursementExpensesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private assertAdmin(role: string) {
-    if (role !== UserRole.admin && role !== UserRole.super_admin) throw new ForbiddenException('Admin access required');
+  private isAdminReviewer(role: string) {
+    return role === UserRole.admin || role === UserRole.super_admin;
+  }
+
+  private isManager(role: string) {
+    return role === UserRole.manager;
+  }
+
+  private assertExpenseAccess(role: string) {
+    if (!this.isAdminReviewer(role) && !this.isManager(role) && role !== UserRole.worker) throw new ForbiddenException('Expense access required');
+  }
+
+  private assertCreateAccess(role: string) {
+    if (!this.isAdminReviewer(role) && role !== UserRole.worker) throw new ForbiddenException('Only workers or admins can create expenses');
+  }
+
+  private assertAdminReviewer(role: string) {
+    if (!this.isAdminReviewer(role)) throw new ForbiddenException('Admin access required');
+  }
+
+  private async getManagedWorkerIds(managerId: string) {
+    const rows = await this.prisma.workerManagerMap.findMany({ where: { managerId }, select: { workerId: true } });
+    return rows.map((row) => row.workerId);
+  }
+
+  private async buildScopedWhere(userId: string, role: string): Promise<Prisma.ReimbursementExpenseWhereInput> {
+    if (this.isAdminReviewer(role)) return {};
+    if (this.isManager(role)) return { createdById: { in: await this.getManagedWorkerIds(userId) } };
+    return { createdById: userId };
   }
 
   private async assertProject(projectId?: string) {
@@ -40,21 +67,29 @@ export class ReimbursementExpensesService {
     return [...map.values()];
   }
 
-  private async getExpenseOrThrow(id: string, role: string) {
-    this.assertAdmin(role);
+  private async getExpenseOrThrow(id: string, userId: string, role: string) {
+    this.assertExpenseAccess(role);
     const expense = await this.prisma.reimbursementExpense.findUnique({
       where: { id },
       include: { project: { select: { id: true, name: true } }, createdBy: { select: { id: true, fullName: true, email: true } } },
     });
     if (!expense) throw new NotFoundException('Expense not found');
+    if (this.isAdminReviewer(role)) return expense;
+    if (this.isManager(role)) {
+      const map = await this.prisma.workerManagerMap.findFirst({ where: { managerId: userId, workerId: expense.createdById }, select: { id: true } });
+      if (!map) throw new ForbiddenException('You can only access expenses from your assigned workers');
+      return expense;
+    }
+    if (expense.createdById !== userId) throw new ForbiddenException('You can only access your own expenses');
     return expense;
   }
 
   async findAll(adminId: string, role: string, query: ReimbursementExpenseFilterDto) {
-    this.assertAdmin(role);
+    this.assertExpenseAccess(role);
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 20, 100);
     const where: Prisma.ReimbursementExpenseWhereInput = {
+      ...(await this.buildScopedWhere(adminId, role)),
       ...(query.status ? { status: query.status as ReimbursementExpenseStatus } : {}),
       ...(query.category ? { category: query.category } : {}),
       ...(query.currency ? { currency: query.currency } : {}),
@@ -70,7 +105,7 @@ export class ReimbursementExpensesService {
   }
 
   async getOptions(adminId: string, role: string) {
-    this.assertAdmin(role);
+    this.assertExpenseAccess(role);
     const [currencies, categories, paymentMethods] = await Promise.all([
       this.prisma.reimbursementExpense.findMany({ distinct: ['currency'], select: { currency: true }, orderBy: { currency: 'asc' } }),
       this.prisma.reimbursementExpense.findMany({ distinct: ['category'], select: { category: true }, orderBy: { category: 'asc' } }),
@@ -85,46 +120,48 @@ export class ReimbursementExpensesService {
   }
 
   async getSummary(adminId: string, role: string) {
-    this.assertAdmin(role);
+    this.assertExpenseAccess(role);
+    const scopeWhere = await this.buildScopedWhere(adminId, role);
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     const [totalExpenses, draft, submitted, approved, rejected, paid, monthly] = await Promise.all([
-      this.prisma.reimbursementExpense.count(),
-      this.prisma.reimbursementExpense.count({ where: { status: 'DRAFT' } }),
-      this.prisma.reimbursementExpense.count({ where: { status: 'SUBMITTED' } }),
-      this.prisma.reimbursementExpense.count({ where: { status: 'APPROVED' } }),
-      this.prisma.reimbursementExpense.count({ where: { status: 'REJECTED' } }),
-      this.prisma.reimbursementExpense.count({ where: { status: 'PAID' } }),
-      this.prisma.reimbursementExpense.aggregate({ where: { expenseDate: { gte: start, lte: end } }, _sum: { amount: true } }),
+      this.prisma.reimbursementExpense.count({ where: scopeWhere }),
+      this.prisma.reimbursementExpense.count({ where: { ...scopeWhere, status: 'DRAFT' } }),
+      this.prisma.reimbursementExpense.count({ where: { ...scopeWhere, status: 'SUBMITTED' } }),
+      this.prisma.reimbursementExpense.count({ where: { ...scopeWhere, status: 'APPROVED' } }),
+      this.prisma.reimbursementExpense.count({ where: { ...scopeWhere, status: 'REJECTED' } }),
+      this.prisma.reimbursementExpense.count({ where: { ...scopeWhere, status: 'PAID' } }),
+      this.prisma.reimbursementExpense.aggregate({ where: { ...scopeWhere, expenseDate: { gte: start, lte: end } }, _sum: { amount: true } }),
     ]);
     return { summary: { totalExpenses, draft, submitted, approved, rejected, paid, totalAmountThisMonth: Number(monthly._sum.amount ?? 0) } };
   }
 
-  async findOne(id: string, adminId: string, role: string) { return this.serialize(await this.getExpenseOrThrow(id, role)); }
+  async findOne(id: string, adminId: string, role: string) { return this.serialize(await this.getExpenseOrThrow(id, adminId, role)); }
 
   async create(dto: CreateReimbursementExpenseDto, adminId: string, role: string) {
-    this.assertAdmin(role); await this.assertProject(dto.projectId); this.assertNotFuture(dto.expenseDate);
+    this.assertCreateAccess(role); await this.assertProject(dto.projectId); this.assertNotFuture(dto.expenseDate);
     const status = dto.action === 'SUBMITTED' ? 'SUBMITTED' : 'DRAFT';
     const expense = await this.prisma.reimbursementExpense.create({ data: { title: dto.title, expenseDate: new Date(dto.expenseDate), amount: this.toMoney(dto.amount), currency: this.normalizeOption(dto.currency) || 'BDT', category: this.normalizeOption(dto.category), vendor: dto.vendor || null, paymentMethod: this.normalizeOption(dto.paymentMethod) || null, projectId: dto.projectId || null, notes: dto.notes || null, receiptUrl: dto.receiptUrl || null, createdById: adminId, status, submittedAt: status === 'SUBMITTED' ? new Date() : null }, include: { project: { select: { id: true, name: true } } } });
     return { message: status === 'SUBMITTED' ? 'Expense submitted successfully' : 'Expense draft saved successfully', ...this.serialize(expense) };
   }
 
   async update(id: string, dto: UpdateReimbursementExpenseDto, adminId: string, role: string) {
-    const existing = await this.getExpenseOrThrow(id, role); if (existing.status !== 'DRAFT') throw new BadRequestException('Only draft expenses can be updated');
+    if (this.isManager(role)) throw new ForbiddenException('Managers cannot edit expenses');
+    const existing = await this.getExpenseOrThrow(id, adminId, role); if (existing.status !== 'DRAFT') throw new BadRequestException('Only draft expenses can be updated');
     await this.assertProject(dto.projectId); if (dto.expenseDate) this.assertNotFuture(dto.expenseDate);
     const expense = await this.prisma.reimbursementExpense.update({ where: { id }, data: { ...(dto.title !== undefined ? { title: dto.title } : {}), ...(dto.expenseDate ? { expenseDate: new Date(dto.expenseDate) } : {}), ...(dto.amount !== undefined ? { amount: this.toMoney(dto.amount) } : {}), ...(dto.currency ? { currency: this.normalizeOption(dto.currency) } : {}), ...(dto.category ? { category: this.normalizeOption(dto.category) } : {}), ...(dto.vendor !== undefined ? { vendor: dto.vendor || null } : {}), ...(dto.paymentMethod !== undefined ? { paymentMethod: this.normalizeOption(dto.paymentMethod) || null } : {}), ...(dto.projectId !== undefined ? { projectId: dto.projectId || null } : {}), ...(dto.notes !== undefined ? { notes: dto.notes || null } : {}), ...(dto.receiptUrl !== undefined ? { receiptUrl: dto.receiptUrl || null } : {}) }, include: { project: { select: { id: true, name: true } } } });
     return { message: 'Expense updated successfully', ...this.serialize(expense) };
   }
 
-  async remove(id: string, adminId: string, role: string) { const existing = await this.getExpenseOrThrow(id, role); if (existing.status !== 'DRAFT') throw new BadRequestException('Only draft expenses can be deleted'); await this.prisma.reimbursementExpense.delete({ where: { id } }); return { message: 'Expense deleted successfully', id }; }
-  async submit(id: string, adminId: string, role: string) { return this.transition(id, role, 'DRAFT', { status: 'SUBMITTED', submittedAt: new Date() }, 'Expense submitted successfully'); }
-  async approve(id: string, adminId: string, role: string) { return this.transition(id, role, 'SUBMITTED', { status: 'APPROVED', approvedAt: new Date() }, 'Expense approved successfully'); }
-  async reject(id: string, dto: RejectReimbursementExpenseDto, adminId: string, role: string) { return this.transition(id, role, 'SUBMITTED', { status: 'REJECTED', rejectedAt: new Date(), rejectionNote: dto.comment || null }, 'Expense rejected successfully'); }
-  async markPaid(id: string, adminId: string, role: string) { return this.transition(id, role, 'APPROVED', { status: 'PAID', paidAt: new Date() }, 'Expense marked as paid successfully'); }
+  async remove(id: string, adminId: string, role: string) { if (this.isManager(role)) throw new ForbiddenException('Managers cannot delete expenses'); const existing = await this.getExpenseOrThrow(id, adminId, role); if (existing.status !== 'DRAFT') throw new BadRequestException('Only draft expenses can be deleted'); await this.prisma.reimbursementExpense.delete({ where: { id } }); return { message: 'Expense deleted successfully', id }; }
+  async submit(id: string, adminId: string, role: string) { if (this.isManager(role)) throw new ForbiddenException('Managers cannot submit expenses'); return this.transition(id, adminId, role, 'DRAFT', { status: 'SUBMITTED', submittedAt: new Date() }, 'Expense submitted successfully'); }
+  async approve(id: string, adminId: string, role: string) { this.assertExpenseAccess(role); if (role === UserRole.worker) throw new ForbiddenException('Workers cannot approve expenses'); return this.transition(id, adminId, role, 'SUBMITTED', { status: 'APPROVED', approvedAt: new Date() }, 'Expense approved successfully'); }
+  async reject(id: string, dto: RejectReimbursementExpenseDto, adminId: string, role: string) { this.assertExpenseAccess(role); if (role === UserRole.worker) throw new ForbiddenException('Workers cannot reject expenses'); return this.transition(id, adminId, role, 'SUBMITTED', { status: 'REJECTED', rejectedAt: new Date(), rejectionNote: dto.comment || null }, 'Expense rejected successfully'); }
+  async markPaid(id: string, adminId: string, role: string) { this.assertAdminReviewer(role); return this.transition(id, adminId, role, 'APPROVED', { status: 'PAID', paidAt: new Date() }, 'Expense marked as paid successfully'); }
 
-  private async transition(id: string, role: string, from: ReimbursementExpenseStatus, data: Prisma.ReimbursementExpenseUpdateInput, message: string) {
-    const existing = await this.getExpenseOrThrow(id, role); if (existing.status !== from) throw new BadRequestException(`Only ${from} expenses can use this action`);
+  private async transition(id: string, userId: string, role: string, from: ReimbursementExpenseStatus, data: Prisma.ReimbursementExpenseUpdateInput, message: string) {
+    const existing = await this.getExpenseOrThrow(id, userId, role); if (existing.status !== from) throw new BadRequestException(`Only ${from} expenses can use this action`);
     const expense = await this.prisma.reimbursementExpense.update({ where: { id }, data, include: { project: { select: { id: true, name: true } }, createdBy: { select: { id: true, fullName: true, email: true } } } });
     return { message, ...this.serialize(expense) };
   }

@@ -15,7 +15,7 @@ const allowedReceiptTypes = ['image/jpeg', 'image/jpg', 'image/png', 'applicatio
 
 @Controller('admin/reimbursement-expenses')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.admin, UserRole.super_admin)
+@Roles(UserRole.admin, UserRole.super_admin, UserRole.manager, UserRole.worker)
 export class ReimbursementExpensesController {
   constructor(private readonly service: ReimbursementExpensesService, private readonly s3: S3Service) {}
 
