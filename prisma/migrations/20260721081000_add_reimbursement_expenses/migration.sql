@@ -1,4 +1,5 @@
 -- Add admin reimbursement expense storage without changing existing task expenses.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 DO $$ BEGIN
   CREATE TYPE "ReimbursementExpenseStatus" AS ENUM ('DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'PAID');
 EXCEPTION
@@ -6,7 +7,7 @@ EXCEPTION
 END $$;
 
 CREATE TABLE IF NOT EXISTS "reimbursement_expenses" (
-  "id" UUID NOT NULL DEFAULT uuid(),
+  "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "title" TEXT NOT NULL,
   "expense_date" DATE NOT NULL,
   "amount" DECIMAL(12,2) NOT NULL,
