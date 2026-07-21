@@ -28,6 +28,8 @@ import { InventoryService } from './inventory/inventory.service';
 import { PayrollController } from './payroll/payroll.controller';
 import { PayrollService } from './payroll/payroll.service';
 import { AdminReportsController } from './reports/reports.controller';
+import { ReimbursementExpensesController } from './reimbursement-expenses/reimbursement-expenses.controller';
+import { ReimbursementExpensesService } from './reimbursement-expenses/reimbursement-expenses.service';
 import { ReportsService } from '../super-admin/reports/reports.service';
 
 @Module({
@@ -43,6 +45,7 @@ import { ReportsService } from '../super-admin/reports/reports.service';
     InventoryController,
     PayrollController,
     AdminReportsController,
+    ReimbursementExpensesController,
   ],
   providers: [
     DashboardService,
@@ -54,6 +57,7 @@ import { ReportsService } from '../super-admin/reports/reports.service';
     InventoryService,
     PayrollService,
     ReportsService,
+    ReimbursementExpensesService,
   ],
   exports: [CompanyService, ProjectService, InventoryService, PayrollService, GeofencingGateway],
 })

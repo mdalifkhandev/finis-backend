@@ -1,0 +1,200 @@
+import { Transform } from 'class-transformer';
+import {
+  IsDateString,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
+
+export const REIMBURSEMENT_EXPENSE_CURRENCIES = ['BDT', 'USD', 'CAD', 'EUR', 'GBP'] as const;
+export const REIMBURSEMENT_EXPENSE_CATEGORIES = [
+  'Travel',
+  'Meals',
+  'Hotel',
+  'Fuel',
+  'Office Supplies',
+  'Equipment',
+  'Software',
+  'Subscriptions',
+  'Training',
+  'Marketing',
+  'Construction Materials',
+  'Vehicle Expenses',
+  'Utilities',
+  'Miscellaneous',
+] as const;
+export const REIMBURSEMENT_PAYMENT_METHODS = [
+  'Cash',
+  'Personal Card',
+  'Corporate Card',
+  'Bank Transfer',
+  'Mobile Banking',
+  'Other',
+] as const;
+
+export class CreateReimbursementExpenseDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MinLength(3)
+  @MaxLength(120)
+  title!: string;
+
+  @IsDateString()
+  expenseDate!: string;
+
+  @Transform(({ value }) => Number(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  amount!: number;
+
+  @IsOptional()
+  @IsIn(REIMBURSEMENT_EXPENSE_CURRENCIES)
+  currency?: string;
+
+  @IsIn(REIMBURSEMENT_EXPENSE_CATEGORIES)
+  category!: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(120)
+  vendor?: string;
+
+  @IsOptional()
+  @IsIn(REIMBURSEMENT_PAYMENT_METHODS)
+  paymentMethod?: string;
+
+  @IsOptional()
+  @IsUUID()
+  projectId?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(1000)
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  receiptUrl?: string;
+
+  @IsOptional()
+  @IsIn(['DRAFT', 'SUBMITTED'])
+  action?: 'DRAFT' | 'SUBMITTED';
+}
+
+export class UpdateReimbursementExpenseDto {
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MinLength(3)
+  @MaxLength(120)
+  title?: string;
+
+  @IsOptional()
+  @IsDateString()
+  expenseDate?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  amount?: number;
+
+  @IsOptional()
+  @IsIn(REIMBURSEMENT_EXPENSE_CURRENCIES)
+  currency?: string;
+
+  @IsOptional()
+  @IsIn(REIMBURSEMENT_EXPENSE_CATEGORIES)
+  category?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(120)
+  vendor?: string;
+
+  @IsOptional()
+  @IsIn(REIMBURSEMENT_PAYMENT_METHODS)
+  paymentMethod?: string;
+
+  @IsOptional()
+  @IsUUID()
+  projectId?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(1000)
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  receiptUrl?: string;
+}
+
+export class ReimbursementExpenseFilterDto {
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsNumber()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsNumber()
+  @Min(1)
+  limit?: number;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsIn(['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'PAID'])
+  status?: string;
+
+  @IsOptional()
+  @IsIn(REIMBURSEMENT_EXPENSE_CATEGORIES)
+  category?: string;
+
+  @IsOptional()
+  @IsIn(REIMBURSEMENT_EXPENSE_CURRENCIES)
+  currency?: string;
+
+  @IsOptional()
+  @IsUUID()
+  projectId?: string;
+
+  @IsOptional()
+  @IsDateString()
+  startDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  endDate?: string;
+
+  @IsOptional()
+  @IsIn(['createdAt', 'expenseDate', 'amount'])
+  sortBy?: 'createdAt' | 'expenseDate' | 'amount';
+
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
+}
+
+export class RejectReimbursementExpenseDto {
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(500)
+  comment?: string;
+}

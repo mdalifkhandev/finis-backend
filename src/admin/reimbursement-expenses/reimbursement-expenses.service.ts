@@ -1,0 +1,106 @@
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, ReimbursementExpenseStatus, UserRole } from '../../generated/prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { CreateReimbursementExpenseDto, ReimbursementExpenseFilterDto, RejectReimbursementExpenseDto, UpdateReimbursementExpenseDto } from './dto/reimbursement-expense.dto';
+
+@Injectable()
+export class ReimbursementExpensesService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  private assertAdmin(role: string) {
+    if (role !== UserRole.admin && role !== UserRole.super_admin) throw new ForbiddenException('Admin access required');
+  }
+
+  private async assertProject(projectId?: string) {
+    if (!projectId) return;
+    const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
+    if (!project) throw new BadRequestException('Invalid project ID');
+  }
+
+  private toMoney(value: number) {
+    return new Prisma.Decimal(value.toFixed(2));
+  }
+
+  private serialize(expense: any) {
+    return expense ? { ...expense, amount: Number(expense.amount) } : expense;
+  }
+
+  private async getExpenseOrThrow(id: string, role: string) {
+    this.assertAdmin(role);
+    const expense = await this.prisma.reimbursementExpense.findUnique({
+      where: { id },
+      include: { project: { select: { id: true, name: true } }, createdBy: { select: { id: true, fullName: true, email: true } } },
+    });
+    if (!expense) throw new NotFoundException('Expense not found');
+    return expense;
+  }
+
+  async findAll(adminId: string, role: string, query: ReimbursementExpenseFilterDto) {
+    this.assertAdmin(role);
+    const page = query.page ?? 1;
+    const limit = Math.min(query.limit ?? 20, 100);
+    const where: Prisma.ReimbursementExpenseWhereInput = {
+      ...(query.status ? { status: query.status as ReimbursementExpenseStatus } : {}),
+      ...(query.category ? { category: query.category } : {}),
+      ...(query.currency ? { currency: query.currency } : {}),
+      ...(query.projectId ? { projectId: query.projectId } : {}),
+      ...(query.startDate || query.endDate ? { expenseDate: { ...(query.startDate ? { gte: new Date(query.startDate) } : {}), ...(query.endDate ? { lte: new Date(query.endDate) } : {}) } } : {}),
+      ...(query.search ? { OR: [{ title: { contains: query.search, mode: 'insensitive' } }, { vendor: { contains: query.search, mode: 'insensitive' } }] } : {}),
+    };
+    const [items, total] = await Promise.all([
+      this.prisma.reimbursementExpense.findMany({ where, include: { project: { select: { id: true, name: true } }, createdBy: { select: { id: true, fullName: true, email: true } } }, orderBy: { [query.sortBy ?? 'createdAt']: query.sortOrder ?? 'desc' }, skip: (page - 1) * limit, take: limit }),
+      this.prisma.reimbursementExpense.count({ where }),
+    ]);
+    return { data: items.map((e) => this.serialize(e)), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  }
+
+  async getSummary(adminId: string, role: string) {
+    this.assertAdmin(role);
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const [totalExpenses, draft, submitted, approved, rejected, paid, monthly] = await Promise.all([
+      this.prisma.reimbursementExpense.count(),
+      this.prisma.reimbursementExpense.count({ where: { status: 'DRAFT' } }),
+      this.prisma.reimbursementExpense.count({ where: { status: 'SUBMITTED' } }),
+      this.prisma.reimbursementExpense.count({ where: { status: 'APPROVED' } }),
+      this.prisma.reimbursementExpense.count({ where: { status: 'REJECTED' } }),
+      this.prisma.reimbursementExpense.count({ where: { status: 'PAID' } }),
+      this.prisma.reimbursementExpense.aggregate({ where: { expenseDate: { gte: start, lte: end } }, _sum: { amount: true } }),
+    ]);
+    return { summary: { totalExpenses, draft, submitted, approved, rejected, paid, totalAmountThisMonth: Number(monthly._sum.amount ?? 0) } };
+  }
+
+  async findOne(id: string, adminId: string, role: string) { return this.serialize(await this.getExpenseOrThrow(id, role)); }
+
+  async create(dto: CreateReimbursementExpenseDto, adminId: string, role: string) {
+    this.assertAdmin(role); await this.assertProject(dto.projectId); this.assertNotFuture(dto.expenseDate);
+    const status = dto.action === 'SUBMITTED' ? 'SUBMITTED' : 'DRAFT';
+    const expense = await this.prisma.reimbursementExpense.create({ data: { title: dto.title, expenseDate: new Date(dto.expenseDate), amount: this.toMoney(dto.amount), currency: dto.currency ?? 'BDT', category: dto.category, vendor: dto.vendor || null, paymentMethod: dto.paymentMethod || null, projectId: dto.projectId || null, notes: dto.notes || null, receiptUrl: dto.receiptUrl || null, createdById: adminId, status, submittedAt: status === 'SUBMITTED' ? new Date() : null }, include: { project: { select: { id: true, name: true } } } });
+    return { message: status === 'SUBMITTED' ? 'Expense submitted successfully' : 'Expense draft saved successfully', ...this.serialize(expense) };
+  }
+
+  async update(id: string, dto: UpdateReimbursementExpenseDto, adminId: string, role: string) {
+    const existing = await this.getExpenseOrThrow(id, role); if (existing.status !== 'DRAFT') throw new BadRequestException('Only draft expenses can be updated');
+    await this.assertProject(dto.projectId); if (dto.expenseDate) this.assertNotFuture(dto.expenseDate);
+    const expense = await this.prisma.reimbursementExpense.update({ where: { id }, data: { ...(dto.title !== undefined ? { title: dto.title } : {}), ...(dto.expenseDate ? { expenseDate: new Date(dto.expenseDate) } : {}), ...(dto.amount !== undefined ? { amount: this.toMoney(dto.amount) } : {}), ...(dto.currency ? { currency: dto.currency } : {}), ...(dto.category ? { category: dto.category } : {}), ...(dto.vendor !== undefined ? { vendor: dto.vendor || null } : {}), ...(dto.paymentMethod !== undefined ? { paymentMethod: dto.paymentMethod || null } : {}), ...(dto.projectId !== undefined ? { projectId: dto.projectId || null } : {}), ...(dto.notes !== undefined ? { notes: dto.notes || null } : {}), ...(dto.receiptUrl !== undefined ? { receiptUrl: dto.receiptUrl || null } : {}) }, include: { project: { select: { id: true, name: true } } } });
+    return { message: 'Expense updated successfully', ...this.serialize(expense) };
+  }
+
+  async remove(id: string, adminId: string, role: string) { const existing = await this.getExpenseOrThrow(id, role); if (existing.status !== 'DRAFT') throw new BadRequestException('Only draft expenses can be deleted'); await this.prisma.reimbursementExpense.delete({ where: { id } }); return { message: 'Expense deleted successfully', id }; }
+  async submit(id: string, adminId: string, role: string) { return this.transition(id, role, 'DRAFT', { status: 'SUBMITTED', submittedAt: new Date() }, 'Expense submitted successfully'); }
+  async approve(id: string, adminId: string, role: string) { return this.transition(id, role, 'SUBMITTED', { status: 'APPROVED', approvedAt: new Date() }, 'Expense approved successfully'); }
+  async reject(id: string, dto: RejectReimbursementExpenseDto, adminId: string, role: string) { return this.transition(id, role, 'SUBMITTED', { status: 'REJECTED', rejectedAt: new Date(), rejectionNote: dto.comment || null }, 'Expense rejected successfully'); }
+  async markPaid(id: string, adminId: string, role: string) { return this.transition(id, role, 'APPROVED', { status: 'PAID', paidAt: new Date() }, 'Expense marked as paid successfully'); }
+
+  private async transition(id: string, role: string, from: ReimbursementExpenseStatus, data: Prisma.ReimbursementExpenseUpdateInput, message: string) {
+    const existing = await this.getExpenseOrThrow(id, role); if (existing.status !== from) throw new BadRequestException(`Only ${from} expenses can use this action`);
+    const expense = await this.prisma.reimbursementExpense.update({ where: { id }, data, include: { project: { select: { id: true, name: true } }, createdBy: { select: { id: true, fullName: true, email: true } } } });
+    return { message, ...this.serialize(expense) };
+  }
+
+  private assertNotFuture(value: string) {
+    const date = new Date(value); const today = new Date(); today.setHours(23, 59, 59, 999);
+    if (date.getTime() > today.getTime()) throw new BadRequestException('Future expense dates are not allowed');
+  }
+}

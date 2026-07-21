@@ -144,6 +144,7 @@ model User {
   managedWorkers          WorkerManagerMap[]       @relation("ManagerWorkers")
   myManager               WorkerManagerMap?        @relation("WorkerManager")
   supportRequestsCreated   SupportRequest[]
+  reimbursementExpenses    ReimbursementExpense[] @relation("ReimbursementExpenseCreator")
 
   @@map("users")
 }
@@ -329,6 +330,7 @@ model Project {
   createdAt      DateTime        @default(now()) @map("created_at")
   updatedAt      DateTime        @updatedAt @map("updated_at")
   expenses       Expense[]
+  reimbursementExpenses ReimbursementExpense[]
   documents      Document[]
   floors         Floor[]
   geofences      Geofence[]
@@ -777,6 +779,36 @@ model Expense {
   @@map("expenses")
 }
 
+model ReimbursementExpense {
+  id            String                      @id @default(uuid()) @db.Uuid
+  title         String
+  expenseDate   DateTime                    @map("expense_date") @db.Date
+  amount        Decimal                     @db.Decimal(12, 2)
+  currency      String                      @default("BDT")
+  category      String
+  vendor        String?
+  paymentMethod String?                     @map("payment_method")
+  projectId     String?                     @map("project_id") @db.Uuid
+  notes         String?
+  receiptUrl    String?                     @map("receipt_url")
+  status        ReimbursementExpenseStatus  @default(DRAFT)
+  createdById   String                      @map("created_by_id") @db.Uuid
+  submittedAt   DateTime?                   @map("submitted_at")
+  approvedAt    DateTime?                   @map("approved_at")
+  rejectedAt    DateTime?                   @map("rejected_at")
+  paidAt        DateTime?                   @map("paid_at")
+  rejectionNote String?                     @map("rejection_note")
+  createdAt     DateTime                    @default(now()) @map("created_at")
+  updatedAt     DateTime                    @updatedAt @map("updated_at")
+  createdBy     User                        @relation("ReimbursementExpenseCreator", fields: [createdById], references: [id])
+  project       Project?                    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([createdById])
+  @@index([projectId])
+  @@index([status])
+  @@index([expenseDate])
+  @@map("reimbursement_expenses")
+}
 model InventoryItem {
   id              String              @id @default(uuid()) @db.Uuid
   name            String
@@ -1202,6 +1234,13 @@ enum ExpenseStatus {
   rejected
 }
 
+enum ReimbursementExpenseStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  PAID
+}
 enum InventoryDamageStatus {
   unresolved
   in_repair
