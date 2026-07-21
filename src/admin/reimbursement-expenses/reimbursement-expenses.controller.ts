@@ -27,6 +27,7 @@ export class ReimbursementExpensesController {
 
   @Get() findAll(@CurrentUser('id') adminId: string, @CurrentUser('role') role: string, @Query() query: ReimbursementExpenseFilterDto) { return this.service.findAll(adminId, role, query); }
   @Get('summary') getSummary(@CurrentUser('id') adminId: string, @CurrentUser('role') role: string) { return this.service.getSummary(adminId, role); }
+  @Get('options') getOptions(@CurrentUser('id') adminId: string, @CurrentUser('role') role: string) { return this.service.getOptions(adminId, role); }
   @Get(':id') findOne(@Param('id') id: string, @CurrentUser('id') adminId: string, @CurrentUser('role') role: string) { return this.service.findOne(id, adminId, role); }
 
   @Post()

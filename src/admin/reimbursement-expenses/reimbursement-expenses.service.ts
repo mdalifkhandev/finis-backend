@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, ReimbursementExpenseStatus, UserRole } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateReimbursementExpenseDto, ReimbursementExpenseFilterDto, RejectReimbursementExpenseDto, UpdateReimbursementExpenseDto } from './dto/reimbursement-expense.dto';
+import { CreateReimbursementExpenseDto, ReimbursementExpenseFilterDto, RejectReimbursementExpenseDto, UpdateReimbursementExpenseDto, REIMBURSEMENT_EXPENSE_CATEGORIES, REIMBURSEMENT_EXPENSE_CURRENCIES, REIMBURSEMENT_PAYMENT_METHODS } from './dto/reimbursement-expense.dto';
 
 @Injectable()
 export class ReimbursementExpensesService {
@@ -23,6 +23,21 @@ export class ReimbursementExpensesService {
 
   private serialize(expense: any) {
     return expense ? { ...expense, amount: Number(expense.amount) } : expense;
+  }
+
+  private normalizeOption(value?: string | null) {
+    return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
+  }
+
+  private mergeOptions(defaults: readonly string[], values: Array<string | null>) {
+    const map = new Map<string, string>();
+    [...defaults, ...values].forEach((value) => {
+      const option = this.normalizeOption(value);
+      if (!option) return;
+      const key = option.toLowerCase();
+      if (!map.has(key)) map.set(key, option);
+    });
+    return [...map.values()];
   }
 
   private async getExpenseOrThrow(id: string, role: string) {
@@ -54,6 +69,21 @@ export class ReimbursementExpensesService {
     return { data: items.map((e) => this.serialize(e)), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 
+  async getOptions(adminId: string, role: string) {
+    this.assertAdmin(role);
+    const [currencies, categories, paymentMethods] = await Promise.all([
+      this.prisma.reimbursementExpense.findMany({ distinct: ['currency'], select: { currency: true }, orderBy: { currency: 'asc' } }),
+      this.prisma.reimbursementExpense.findMany({ distinct: ['category'], select: { category: true }, orderBy: { category: 'asc' } }),
+      this.prisma.reimbursementExpense.findMany({ where: { paymentMethod: { not: null } }, distinct: ['paymentMethod'], select: { paymentMethod: true }, orderBy: { paymentMethod: 'asc' } }),
+    ]);
+
+    return {
+      currency: this.mergeOptions(REIMBURSEMENT_EXPENSE_CURRENCIES, currencies.map((item) => item.currency)),
+      category: this.mergeOptions(REIMBURSEMENT_EXPENSE_CATEGORIES, categories.map((item) => item.category)),
+      paymentMethod: this.mergeOptions(REIMBURSEMENT_PAYMENT_METHODS, paymentMethods.map((item) => item.paymentMethod)),
+    };
+  }
+
   async getSummary(adminId: string, role: string) {
     this.assertAdmin(role);
     const now = new Date();
@@ -76,14 +106,14 @@ export class ReimbursementExpensesService {
   async create(dto: CreateReimbursementExpenseDto, adminId: string, role: string) {
     this.assertAdmin(role); await this.assertProject(dto.projectId); this.assertNotFuture(dto.expenseDate);
     const status = dto.action === 'SUBMITTED' ? 'SUBMITTED' : 'DRAFT';
-    const expense = await this.prisma.reimbursementExpense.create({ data: { title: dto.title, expenseDate: new Date(dto.expenseDate), amount: this.toMoney(dto.amount), currency: dto.currency ?? 'BDT', category: dto.category, vendor: dto.vendor || null, paymentMethod: dto.paymentMethod || null, projectId: dto.projectId || null, notes: dto.notes || null, receiptUrl: dto.receiptUrl || null, createdById: adminId, status, submittedAt: status === 'SUBMITTED' ? new Date() : null }, include: { project: { select: { id: true, name: true } } } });
+    const expense = await this.prisma.reimbursementExpense.create({ data: { title: dto.title, expenseDate: new Date(dto.expenseDate), amount: this.toMoney(dto.amount), currency: this.normalizeOption(dto.currency) || 'BDT', category: this.normalizeOption(dto.category), vendor: dto.vendor || null, paymentMethod: this.normalizeOption(dto.paymentMethod) || null, projectId: dto.projectId || null, notes: dto.notes || null, receiptUrl: dto.receiptUrl || null, createdById: adminId, status, submittedAt: status === 'SUBMITTED' ? new Date() : null }, include: { project: { select: { id: true, name: true } } } });
     return { message: status === 'SUBMITTED' ? 'Expense submitted successfully' : 'Expense draft saved successfully', ...this.serialize(expense) };
   }
 
   async update(id: string, dto: UpdateReimbursementExpenseDto, adminId: string, role: string) {
     const existing = await this.getExpenseOrThrow(id, role); if (existing.status !== 'DRAFT') throw new BadRequestException('Only draft expenses can be updated');
     await this.assertProject(dto.projectId); if (dto.expenseDate) this.assertNotFuture(dto.expenseDate);
-    const expense = await this.prisma.reimbursementExpense.update({ where: { id }, data: { ...(dto.title !== undefined ? { title: dto.title } : {}), ...(dto.expenseDate ? { expenseDate: new Date(dto.expenseDate) } : {}), ...(dto.amount !== undefined ? { amount: this.toMoney(dto.amount) } : {}), ...(dto.currency ? { currency: dto.currency } : {}), ...(dto.category ? { category: dto.category } : {}), ...(dto.vendor !== undefined ? { vendor: dto.vendor || null } : {}), ...(dto.paymentMethod !== undefined ? { paymentMethod: dto.paymentMethod || null } : {}), ...(dto.projectId !== undefined ? { projectId: dto.projectId || null } : {}), ...(dto.notes !== undefined ? { notes: dto.notes || null } : {}), ...(dto.receiptUrl !== undefined ? { receiptUrl: dto.receiptUrl || null } : {}) }, include: { project: { select: { id: true, name: true } } } });
+    const expense = await this.prisma.reimbursementExpense.update({ where: { id }, data: { ...(dto.title !== undefined ? { title: dto.title } : {}), ...(dto.expenseDate ? { expenseDate: new Date(dto.expenseDate) } : {}), ...(dto.amount !== undefined ? { amount: this.toMoney(dto.amount) } : {}), ...(dto.currency ? { currency: this.normalizeOption(dto.currency) } : {}), ...(dto.category ? { category: this.normalizeOption(dto.category) } : {}), ...(dto.vendor !== undefined ? { vendor: dto.vendor || null } : {}), ...(dto.paymentMethod !== undefined ? { paymentMethod: this.normalizeOption(dto.paymentMethod) || null } : {}), ...(dto.projectId !== undefined ? { projectId: dto.projectId || null } : {}), ...(dto.notes !== undefined ? { notes: dto.notes || null } : {}), ...(dto.receiptUrl !== undefined ? { receiptUrl: dto.receiptUrl || null } : {}) }, include: { project: { select: { id: true, name: true } } } });
     return { message: 'Expense updated successfully', ...this.serialize(expense) };
   }
 

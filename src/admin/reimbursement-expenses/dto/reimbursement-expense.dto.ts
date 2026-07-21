@@ -53,10 +53,14 @@ export class CreateReimbursementExpenseDto {
   amount!: number;
 
   @IsOptional()
-  @IsIn(REIMBURSEMENT_EXPENSE_CURRENCIES)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(20)
   currency?: string;
 
-  @IsIn(REIMBURSEMENT_EXPENSE_CATEGORIES)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(80)
   category!: string;
 
   @IsOptional()
@@ -66,7 +70,9 @@ export class CreateReimbursementExpenseDto {
   vendor?: string;
 
   @IsOptional()
-  @IsIn(REIMBURSEMENT_PAYMENT_METHODS)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(80)
   paymentMethod?: string;
 
   @IsOptional()
@@ -108,11 +114,15 @@ export class UpdateReimbursementExpenseDto {
   amount?: number;
 
   @IsOptional()
-  @IsIn(REIMBURSEMENT_EXPENSE_CURRENCIES)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(20)
   currency?: string;
 
   @IsOptional()
-  @IsIn(REIMBURSEMENT_EXPENSE_CATEGORIES)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(80)
   category?: string;
 
   @IsOptional()
@@ -122,7 +132,9 @@ export class UpdateReimbursementExpenseDto {
   vendor?: string;
 
   @IsOptional()
-  @IsIn(REIMBURSEMENT_PAYMENT_METHODS)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(80)
   paymentMethod?: string;
 
   @IsOptional()
@@ -163,11 +175,15 @@ export class ReimbursementExpenseFilterDto {
   status?: string;
 
   @IsOptional()
-  @IsIn(REIMBURSEMENT_EXPENSE_CATEGORIES)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(80)
   category?: string;
 
   @IsOptional()
-  @IsIn(REIMBURSEMENT_EXPENSE_CURRENCIES)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(20)
   currency?: string;
 
   @IsOptional()
