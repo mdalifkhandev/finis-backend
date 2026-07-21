@@ -75,9 +75,8 @@ export class CreateReimbursementExpenseDto {
   @MaxLength(80)
   paymentMethod?: string;
 
-  @IsOptional()
   @IsUUID()
-  projectId?: string;
+  projectId!: string;
 
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
