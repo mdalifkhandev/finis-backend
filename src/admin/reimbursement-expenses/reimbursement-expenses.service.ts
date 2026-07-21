@@ -28,8 +28,20 @@ export class ReimbursementExpensesService {
   }
 
   private async getManagedWorkerIds(managerId: string) {
-    const rows = await this.prisma.workerManagerMap.findMany({ where: { managerId }, select: { workerId: true } });
-    return rows.map((row) => row.workerId);
+    const [mappedWorkers, directlyManagedMembers, managerProjects] = await Promise.all([
+      this.prisma.workerManagerMap.findMany({ where: { managerId }, select: { workerId: true } }),
+      this.prisma.projectMember.findMany({ where: { managerId, role: 'worker' }, select: { userId: true } }),
+      this.prisma.projectMember.findMany({ where: { userId: managerId, role: 'manager' }, select: { projectId: true } }),
+    ]);
+    const projectIds = managerProjects.map((member) => member.projectId);
+    const projectWorkers = projectIds.length
+      ? await this.prisma.projectMember.findMany({ where: { projectId: { in: projectIds }, role: 'worker' }, select: { userId: true } })
+      : [];
+    return [...new Set([
+      ...mappedWorkers.map((row) => row.workerId),
+      ...directlyManagedMembers.map((member) => member.userId),
+      ...projectWorkers.map((member) => member.userId),
+    ])];
   }
 
   private async buildScopedWhere(userId: string, role: string): Promise<Prisma.ReimbursementExpenseWhereInput> {
@@ -90,8 +102,8 @@ export class ReimbursementExpensesService {
     if (this.isAdminReviewer(role)) return expense;
     if (this.isManager(role)) {
       if (expense.createdById === userId) return expense;
-      const map = await this.prisma.workerManagerMap.findFirst({ where: { managerId: userId, workerId: expense.createdById }, select: { id: true } });
-      if (!map) throw new ForbiddenException('You can only access your own expenses or expenses from your assigned workers');
+      const workerIds = await this.getManagedWorkerIds(userId);
+      if (!workerIds.includes(expense.createdById)) throw new ForbiddenException('You can only access your own expenses or expenses from your assigned workers');
       return expense;
     }
     if (expense.createdById !== userId) throw new ForbiddenException('You can only access your own expenses');
