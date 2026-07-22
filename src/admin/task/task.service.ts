@@ -820,8 +820,8 @@ export class TaskService {
       }
     }
 
-    const approvalDecision = userRole === UserRole.manager ? 'pending' : 'approved';
-    const initialStatus = userRole === UserRole.manager ? 'in_active' : 'pending';
+    const approvalDecision = 'approved';
+    const initialStatus = 'pending';
 
     const task = await this.prisma.task.create({
       data: {
@@ -860,10 +860,50 @@ export class TaskService {
         data: unitIds.map((unitId) => ({ taskId: task.id, unitId })),
         skipDuplicates: true,
       });
+      for (const unitId of unitIds) {
+        const subTask = await this.prisma.subTask.create({
+          data: {
+            taskId: task.id,
+            unitId,
+            createdBy: userId,
+            title: dto.title,
+            description: dto.description ?? null,
+            priority: dto.priority ?? TaskPriority.medium,
+            dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+            estimatedHours: dto.estimatedHours ?? null,
+            status: initialStatus,
+            approvalDecision,
+            approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
+            approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
+          } as any,
+        });
+        await this.prisma.subTaskUnit.create({
+          data: { subTaskId: subTask.id, unitId },
+        });
+      }
     } else if (dto.unitId) {
       await this.prisma.taskUnit.createMany({
         data: [{ taskId: task.id, unitId: dto.unitId }],
         skipDuplicates: true,
+      });
+      const subTask = await this.prisma.subTask.create({
+        data: {
+          taskId: task.id,
+          unitId: dto.unitId,
+          createdBy: userId,
+          title: dto.title,
+          description: dto.description ?? null,
+          priority: dto.priority ?? TaskPriority.medium,
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+          estimatedHours: dto.estimatedHours ?? null,
+          status: initialStatus,
+          approvalDecision,
+          approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
+          approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
+        } as any,
+      });
+      await this.prisma.subTaskUnit.create({
+        data: { subTaskId: subTask.id, unitId: dto.unitId },
       });
     }
 
