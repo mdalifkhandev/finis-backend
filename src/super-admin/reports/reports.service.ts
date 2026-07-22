@@ -542,7 +542,7 @@ export class ReportsService {
       },
       projects: projects.map((p) => {
         const approvedExpenses = p.expenses
-          .filter((e) => e.status === 'approved')
+          .filter((e) => e.status === 'APPROVED' || e.status === 'PAID')
           .reduce((s, e) => s + e.amount, 0);
         const completedTasks = p.tasks.filter((t) => t.status === 'completed').length;
 
