@@ -177,9 +177,12 @@ export class WorkerService {
     return subTask.createdBy === workerId || subTask.taskAssignee?.userId === workerId;
   }
 
-  private ensureSubTaskApproved(subTask: { approvalDecision?: string }, actionLabel: string) {
-    if (subTask.approvalDecision !== 'approved') {
+  private ensureSubTaskApproved(subTask: { approvalDecision?: string; status?: string }, actionLabel: string) {
+    if (subTask.approvalDecision !== 'approved' && subTask.approvalDecision !== 'rejected') {
       throw new BadRequestException(`Subtask must be approved before ${actionLabel}`);
+    }
+    if (subTask.status === 'cancelled') {
+      throw new BadRequestException(`Cannot perform action: ${actionLabel} because subtask is cancelled.`);
     }
   }
 
@@ -198,9 +201,12 @@ export class WorkerService {
     );
   }
 
-  private ensureTaskApproved(task: { approvalDecision?: string }, actionLabel: string) {
-    if (task.approvalDecision !== 'approved') {
+  private ensureTaskApproved(task: { approvalDecision?: string; status?: string }, actionLabel: string) {
+    if (task.approvalDecision !== 'approved' && task.approvalDecision !== 'rejected') {
       throw new BadRequestException(`Main task must be approved before ${actionLabel}`);
+    }
+    if (task.status === 'cancelled') {
+      throw new BadRequestException(`Cannot perform action: ${actionLabel} because main task is cancelled.`);
     }
   }
 
