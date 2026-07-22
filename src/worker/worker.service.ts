@@ -743,37 +743,50 @@ export class WorkerService {
           }
           const floorEntry = floorMap.get(floor.id)!;
           if (!floorEntry.units.some((unit) => unit.id === entry.unit.id)) {
+            const unitSubTasks = (task.subTasks ?? []).filter((subTask: any) => {
+              const isAssignedToMe = subTask.taskAssignee?.user?.id === workerId || subTask.taskAssignee?.userId === workerId;
+              if (subTask.taskAssigneeId && !isAssignedToMe) return false;
+
+              // Match primary unit OR any grouped unit via SubTaskUnit
+              if (subTask.unitId === entry.unit.id) return true;
+              return (subTask.subTaskUnits ?? []).some(
+                (stu: any) => stu.unitId === entry.unit.id,
+              );
+            });
+
+            let computedStatus = task.status;
+            if (unitSubTasks.length > 0) {
+              computedStatus = 'completed'; // Assume completed, demote if any is pending/in_progress
+              for (const st of unitSubTasks) {
+                if (st.status === 'in_progress') {
+                  computedStatus = 'in_progress';
+                  break;
+                } else if (st.status === 'pending') {
+                  if (computedStatus !== 'in_progress') computedStatus = 'pending';
+                }
+              }
+            }
+
             floorEntry.units.push({
               id: entry.unit.id,
               name: entry.unit.name,
-              status: task.status,
+              status: computedStatus,
               approvalDecision: task.approvalDecision,
               canCreateSubTask: allowSubTaskCreation,
-              subTasks: (task.subTasks ?? [])
-                .filter((subTask: any) => {
-                  const isAssignedToMe = subTask.taskAssignee?.user?.id === workerId || subTask.taskAssignee?.userId === workerId;
-                  if (subTask.taskAssigneeId && !isAssignedToMe) return false;
-
-                  // Match primary unit OR any grouped unit via SubTaskUnit
-                  if (subTask.unitId === entry.unit.id) return true;
-                  return (subTask.subTaskUnits ?? []).some(
-                    (stu: any) => stu.unitId === entry.unit.id,
-                  );
-                })
-                .map((subTask: any) => ({
-                  id: subTask.id,
-                  title: subTask.title,
-                  status: subTask.status,
-                  approvalDecision: subTask.approvalDecision,
-                  action:
-                    subTask.status === 'pending'
-                      ? 'start'
-                      : subTask.status === 'in_progress'
-                        ? 'continue'
-                        : 'view',
-                  reportCount: subTask.reports?.length ?? 0,
-                  workflow: this.buildWorkflowSnapshot(subTask),
-                })),
+              subTasks: unitSubTasks.map((subTask: any) => ({
+                id: subTask.id,
+                title: subTask.title,
+                status: subTask.status,
+                approvalDecision: subTask.approvalDecision,
+                action:
+                  subTask.status === 'pending'
+                    ? 'start'
+                    : subTask.status === 'in_progress'
+                      ? 'continue'
+                      : 'view',
+                reportCount: subTask.reports?.length ?? 0,
+                workflow: this.buildWorkflowSnapshot(subTask),
+              })),
             });
           }
         }
