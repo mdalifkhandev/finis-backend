@@ -2324,6 +2324,7 @@ export class TaskService {
           status: dto.reviewDecision === 'approved' ? 'completed' : 'in_progress',
           submittedAt: dto.reviewDecision === 'approved' ? new Date() : undefined,
           completedAt: dto.reviewDecision === 'approved' ? new Date() : null,
+          approvalDecision: dto.reviewDecision as any,
         },
       });
 
@@ -2333,6 +2334,7 @@ export class TaskService {
         where: { id: taskId },
         data: {
           completionDecision: dto.reviewDecision as any,
+          approvalDecision: dto.reviewDecision as any,
           completionReviewedBy: userId,
           completionReviewedAt: new Date(),
           completionNotes: reviewText,
@@ -2398,6 +2400,7 @@ export class TaskService {
       where: { id: taskId },
       data: {
         completionDecision: 'rejected',
+        approvalDecision: 'rejected',
         completionReviewedBy: userId,
         completionReviewedAt: new Date(),
         completionNotes: dto.reviewDescription ?? null,
