@@ -1374,78 +1374,96 @@ export class WorkerService {
       });
     }
 
-    const primaryUnitId = unitIds[0];
-    const primaryUnit = taskUnits.find((item) => item.unitId === primaryUnitId);
-    if (!primaryUnit) throw new NotFoundException('Unit not found in this task');
+    const createdSubTasks: any[] = [];
 
-    let assignee: { id: string; userId: string } | null = null;
+    for (const unitId of unitIds) {
+      const currentUnit = taskUnits.find((item) => item.unitId === unitId);
+      if (!currentUnit) throw new NotFoundException('Unit not found in this task');
 
-    if (workerId) {
-      assignee = await this.prisma.taskAssignee.findFirst({
-        where: { taskId, unitId: primaryUnitId, userId: workerId },
-        select: { id: true, userId: true },
+      let assignee: { id: string; userId: string } | null = null;
+
+      if (workerId) {
+        assignee = await this.prisma.taskAssignee.findFirst({
+          where: { taskId, unitId, userId: workerId },
+          select: { id: true, userId: true },
+        });
+      }
+
+      if (!assignee) {
+        assignee = await this.prisma.taskAssignee.findFirst({
+          where: { taskId, unitId },
+          select: { id: true, userId: true },
+          orderBy: { assignedAt: 'asc' },
+        });
+      }
+
+      const subTask = await this.prisma.subTask.create({
+        data: {
+          taskId,
+          unitId,
+          taskAssigneeId: assignee?.id ?? null,
+          createdBy: workerId,
+          title: dto.title,
+          description: dto.description ?? null,
+          priority: dto.priority ?? TaskPriority.medium,
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+          estimatedHours: dto.estimatedHours ?? null,
+          status: 'in_active' as any,
+        },
+        include: {
+          task: { select: { id: true, title: true } },
+          unit: { select: { id: true, name: true } },
+        },
       });
-    }
 
-    if (!assignee) {
-      assignee = await this.prisma.taskAssignee.findFirst({
-        where: { taskId, unitId: primaryUnitId },
-        select: { id: true, userId: true },
-        orderBy: { assignedAt: 'asc' },
+      await this.prisma.subTaskUnit.create({
+        data: { subTaskId: subTask.id, unitId },
       });
-    }
 
-    const subTask = await this.prisma.subTask.create({
-      data: {
-        taskId,
-        unitId: primaryUnitId,
-        taskAssigneeId: assignee?.id ?? null,
-        createdBy: workerId,
-        title: dto.title,
-        description: dto.description ?? null,
-        priority: dto.priority ?? TaskPriority.medium,
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
-        estimatedHours: dto.estimatedHours ?? null,
-        status: 'in_active' as any,
-      },
-      include: {
-        task: { select: { id: true, title: true } },
-        unit: { select: { id: true, name: true } },
-      },
-    });
-
-    await this.prisma.subTaskUnit.createMany({
-      data: unitIds.map((unitId) => ({ subTaskId: subTask.id, unitId })),
-      skipDuplicates: true,
-    });
-
-    const createdSubTask = await this.prisma.subTask.findUnique({
-      where: { id: subTask.id },
-      include: {
-        task: { select: { id: true, title: true } },
-        subTaskUnits: {
-          include: {
-            unit: { select: { id: true, name: true } },
+      const createdSubTask = await this.prisma.subTask.findUnique({
+        where: { id: subTask.id },
+        include: {
+          task: { select: { id: true, title: true } },
+          subTaskUnits: {
+            include: {
+              unit: { select: { id: true, name: true } },
+            },
           },
         },
-      },
-    });
+      });
+      if (createdSubTask) {
+        createdSubTasks.push(createdSubTask);
+      }
+    }
+
+    const returnSubTask = createdSubTasks[0];
 
     return {
-      message: '1 subtask created',
-      subTask: createdSubTask
+      message: `${createdSubTasks.length} subtask(s) created`,
+      subTask: returnSubTask
         ? {
-            id: createdSubTask.id,
-            title: createdSubTask.title,
-            description: createdSubTask.description,
-            priority: createdSubTask.priority,
-            dueDate: createdSubTask.dueDate,
-            estimatedHours: createdSubTask.estimatedHours,
-            status: createdSubTask.status,
-            task: createdSubTask.task,
-            units: (createdSubTask.subTaskUnits ?? []).map((item) => item.unit),
+            id: returnSubTask.id,
+            title: returnSubTask.title,
+            description: returnSubTask.description,
+            priority: returnSubTask.priority,
+            dueDate: returnSubTask.dueDate,
+            estimatedHours: returnSubTask.estimatedHours,
+            status: returnSubTask.status,
+            task: returnSubTask.task,
+            units: (returnSubTask.subTaskUnits ?? []).map((item) => item.unit),
           }
         : null,
+      subTasks: createdSubTasks.map((st) => ({
+        id: st.id,
+        title: st.title,
+        description: st.description,
+        priority: st.priority,
+        dueDate: st.dueDate,
+        estimatedHours: st.estimatedHours,
+        status: st.status,
+        task: st.task,
+        units: (st.subTaskUnits ?? []).map((item) => item.unit),
+      })),
     };
   }
 

@@ -1942,58 +1942,59 @@ export class TaskService {
     }
 
     const createdSubTasks: any[] = [];
-    const primaryUnitId = unitIds[0];
-    let taskAssignee: any = null;
 
-    if (userRole === UserRole.worker) {
-      taskAssignee = await this.resolveTaskAssignee(taskId, primaryUnitId, userId);
-    } else {
-      taskAssignee = await this.prisma.taskAssignee.findFirst({
-        where: { taskId },
-        include: {
-          user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
-          unit: { select: { id: true, name: true } },
-        },
-        orderBy: { assignedAt: 'asc' },
-      });
-    }
+    for (const unitId of unitIds) {
+      let taskAssignee: any = null;
 
-    const subTask = await this.prisma.subTask.create({
-      data: {
-        taskId,
-        unitId: primaryUnitId,
-        taskAssigneeId: taskAssignee?.id ?? null,
-        createdBy: userId,
-        title: dto.title,
-        description: dto.description ?? null,
-        priority: dto.priority ?? 'medium',
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
-        estimatedHours: dto.estimatedHours ?? null,
-        status: 'pending',
-        approvalDecision,
-        approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
-        approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
-      },
-      include: {
-        unit: { select: { id: true, name: true } },
-        task: { select: { id: true, title: true, priority: true, dueDate: true } },
-        taskAssignee: {
+      if (userRole === UserRole.worker) {
+        taskAssignee = await this.resolveTaskAssignee(taskId, unitId, userId);
+      } else {
+        taskAssignee = await this.prisma.taskAssignee.findFirst({
+          where: { taskId },
           include: {
             user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
             unit: { select: { id: true, name: true } },
           },
+          orderBy: { assignedAt: 'asc' },
+        });
+      }
+
+      const subTask = await this.prisma.subTask.create({
+        data: {
+          taskId,
+          unitId,
+          taskAssigneeId: taskAssignee?.id ?? null,
+          createdBy: userId,
+          title: dto.title,
+          description: dto.description ?? null,
+          priority: dto.priority ?? 'medium',
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+          estimatedHours: dto.estimatedHours ?? null,
+          status: 'pending',
+          approvalDecision,
+          approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
+          approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
         },
-        reports: true,
-        inventories: true,
-      },
-    });
+        include: {
+          unit: { select: { id: true, name: true } },
+          task: { select: { id: true, title: true, priority: true, dueDate: true } },
+          taskAssignee: {
+            include: {
+              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+              unit: { select: { id: true, name: true } },
+            },
+          },
+          reports: true,
+          inventories: true,
+        },
+      });
 
-    await this.prisma.subTaskUnit.createMany({
-      data: unitIds.map((unitId) => ({ subTaskId: subTask.id, unitId })),
-      skipDuplicates: true,
-    });
+      await this.prisma.subTaskUnit.create({
+        data: { subTaskId: subTask.id, unitId },
+      });
 
-    createdSubTasks.push(subTask);
+      createdSubTasks.push(subTask);
+    }
 
     const updatedTask = await this.prisma.task.findUnique({
       where: { id: taskId },
