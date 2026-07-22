@@ -751,6 +751,9 @@ export class WorkerService {
               canCreateSubTask: allowSubTaskCreation,
               subTasks: (task.subTasks ?? [])
                 .filter((subTask: any) => {
+                  const isAssignedToMe = subTask.taskAssignee?.user?.id === workerId || subTask.taskAssignee?.userId === workerId;
+                  if (subTask.taskAssigneeId && !isAssignedToMe) return false;
+
                   // Match primary unit OR any grouped unit via SubTaskUnit
                   if (subTask.unitId === entry.unit.id) return true;
                   return (subTask.subTaskUnits ?? []).some(

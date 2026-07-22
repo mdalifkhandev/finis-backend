@@ -860,11 +860,41 @@ export class TaskService {
         data: unitIds.map((unitId) => ({ taskId: task.id, unitId })),
         skipDuplicates: true,
       });
-      for (const unitId of unitIds) {
+
+      if (!dto.allowSubTaskCreation) {
+        for (const unitId of unitIds) {
+          const subTask = await this.prisma.subTask.create({
+            data: {
+              taskId: task.id,
+              unitId,
+              createdBy: userId,
+              title: dto.title,
+              description: dto.description ?? null,
+              priority: dto.priority ?? TaskPriority.medium,
+              dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+              estimatedHours: dto.estimatedHours ?? null,
+              status: initialStatus,
+              approvalDecision,
+              approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
+              approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
+            } as any,
+          });
+          await this.prisma.subTaskUnit.create({
+            data: { subTaskId: subTask.id, unitId },
+          });
+        }
+      }
+    } else if (dto.unitId) {
+      await this.prisma.taskUnit.createMany({
+        data: [{ taskId: task.id, unitId: dto.unitId }],
+        skipDuplicates: true,
+      });
+
+      if (!dto.allowSubTaskCreation) {
         const subTask = await this.prisma.subTask.create({
           data: {
             taskId: task.id,
-            unitId,
+            unitId: dto.unitId,
             createdBy: userId,
             title: dto.title,
             description: dto.description ?? null,
@@ -878,33 +908,9 @@ export class TaskService {
           } as any,
         });
         await this.prisma.subTaskUnit.create({
-          data: { subTaskId: subTask.id, unitId },
+          data: { subTaskId: subTask.id, unitId: dto.unitId },
         });
       }
-    } else if (dto.unitId) {
-      await this.prisma.taskUnit.createMany({
-        data: [{ taskId: task.id, unitId: dto.unitId }],
-        skipDuplicates: true,
-      });
-      const subTask = await this.prisma.subTask.create({
-        data: {
-          taskId: task.id,
-          unitId: dto.unitId,
-          createdBy: userId,
-          title: dto.title,
-          description: dto.description ?? null,
-          priority: dto.priority ?? TaskPriority.medium,
-          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
-          estimatedHours: dto.estimatedHours ?? null,
-          status: initialStatus,
-          approvalDecision,
-          approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
-          approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
-        } as any,
-      });
-      await this.prisma.subTaskUnit.create({
-        data: { subTaskId: subTask.id, unitId: dto.unitId },
-      });
     }
 
     const created = await this.prisma.task.findUnique({
@@ -1872,14 +1878,22 @@ export class TaskService {
       select: { id: true },
     });
 
-    // Subtasks are unit-scoped and unaffected by this change; keep their
-    // taskAssigneeId pointing at the (single) task-level assignee.
-    const taskLevelAssigneeId = taskAssignees[0]?.id ?? null;
-
-    await this.prisma.subTask.updateMany({
+    const subTasks = await this.prisma.subTask.findMany({
       where: { taskId },
-      data: { taskAssigneeId: taskLevelAssigneeId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
     });
+
+    if (taskAssignees.length > 0 && subTasks.length > 0) {
+      // Distribute subTasks evenly to taskAssignees
+      for (let i = 0; i < subTasks.length; i++) {
+        const assigneeId = taskAssignees[i % taskAssignees.length].id;
+        await this.prisma.subTask.update({
+          where: { id: subTasks[i].id },
+          data: { taskAssigneeId: assigneeId },
+        });
+      }
+    }
 
     const updated = await this.prisma.task.findUnique({
       where: { id: taskId },
