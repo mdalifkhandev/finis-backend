@@ -10,7 +10,7 @@ import {
   IsUUID,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { TaskPriority, TaskStatus } from '../../../generated/prisma/client';
 
 export class CreateTaskFloorDto {
@@ -176,18 +176,22 @@ export class CreateSubTaskDto {
 export class UpdateSubTaskDto {
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => value === '' ? undefined : value)
   title?: string;
 
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => value === '' ? undefined : value)
   description?: string;
 
   @IsOptional()
   @IsEnum(TaskPriority)
+  @Transform(({ value }) => value === '' ? undefined : value)
   priority?: TaskPriority;
 
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => value === '' ? undefined : value)
   dueDate?: string;
 }
 
