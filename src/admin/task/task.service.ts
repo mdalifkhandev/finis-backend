@@ -1688,6 +1688,37 @@ export class TaskService {
     });
   }
 
+  async updateSubTask(
+    subTaskId: string,
+    dto: import('./dto/task.dto').UpdateSubTaskDto,
+    userId: string,
+    userRole: string,
+  ) {
+    const subTask = await this.prisma.subTask.findUnique({
+      where: { id: subTaskId },
+      include: { task: true },
+    });
+    if (!subTask) {
+      throw new NotFoundException('Sub task not found');
+    }
+
+    await this.verifyTaskAccess(subTask.taskId, userId, userRole);
+
+    return this.prisma.subTask.update({
+      where: { id: subTaskId },
+      data: {
+        title: dto.title,
+        description: dto.description,
+        priority: dto.priority as any,
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+      },
+      include: {
+        task: { select: { id: true, title: true } },
+        unit: { select: { id: true, name: true } },
+      },
+    });
+  }
+
   async reviewTaskApproval(taskId: string, dto: ReviewTaskDto, userId: string, userRole: string) {
     await this.verifyTaskAccess(taskId, userId, userRole);
     if (userRole !== UserRole.admin && userRole !== UserRole.super_admin && userRole !== UserRole.manager) {

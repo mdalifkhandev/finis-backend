@@ -18,7 +18,7 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { UserRole } from '../../generated/prisma/client';
 import { S3Service } from '../../s3/s3.service';
-import { ReviewTaskDto } from './dto/task.dto';
+import { ReviewTaskDto, UpdateSubTaskDto } from './dto/task.dto';
 
 @Controller('admin/subtasks')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -28,6 +28,16 @@ export class SubTaskController {
     private readonly taskService: TaskService,
     private readonly s3Service: S3Service,
   ) {}
+
+  @Put(':id')
+  async updateSubTask(
+    @Param('id') id: string,
+    @Body() dto: UpdateSubTaskDto,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.taskService.updateSubTask(id, dto, userId, userRole);
+  }
 
   /** GET /admin/subtasks — সব subtask with pagination/filter */
   @Get()

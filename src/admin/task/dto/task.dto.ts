@@ -1,3 +1,4 @@
+import { PartialType } from '@nestjs/mapped-types';
 import {
   ArrayNotEmpty,
   IsArray,
@@ -171,6 +172,8 @@ export class CreateSubTaskDto {
   @IsNumber()
   estimatedHours?: number;
 }
+
+export class UpdateSubTaskDto extends PartialType(CreateSubTaskDto) {}
 
 export class ReviewTaskDto {
   @IsString()
