@@ -173,7 +173,23 @@ export class CreateSubTaskDto {
   estimatedHours?: number;
 }
 
-export class UpdateSubTaskDto extends PartialType(CreateSubTaskDto) {}
+export class UpdateSubTaskDto {
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsEnum(TaskPriority)
+  priority?: TaskPriority;
+
+  @IsOptional()
+  @IsString()
+  dueDate?: string;
+}
 
 export class ReviewTaskDto {
   @IsString()
