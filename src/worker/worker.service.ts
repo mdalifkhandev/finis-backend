@@ -395,6 +395,7 @@ export class WorkerService {
               },
               project: { select: { id: true, name: true } },
               unit: { select: { id: true, name: true } },
+              allowSubTaskCreation: true,
             },
           },
           _count: { select: { reports: true } },
@@ -448,6 +449,7 @@ export class WorkerService {
           status: subTask.task.status,
           project: subTask.task.project,
           scheduledLabel: thisWeekSchedule[0]?.schedule?.name ?? null,
+          allowSubTaskCreation: subTask.task.allowSubTaskCreation,
           floors: [],
           workflow: this.buildWorkflowSnapshot(subTask.task),
         };
