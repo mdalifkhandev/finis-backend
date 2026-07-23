@@ -1691,8 +1691,8 @@ export class TaskService {
 
   async reviewTaskApproval(taskId: string, dto: ReviewTaskDto, userId: string, userRole: string) {
     await this.verifyTaskAccess(taskId, userId, userRole);
-    if (userRole !== UserRole.admin && userRole !== UserRole.super_admin) {
-      throw new ForbiddenException('Only admin can approve or reject the task');
+    if (userRole !== UserRole.admin && userRole !== UserRole.super_admin && userRole !== UserRole.manager) {
+      throw new ForbiddenException('Only admin or manager can approve or reject the task');
     }
 
     if (dto.reviewDecision === 'approved') {
@@ -2400,11 +2400,20 @@ export class TaskService {
       where: { id: taskId },
       data: {
         completionDecision: 'rejected',
-        approvalDecision: 'rejected',
+        // approvalDecision 'approved' রাখা হচ্ছে যাতে worker আবার startTask/submitReport করতে পারে
         completionReviewedBy: userId,
         completionReviewedAt: new Date(),
         completionNotes: dto.reviewDescription ?? null,
         status: 'in_progress',
+      },
+    });
+
+    // সব completed SubTask কে in_progress-এ ফিরিয়ে দাও যাতে worker আবার resubmit করতে পারে
+    await this.prisma.subTask.updateMany({
+      where: { taskId, status: 'completed' },
+      data: {
+        status: 'in_progress',
+        completedAt: null,
       },
     });
 
