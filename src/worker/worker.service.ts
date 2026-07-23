@@ -495,7 +495,9 @@ export class WorkerService {
               ? 'start'
               : subTask.status === 'in_progress'
                 ? 'continue'
-          : 'view',
+                : subTask.status === 'revision'
+                  ? 'resubmit'
+                  : 'view',
           reportCount: subTask._count?.reports ?? 0,
           workflow: this.buildWorkflowSnapshot(subTask),
         });
@@ -789,7 +791,9 @@ export class WorkerService {
                     ? 'start'
                     : subTask.status === 'in_progress'
                       ? 'continue'
-                      : 'view',
+                      : subTask.status === 'revision'
+                        ? 'resubmit'
+                        : 'view',
                 reportCount: subTask.reports?.length ?? 0,
                 workflow: this.buildWorkflowSnapshot(subTask),
               })),
@@ -971,7 +975,9 @@ export class WorkerService {
               ? 'start'
               : subTask.status === 'in_progress'
                 ? 'continue'
-                : 'view',
+                : subTask.status === 'revision'
+                  ? 'resubmit'
+                  : 'view',
           reportCount: subTask._count?.reports ?? 0,
           workflow: this.buildWorkflowSnapshot(subTask),
         });
@@ -1253,7 +1259,7 @@ export class WorkerService {
     if (subTask.task.approvalDecision !== 'approved') {
       throw new BadRequestException('Main task is not approved yet');
     }
-    if (subTask.status === 'in_progress') {
+    if (subTask.status === 'in_progress' || subTask.status === 'revision') {
       return this.prisma.subTask.findUnique({
         where: { id: taskId },
         include: {
@@ -1624,6 +1630,12 @@ export class WorkerService {
         status: 'review',
         submittedAt: new Date(),
       },
+    });
+
+    // যেকোনো SubTask submit হলে Main task-ও review-এ যাবে
+    await this.prisma.task.update({
+      where: { id: subTask.taskId },
+      data: { status: 'review' },
     });
 
     return {

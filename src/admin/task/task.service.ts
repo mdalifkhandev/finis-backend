@@ -243,13 +243,12 @@ export class TaskService {
     }
 
     if (subTaskCount === completedCount) {
-      await this.prisma.task.update({
-        where: { id: taskId },
-        data: { status: 'review' },
-      });
+      // সব SubTask completed — main task review-এ থাকবে (admin final approve করবে)
+      // main task ইতিমধ্যে review-এ আছে (submitTaskReport থেকে set হয়েছে)
       return;
     }
 
+    // কোনো SubTask incomplete বা revision-এ আছে → main task in_progress
     await this.prisma.task.update({
       where: { id: taskId },
       data: { status: 'in_progress' },
@@ -2321,7 +2320,8 @@ export class TaskService {
       await this.prisma.subTask.update({
         where: { id: report.subTaskId },
         data: {
-          status: dto.reviewDecision === 'approved' ? 'completed' : 'in_progress',
+          // approve → completed, reject → revision (worker আবার resubmit করবে)
+          status: dto.reviewDecision === 'approved' ? 'completed' : 'revision',
           submittedAt: dto.reviewDecision === 'approved' ? new Date() : undefined,
           completedAt: dto.reviewDecision === 'approved' ? new Date() : null,
           approvalDecision: dto.reviewDecision as any,
@@ -2368,7 +2368,16 @@ export class TaskService {
       throw new BadRequestException('Task is not ready for final review');
     }
 
+    // সব SubTask completed কিনা check করো — না হলে approve করা যাবে না
     if (dto.reviewDecision === 'approved') {
+      const incompleteCount = task.subTasks.filter(
+        (st) => st.status !== 'completed',
+      ).length;
+      if (incompleteCount > 0) {
+        throw new BadRequestException(
+          `Cannot approve: ${incompleteCount} sub-task(s) are not yet completed.`,
+        );
+      }
       await this.prisma.task.update({
         where: { id: taskId },
         data: {
@@ -2408,11 +2417,11 @@ export class TaskService {
       },
     });
 
-    // সব completed SubTask কে in_progress-এ ফিরিয়ে দাও যাতে worker আবার resubmit করতে পারে
+    // সব completed SubTask কে revision-এ ফিরিয়ে দাও যাতে worker আবার resubmit করতে পারে
     await this.prisma.subTask.updateMany({
       where: { taskId, status: 'completed' },
       data: {
-        status: 'in_progress',
+        status: 'revision',
         completedAt: null,
       },
     });
