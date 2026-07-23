@@ -521,7 +521,7 @@ export class TaskService {
       taskInventories: (task.taskInventories ?? []).map((item: any) => ({
         id: item.id,
         inventory: item.inventory,
-        quantity: item.quantity ?? null,
+        qtyUsed: item.qtyUsed,
         subTask: item.subTask ?? null,
       })),
       expenses: expenses.map((expense) => ({
