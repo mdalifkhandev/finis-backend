@@ -1528,9 +1528,6 @@ export class WorkerService {
           where: { id: item.inventoryId },
         });
         if (!inv) throw new NotFoundException(`Inventory item not found: ${item.inventoryId}`);
-        if (inv.currentQty < item.qtyUsed) {
-          throw new BadRequestException(`Not enough stock for: ${inv.name}`);
-        }
 
         const existingTaskInventory = await this.prisma.taskInventory.findFirst({
           where: {
@@ -1540,20 +1537,35 @@ export class WorkerService {
           },
         });
 
-        await this.prisma.$transaction([
-          this.prisma.inventoryItem.update({
-            where: { id: item.inventoryId },
-            data: { currentQty: { decrement: item.qtyUsed } },
-          }),
-          this.prisma.inventoryUsageLog.create({
-            data: {
-              inventoryId: item.inventoryId,
-              userId: workerId,
-              projectId: subTask.task.project.id,
-              qtyChange: -item.qtyUsed,
-              reason: `Used in task: ${subTask.task.title}`,
-            },
-          }),
+        const stockDelta = item.qtyUsed - (existingTaskInventory?.qtyUsed || 0);
+
+        if (stockDelta > 0 && inv.currentQty < stockDelta) {
+          throw new BadRequestException(`Not enough stock for: ${inv.name}`);
+        }
+
+        const txActions: any[] = [];
+
+        if (stockDelta !== 0) {
+          txActions.push(
+            this.prisma.inventoryItem.update({
+              where: { id: item.inventoryId },
+              data: {
+                currentQty: stockDelta > 0 ? { decrement: stockDelta } : { increment: Math.abs(stockDelta) },
+              },
+            }),
+            this.prisma.inventoryUsageLog.create({
+              data: {
+                inventoryId: item.inventoryId,
+                userId: workerId,
+                projectId: subTask.task.project.id,
+                qtyChange: -stockDelta,
+                reason: `Used in task: ${subTask.task.title}`,
+              },
+            })
+          );
+        }
+
+        txActions.push(
           existingTaskInventory
             ? this.prisma.taskInventory.update({
                 where: { id: existingTaskInventory.id },
@@ -1566,8 +1578,10 @@ export class WorkerService {
                   inventoryId: item.inventoryId,
                   qtyUsed: item.qtyUsed,
                 },
-              }),
-        ]);
+              })
+        );
+
+        await this.prisma.$transaction(txActions);
       }
     }
 
@@ -1679,9 +1693,6 @@ export class WorkerService {
           where: { id: item.inventoryId },
         });
         if (!inv) throw new NotFoundException(`Inventory item not found: ${item.inventoryId}`);
-        if (inv.currentQty < item.qtyUsed) {
-          throw new BadRequestException(`Not enough stock for: ${inv.name}`);
-        }
 
         const existingTaskInventory = await this.prisma.taskInventory.findFirst({
           where: {
@@ -1691,20 +1702,35 @@ export class WorkerService {
           },
         });
 
-        await this.prisma.$transaction([
-          this.prisma.inventoryItem.update({
-            where: { id: item.inventoryId },
-            data: { currentQty: { decrement: item.qtyUsed } },
-          }),
-          this.prisma.inventoryUsageLog.create({
-            data: {
-              inventoryId: item.inventoryId,
-              userId: workerId,
-              projectId: task.project.id,
-              qtyChange: -item.qtyUsed,
-              reason: `Used in task: ${task.title}`,
-            },
-          }),
+        const stockDelta = item.qtyUsed - (existingTaskInventory?.qtyUsed || 0);
+
+        if (stockDelta > 0 && inv.currentQty < stockDelta) {
+          throw new BadRequestException(`Not enough stock for: ${inv.name}`);
+        }
+
+        const txActions: any[] = [];
+
+        if (stockDelta !== 0) {
+          txActions.push(
+            this.prisma.inventoryItem.update({
+              where: { id: item.inventoryId },
+              data: {
+                currentQty: stockDelta > 0 ? { decrement: stockDelta } : { increment: Math.abs(stockDelta) },
+              },
+            }),
+            this.prisma.inventoryUsageLog.create({
+              data: {
+                inventoryId: item.inventoryId,
+                userId: workerId,
+                projectId: task.project.id,
+                qtyChange: -stockDelta,
+                reason: `Used in task: ${task.title}`,
+              },
+            })
+          );
+        }
+
+        txActions.push(
           existingTaskInventory
             ? this.prisma.taskInventory.update({
                 where: { id: existingTaskInventory.id },
@@ -1717,8 +1743,10 @@ export class WorkerService {
                   inventoryId: item.inventoryId,
                   qtyUsed: item.qtyUsed,
                 },
-              }),
-        ]);
+              })
+        );
+
+        await this.prisma.$transaction(txActions);
       }
     }
 
