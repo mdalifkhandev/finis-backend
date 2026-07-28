@@ -40,14 +40,19 @@ export class ProjectService {
   }
 
   private buildAutoFloorUnits(floorNumber: number, unitMin?: number | null, unitMax?: number | null) {
-    const startSuffix = unitMin !== undefined && unitMin !== null ? unitMin % 100 : 1;
-    const endSuffix = unitMax !== undefined && unitMax !== null ? unitMax % 100 : startSuffix;
+    const maxUnitValue = Math.max(
+      unitMin !== undefined && unitMin !== null ? unitMin : 0,
+      unitMax !== undefined && unitMax !== null ? unitMax : 0,
+    );
+    const suffixBase = maxUnitValue > 0 ? 10 ** Math.max(1, String(maxUnitValue).length - 1) : 100;
+    const startSuffix = unitMin !== undefined && unitMin !== null ? unitMin % suffixBase : 1;
+    const endSuffix = unitMax !== undefined && unitMax !== null ? unitMax % suffixBase : startSuffix;
     if (startSuffix > endSuffix) {
       throw new BadRequestException('Unit minimum cannot be greater than unit maximum.');
     }
 
     return Array.from({ length: endSuffix - startSuffix + 1 }, (_, index) => {
-      const unitNumber = floorNumber * 100 + startSuffix + index;
+      const unitNumber = floorNumber * suffixBase + startSuffix + index;
       return {
         name: String(unitNumber),
         status: 'pending' as const,

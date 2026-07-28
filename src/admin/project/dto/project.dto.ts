@@ -9,6 +9,7 @@ import {
   Min,
   IsBoolean,
   ValidateIf,
+  IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ProjectType, ProjectStatus, FloorStatus, RoomStatus } from '../../../generated/prisma/client';
@@ -126,6 +127,7 @@ export class CreateProjectDto {
   name!: string;
 
   @IsString()
+  @IsUUID()
   companyId!: string;
 
   @IsOptional()
