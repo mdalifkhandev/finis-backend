@@ -64,14 +64,13 @@ export class SubTaskController {
     });
   }
 
-  /** GET /admin/subtasks/groups — grouped subtask cards */
+  /** GET /admin/subtasks/groups — grouped subtask list (title only) */
   @Get('groups')
   getSubTaskGroups(
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
     @Query('taskId') taskId?: string,
     @Query('projectId') projectId?: string,
-    @Query('unitId') unitId?: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
     @Query('page') page = '1',
@@ -80,7 +79,6 @@ export class SubTaskController {
     return this.taskService.getGroupedSubTasks(userId, userRole, {
       taskId,
       projectId,
-      unitId,
       status,
       search,
       page: +page,
@@ -88,25 +86,24 @@ export class SubTaskController {
     });
   }
 
-  /** GET /admin/subtasks/groups/:taskId/:title — grouped subtask details */
-  @Get('groups/:taskId/:title')
-  getSubTaskGroupDetails(
-    @Param('taskId') taskId: string,
+  /** GET /admin/subtasks/groups/:title — sub-tasks within a group */
+  @Get('groups/:title')
+  getSubTasksByGroup(
     @Param('title') title: string,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
+    @Query('taskId') taskId?: string,
     @Query('projectId') projectId?: string,
-    @Query('unitId') unitId?: string,
     @Query('status') status?: string,
-    @Query('search') search?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '10',
   ) {
-    return this.taskService.getGroupedSubTaskDetails(userId, userRole, {
+    return this.taskService.getSubTasksByGroup(userId, userRole, decodeURIComponent(title), {
       taskId,
-      title,
       projectId,
-      unitId,
       status,
-      search,
+      page: +page,
+      limit: +limit,
     });
   }
 

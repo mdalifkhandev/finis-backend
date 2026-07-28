@@ -230,64 +230,25 @@ export class TaskService {
     return firstAssignee;
   }
 
-  private groupSubTasksByTaskAndTitle(subTasks: any[]) {
+  private groupSubTasksByTitle(subTasks: any[]) {
     const grouped = new Map<string, any>();
 
     for (const subTask of subTasks) {
-      const taskId = subTask.task?.id ?? subTask.taskId ?? 'unknown-task';
       const title = subTask.title ?? 'Untitled';
-      const groupKey = `${taskId}__${title.toLowerCase()}`;
-      const unitItems = (subTask.subTaskUnits ?? []).map((item: any) => item.unit);
-      const primaryUnit = subTask.unit ?? unitItems[0] ?? null;
-
-      const item = {
-        id: subTask.id,
-        title: subTask.title,
-        description: subTask.description,
-        priority: subTask.priority,
-        dueDate: subTask.dueDate,
-        estimatedHours: subTask.estimatedHours,
-        status: subTask.status,
-        approvalDecision: subTask.approvalDecision,
-        reports: subTask.reports,
-        task: subTask.task
-          ? {
-              ...subTask.task,
-              workflow: this.buildWorkflowSnapshot(subTask.task),
-            }
-          : null,
-        unit: primaryUnit,
-        units: unitItems,
-        workflow: this.buildWorkflowSnapshot(subTask),
-      };
+      const groupKey = title.toLowerCase();
 
       const existing = grouped.get(groupKey);
       if (!existing) {
         grouped.set(groupKey, {
-          taskId,
           title: subTask.title,
-          task: subTask.task
-            ? {
-                ...subTask.task,
-                workflow: this.buildWorkflowSnapshot(subTask.task),
-              }
-            : null,
-          units: unitItems,
           subTaskCount: 1,
-          items: [item],
+          statusSummary: { [subTask.status]: 1 },
         });
         continue;
       }
 
       existing.subTaskCount += 1;
-      existing.items.push(item);
-      existing.units = Array.from(
-        new Map(
-          [...existing.units, ...unitItems]
-            .filter(Boolean)
-            .map((unit: any) => [unit.id, unit]),
-        ).values(),
-      );
+      existing.statusSummary[subTask.status] = (existing.statusSummary[subTask.status] ?? 0) + 1;
     }
 
     return Array.from(grouped.values());
@@ -1526,7 +1487,6 @@ export class TaskService {
     query: {
       taskId?: string;
       projectId?: string;
-      unitId?: string;
       status?: string;
       search?: string;
       page?: number;
@@ -1543,71 +1503,22 @@ export class TaskService {
         ...(query.projectId && { projectId: query.projectId }),
       },
       ...(query.taskId && { taskId: query.taskId }),
-      ...(query.unitId && { unitId: query.unitId }),
       ...(query.status && { status: query.status }),
       ...(query.search && {
-        OR: [
-          { title: { contains: query.search, mode: 'insensitive' } },
-          { description: { contains: query.search, mode: 'insensitive' } },
-        ],
+        title: { contains: query.search, mode: 'insensitive' },
       }),
     };
 
     const data = await this.prisma.subTask.findMany({
       where,
-      include: {
-        task: {
-          select: {
-            id: true,
-            title: true,
-            priority: true,
-            dueDate: true,
-            status: true,
-            approvalDecision: true,
-            reports: {
-              orderBy: { submittedAt: 'desc' },
-              take: 1,
-              select: {
-                id: true,
-                notes: true,
-                beforePhotoUrl: true,
-                afterPhotoUrl: true,
-                receiptUrl: true,
-                reviewDecision: true,
-                reviewDescription: true,
-                reviewAttachmentUrl: true,
-                submittedAt: true,
-              },
-            },
-            project: { select: { id: true, name: true } },
-          },
-        },
-        reports: {
-          orderBy: { submittedAt: 'desc' },
-          take: 1,
-          select: {
-            id: true,
-            notes: true,
-            beforePhotoUrl: true,
-            afterPhotoUrl: true,
-            receiptUrl: true,
-            reviewDecision: true,
-            reviewDescription: true,
-            reviewAttachmentUrl: true,
-            submittedAt: true,
-          },
-        },
-        unit: { select: { id: true, name: true } },
-        subTaskUnits: {
-          include: {
-            unit: { select: { id: true, name: true } },
-          },
-        },
+      select: {
+        id: true,
+        title: true,
+        status: true,
       },
-      orderBy: { createdAt: 'desc' },
     });
 
-    const grouped = this.groupSubTasksByTaskAndTitle(data as any[]);
+    const grouped = this.groupSubTasksByTitle(data as any[]);
     const totalGroups = grouped.length;
     const offset = (page - 1) * limit;
 
@@ -1622,98 +1533,97 @@ export class TaskService {
     };
   }
 
-  async getGroupedSubTaskDetails(
+  async getSubTasksByGroup(
     userId: string,
     userRole: string,
+    title: string,
     query: {
-      taskId: string;
-      title: string;
+      taskId?: string;
       projectId?: string;
-      unitId?: string;
       status?: string;
-      search?: string;
+      page?: number;
+      limit?: number;
     },
   ) {
+    const page = Math.max(1, Number(query.page ?? 1) || 1);
+    const limit = Math.max(1, Number(query.limit ?? 10) || 10);
+    const skip = (page - 1) * limit;
+
     const projectIds = await this.getProjectIdsForUser(userId, userRole);
     const where: any = {
-      taskId: query.taskId,
-      title: query.title,
+      title: { equals: title, mode: 'insensitive' },
       task: {
         projectId: { in: projectIds },
         ...(query.projectId && { projectId: query.projectId }),
       },
-      ...(query.unitId && { unitId: query.unitId }),
+      ...(query.taskId && { taskId: query.taskId }),
       ...(query.status && { status: query.status }),
-      ...(query.search && {
-        OR: [
-          { title: { contains: query.search, mode: 'insensitive' } },
-          { description: { contains: query.search, mode: 'insensitive' } },
-        ],
-      }),
     };
 
-    const subTasks = await this.prisma.subTask.findMany({
-      where,
-      include: {
-        task: {
-          select: {
-            id: true,
-            title: true,
-            priority: true,
-            dueDate: true,
-            status: true,
-            approvalDecision: true,
-            reports: {
-              orderBy: { submittedAt: 'desc' },
-              take: 1,
-              select: {
-                id: true,
-                notes: true,
-                beforePhotoUrl: true,
-                afterPhotoUrl: true,
-                receiptUrl: true,
-                reviewDecision: true,
-                reviewDescription: true,
-                reviewAttachmentUrl: true,
-                submittedAt: true,
-              },
+    const [subTasks, total] = await Promise.all([
+      this.prisma.subTask.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          task: {
+            select: {
+              id: true,
+              title: true,
+              priority: true,
+              dueDate: true,
+              status: true,
+              project: { select: { id: true, name: true } },
             },
-            project: { select: { id: true, name: true } },
+          },
+          unit: { select: { id: true, name: true } },
+          subTaskUnits: {
+            include: {
+              unit: { select: { id: true, name: true } },
+            },
+          },
+          reports: {
+            orderBy: { submittedAt: 'desc' },
+            take: 1,
+            select: {
+              id: true,
+              notes: true,
+              beforePhotoUrl: true,
+              afterPhotoUrl: true,
+              receiptUrl: true,
+              submittedAt: true,
+            },
           },
         },
-        reports: {
-          orderBy: { submittedAt: 'desc' },
-          take: 1,
-          select: {
-            id: true,
-            notes: true,
-            beforePhotoUrl: true,
-            afterPhotoUrl: true,
-            receiptUrl: true,
-            reviewDecision: true,
-            reviewDescription: true,
-            reviewAttachmentUrl: true,
-            submittedAt: true,
-          },
-        },
-        unit: { select: { id: true, name: true } },
-        subTaskUnits: {
-          include: {
-            unit: { select: { id: true, name: true } },
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.subTask.count({ where }),
+    ]);
 
-    const grouped = this.groupSubTasksByTaskAndTitle(subTasks as any[]);
-    return grouped[0] ?? {
-      taskId: query.taskId,
-      title: query.title,
-      task: null,
-      units: [],
-      subTaskCount: 0,
-      items: [],
+    return {
+      title,
+      data: subTasks.map((subTask) => ({
+        id: subTask.id,
+        title: subTask.title,
+        description: subTask.description,
+        priority: subTask.priority,
+        dueDate: subTask.dueDate,
+        estimatedHours: subTask.estimatedHours,
+        status: subTask.status,
+        approvalDecision: subTask.approvalDecision,
+        startedAt: subTask.startedAt,
+        submittedAt: subTask.submittedAt,
+        completedAt: subTask.completedAt,
+        task: subTask.task,
+        units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
+        workflow: this.buildWorkflowSnapshot(subTask),
+      })),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
     };
   }
 
