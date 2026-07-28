@@ -39,11 +39,17 @@ export class CreateRoomDto {
 }
 
 export class AddRoomDto {
+  @IsOptional()
   @IsString()
-  startRoomNumber!: string;
+  name?: string;
 
+  @IsOptional()
   @IsString()
-  endRoomNumber!: string;
+  startRoomNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  endRoomNumber?: string;
 }
 
 export class UpdateRoomDto {

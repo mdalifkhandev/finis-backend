@@ -101,6 +101,46 @@ describe('ProjectService addRoom', () => {
     });
   });
 
+  it('creates a single unit when only name is provided', async () => {
+    await service.addRoom(
+      'project-1',
+      'floor-1',
+      { name: '1001' },
+      'admin-1',
+      UserRole.admin,
+    );
+
+    expect(prismaMock.unit.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          floorId: 'floor-1',
+          name: '1001',
+          status: 'pending',
+          progress: 0,
+        },
+      ],
+    });
+  });
+
+  it('creates a range when name is omitted and start/end are provided', async () => {
+    await service.addRoom(
+      'project-1',
+      'floor-1',
+      { startRoomNumber: '1006', endRoomNumber: '1010' },
+      'admin-1',
+      UserRole.admin,
+    );
+
+    expect(prismaMock.unit.createMany).toHaveBeenCalledWith({
+      data: ['1006', '1007', '1008', '1009', '1010'].map((name) => ({
+        floorId: 'floor-1',
+        name,
+        status: 'pending',
+        progress: 0,
+      })),
+    });
+  });
+
   it('rejects mismatched prefixes', async () => {
     await expect(
       service.addRoom(

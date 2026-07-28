@@ -1024,35 +1024,51 @@ export class ProjectService {
       };
     };
 
-    const start = parseRoomLabel(dto.startRoomNumber);
-    const end = parseRoomLabel(dto.endRoomNumber);
+    const isSingleNameMode = !!dto.name && !dto.startRoomNumber && !dto.endRoomNumber;
+    const isRangeMode = !!dto.startRoomNumber && !!dto.endRoomNumber && !dto.name;
 
-    if (start.prefix !== end.prefix) {
-      throw new BadRequestException('Start and end unit prefix must be the same');
+    if (!isSingleNameMode && !isRangeMode) {
+      throw new BadRequestException('Provide either name, or startRoomNumber and endRoomNumber');
     }
 
-    const from = Math.min(start.number, end.number);
-    const to = Math.max(start.number, end.number);
+    const unitsData = isSingleNameMode
+      ? [{
+          floorId,
+          name: dto.name!.trim(),
+          status: 'pending' as const,
+          progress: 0,
+        }]
+      : (() => {
+          const start = parseRoomLabel(dto.startRoomNumber!);
+          const end = parseRoomLabel(dto.endRoomNumber!);
 
-    if (from < 1) {
-      throw new BadRequestException('Unit number must start from 1 or greater');
-    }
+          if (start.prefix !== end.prefix) {
+            throw new BadRequestException('Start and end unit prefix must be the same');
+          }
 
-    if (to - from + 1 > 200) {
-      throw new BadRequestException('Too many units requested');
-    }
+          const from = Math.min(start.number, end.number);
+          const to = Math.max(start.number, end.number);
 
-    const numberWidth = Math.max(start.rawNumber.length, end.rawNumber.length);
+          if (from < 1) {
+            throw new BadRequestException('Unit number must start from 1 or greater');
+          }
 
-    const unitsData = Array.from({ length: to - from + 1 }, (_, index) => {
-      const roomNumber = from + index;
-      return {
-        floorId,
-        name: `${start.prefix}${String(roomNumber).padStart(numberWidth, '0')}`,
-        status: 'pending' as const,
-        progress: 0,
-      };
-    });
+          if (to - from + 1 > 200) {
+            throw new BadRequestException('Too many units requested');
+          }
+
+          const numberWidth = Math.max(start.rawNumber.length, end.rawNumber.length);
+
+          return Array.from({ length: to - from + 1 }, (_, index) => {
+            const roomNumber = from + index;
+            return {
+              floorId,
+              name: `${start.prefix}${String(roomNumber).padStart(numberWidth, '0')}`,
+              status: 'pending' as const,
+              progress: 0,
+            };
+          });
+        })();
 
     await this.prisma.unit.createMany({ data: unitsData });
 
