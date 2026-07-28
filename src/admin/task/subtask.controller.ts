@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Put,
@@ -71,6 +72,16 @@ export class SubTaskController {
     @CurrentUser('role') userRole: string,
   ) {
     return this.taskService.getAdminSubTaskDetails(userId, userRole, id);
+  }
+
+  /** DELETE /admin/subtasks/:id — delete subtask */
+  @Delete(':id')
+  deleteSubTask(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.taskService.deleteSubTask(id, userId, userRole);
   }
 
   /** PUT /admin/subtasks/:id/approval — subtask approval/rejection */

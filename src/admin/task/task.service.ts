@@ -1314,6 +1314,28 @@ export class TaskService {
     return this.toSimpleSubTaskResponse(subTask);
   }
 
+  async deleteSubTask(subTaskId: string, userId: string, userRole: string) {
+    const subTask = await this.prisma.subTask.findUnique({
+      where: { id: subTaskId },
+      select: { id: true, taskId: true, title: true },
+    });
+
+    if (!subTask) {
+      throw new NotFoundException('Sub task not found');
+    }
+
+    await this.verifyTaskAccess(subTask.taskId, userId, userRole);
+
+    await this.prisma.subTask.delete({
+      where: { id: subTaskId },
+    });
+
+    return {
+      message: 'Sub task deleted successfully',
+      deletedSubTaskId: subTaskId,
+    };
+  }
+
   async getAllSubTasks(
     userId: string,
     userRole: string,
