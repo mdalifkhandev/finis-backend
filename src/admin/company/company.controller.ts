@@ -110,6 +110,16 @@ export class CompanyController {
     return this.companyService.deleteCompany(companyId, adminId, userRole);
   }
 
+  /** DELETE /admin/companies/:id/hard — permanently delete company */
+  @Delete(':id/hard')
+  hardDeleteCompany(
+    @Param('id') companyId: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.companyService.hardDeleteCompany(companyId, adminId, userRole);
+  }
+
   // ─── ASSIGNED PROJECTS ────────────────────────────────────────────────────
 
   /** GET /admin/companies/:id/projects */

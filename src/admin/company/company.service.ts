@@ -276,6 +276,12 @@ export class CompanyService {
     return { message: 'Company deactivated successfully' };
   }
 
+  async hardDeleteCompany(companyId: string, adminId: string, userRole: string = 'admin') {
+    await this.verifyCompanyAccess(companyId, adminId, userRole);
+    await this.prisma.company.delete({ where: { id: companyId } });
+    return { message: 'Company permanently deleted successfully' };
+  }
+
   async getAssignedProjects(companyId: string, adminId: string, userRole: string = 'admin') {
     await this.verifyCompanyAccess(companyId, adminId, userRole);
     return this.prisma.project.findMany({
