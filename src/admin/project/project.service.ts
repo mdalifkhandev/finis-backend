@@ -1015,6 +1015,7 @@ export class ProjectService {
       return {
         prefix: match[1],
         number: Number(match[2]),
+        rawNumber: match[2],
       };
     };
 
@@ -1036,11 +1037,13 @@ export class ProjectService {
       throw new BadRequestException('Too many units requested');
     }
 
+    const numberWidth = Math.max(start.rawNumber.length, end.rawNumber.length);
+
     const unitsData = Array.from({ length: to - from + 1 }, (_, index) => {
       const roomNumber = from + index;
       return {
         floorId,
-        name: `${start.prefix}${roomNumber}`,
+        name: `${start.prefix}${String(roomNumber).padStart(numberWidth, '0')}`,
         status: 'pending' as const,
         progress: 0,
       };
