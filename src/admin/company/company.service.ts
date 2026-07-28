@@ -259,13 +259,13 @@ export class CompanyService {
   async updateCompany(companyId: string, dto: UpdateCompanyDto, adminId: string, logoUrl?: string, userRole: string = 'admin') {
     await this.verifyCompanyAccess(companyId, adminId, userRole);
 
-    const { logoUrl: _, ...restDto } = dto; // body এর logoUrl বাদ দাও
+    const { logoUrl: _, ...restDto } = dto;
 
     return this.prisma.company.update({
       where: { id: companyId },
       data: {
         ...restDto,
-        ...(logoUrl && { logoUrl }), // শুধু file upload হলেই update হবে
+        ...(logoUrl && { logoUrl }),
       },
     });
   }
