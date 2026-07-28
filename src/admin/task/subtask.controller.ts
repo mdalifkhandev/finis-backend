@@ -64,6 +64,52 @@ export class SubTaskController {
     });
   }
 
+  /** GET /admin/subtasks/groups — grouped subtask cards */
+  @Get('groups')
+  getSubTaskGroups(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+    @Query('taskId') taskId?: string,
+    @Query('projectId') projectId?: string,
+    @Query('unitId') unitId?: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('page') page = '1',
+    @Query('limit') limit = '10',
+  ) {
+    return this.taskService.getGroupedSubTasks(userId, userRole, {
+      taskId,
+      projectId,
+      unitId,
+      status,
+      search,
+      page: +page,
+      limit: +limit,
+    });
+  }
+
+  /** GET /admin/subtasks/groups/:taskId/:title — grouped subtask details */
+  @Get('groups/:taskId/:title')
+  getSubTaskGroupDetails(
+    @Param('taskId') taskId: string,
+    @Param('title') title: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+    @Query('projectId') projectId?: string,
+    @Query('unitId') unitId?: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.taskService.getGroupedSubTaskDetails(userId, userRole, {
+      taskId,
+      title,
+      projectId,
+      unitId,
+      status,
+      search,
+    });
+  }
+
   /** GET /admin/subtasks/:id — single subtask details */
   @Get(':id')
   getSubTaskDetails(
