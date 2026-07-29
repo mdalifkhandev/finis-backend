@@ -1573,12 +1573,20 @@ export class TaskService {
               priority: true,
               dueDate: true,
               status: true,
+              approvalDecision: true,
               project: { select: { id: true, name: true } },
             },
           },
           unit: { select: { id: true, name: true } },
           subTaskUnits: {
             include: {
+              unit: { select: { id: true, name: true } },
+            },
+          },
+          creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
+          taskAssignee: {
+            include: {
+              user: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
               unit: { select: { id: true, name: true } },
             },
           },
@@ -1607,6 +1615,7 @@ export class TaskService {
         title: subTask.title,
         description: subTask.description,
         priority: subTask.priority,
+        createdAt: subTask.createdAt,
         dueDate: subTask.dueDate,
         estimatedHours: subTask.estimatedHours,
         status: subTask.status,
@@ -1616,6 +1625,8 @@ export class TaskService {
         completedAt: subTask.completedAt,
         task: subTask.task,
         units: (subTask.subTaskUnits ?? []).map((item: any) => item.unit),
+        creator: subTask.creator,
+        taskAssignee: subTask.taskAssignee,
         workflow: this.buildWorkflowSnapshot(subTask),
       })),
       meta: {
