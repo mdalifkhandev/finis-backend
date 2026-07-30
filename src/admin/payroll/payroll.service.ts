@@ -725,8 +725,8 @@ export class PayrollService {
         ...(accessibleCompanyIds.length > 0 ? { companyId: { in: accessibleCompanyIds } } : {}),
         OR: [
           {
-            payPeriodStart: { gte: window.startDate },
-            payPeriodEnd: { lte: window.endDate },
+            payPeriodStart: { lte: window.endDate },
+            payPeriodEnd: { gte: window.startDate },
           },
           {
             status: 'paid',
@@ -1483,8 +1483,8 @@ export class PayrollService {
       this.prisma.payroll.findMany({
         where: {
           ...(companyIds.length > 0 ? { companyId: { in: companyIds } } : {}),
-          payPeriodStart: { gte: window.startDate },
-          payPeriodEnd: { lte: window.endDate },
+          payPeriodStart: { lte: window.endDate },
+          payPeriodEnd: { gte: window.startDate },
         },
         select: {
           regularHours: true,
