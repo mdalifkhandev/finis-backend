@@ -202,7 +202,7 @@ export class TaskController {
 
   /** DELETE /admin/tasks/:id — Manager */
   @Delete(':id')
-  @Roles(UserRole.admin, UserRole.super_admin)
+  @Roles(UserRole.admin, UserRole.manager, UserRole.super_admin)
   deleteTask(
     @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentUser('id') userId: string,
