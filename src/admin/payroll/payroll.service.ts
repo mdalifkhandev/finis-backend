@@ -198,7 +198,7 @@ export class PayrollService {
       return { startDate: normalizeStart(start), endDate: normalizeEnd(end) };
     };
 
-    if (query.range === 'custom') {
+    if (query.startDate || query.endDate) {
       const start = query.startDate ? normalizeStart(new Date(query.startDate)) : normalizeStart(now);
       const end = query.endDate ? normalizeEnd(new Date(query.endDate)) : normalizeEnd(start);
       return { startDate: start, endDate: end };
