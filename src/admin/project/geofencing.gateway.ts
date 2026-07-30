@@ -504,16 +504,27 @@ export class GeofencingGateway
     };
 
     this.server.to(`project_${projectId}`).emit('worker_checked_in', payload);
-    client.emit('check_in_confirmed', {
-      message: isInsideZone.inside
-        ? `✅ Checked in to ${isInsideZone.zoneName}`
-        : '⚠️ Checked in but outside zone boundaries',
-      sessionId: session.id,
-      ...payload,
-    });
+      client.emit('check_in_confirmed', {
+        message: isInsideZone.inside
+          ? `✅ Checked in to ${isInsideZone.zoneName}`
+          : '⚠️ Checked in but outside zone boundaries',
+        sessionId: session.id,
+        ...payload,
+      });
 
-    console.log(`🟢 CHECK IN: ${user.fullName} | Zone: ${isInsideZone.inside ? isInsideZone.zoneName : 'Outside'}`);
-  }
+      await this.notificationsService.send({
+        userId: user.id,
+        title: isInsideZone.inside ? 'Inside zone' : 'Outside zone',
+        body: isInsideZone.inside
+          ? `You are inside ${isInsideZone.zoneName ?? 'the work zone'}.`
+          : 'You are outside the work zone.',
+        type: 'geofence',
+        refId: projectId,
+        refType: 'geofence',
+      });
+
+      console.log(`🟢 CHECK IN: ${user.fullName} | Zone: ${isInsideZone.inside ? isInsideZone.zoneName : 'Outside'}`);
+    }
 
   // ─── CHECK OUT ──────────────────────────────────────────────────────────────
 
@@ -719,15 +730,6 @@ export class GeofencingGateway
           geofenceName: nearestZone.zoneName,
           distanceM,
           occurredAt: now,
-        });
-
-        await this.notificationsService.send({
-          userId: user.id,
-          title: '⚠️ Geofence Alert',
-          body: 'You have left the designated work zone.',
-          type: 'geofence',
-          refId: nearestZone.id,
-          refType: 'geofence_violation',
         });
       }
 
