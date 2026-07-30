@@ -694,31 +694,32 @@ export class SuperAdminCompaniesService {
   async getCompanyDocuments(companyId: string, query: PaginationQueryDto) {
     await this.findOrFail(companyId);
 
-    const { search, page = 1, limit = 20 } = query;
+    const { search, page = 1, limit = 20, type } = query as PaginationQueryDto & { type?: string };
     const skip = (page - 1) * limit;
+    const normalizedType = type?.trim().toLowerCase();
+    const normalizedSearch = search?.trim().toLowerCase();
+    const isPdfUrl = (value?: string | null) => Boolean(value && /\.pdf(\?|#|$)/i.test(value));
 
-    const documentWhere: any = {
-      companyId,
-      ...(search
-        ? {
-            OR: [
-              { fileName: { contains: search, mode: 'insensitive' } },
-              { fileType: { contains: search, mode: 'insensitive' } },
-              {
-                uploadedByUser: {
-                  fullName: { contains: search, mode: 'insensitive' },
-                },
-              },
-            ],
-          }
-        : {}),
-    };
+    const [company, projectIds] = await Promise.all([
+      this.prisma.company.findUnique({
+        where: { id: companyId },
+        select: { id: true, name: true, documents: true },
+      }),
+      this.prisma.project.findMany({
+        where: { companyId },
+        select: { id: true },
+      }),
+    ]);
 
-    const [documents, total] = await Promise.all([
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
+    const companyProjectIds = projectIds.map((project) => project.id);
+
+    const [companyDocuments, projectDocuments, taskReports, expenses] = await Promise.all([
       this.prisma.document.findMany({
-        where: documentWhere,
-        skip,
-        take: limit,
+        where: { companyId },
         orderBy: { uploadedAt: 'desc' },
         select: {
           id: true,
@@ -731,11 +732,174 @@ export class SuperAdminCompaniesService {
           uploadedByUser: { select: { id: true, fullName: true } },
         },
       }),
-      this.prisma.document.count({ where: documentWhere }),
+      this.prisma.document.findMany({
+        where: {
+          projectId: { in: companyProjectIds },
+        },
+        orderBy: { uploadedAt: 'desc' },
+        select: {
+          id: true,
+          fileName: true,
+          fileUrl: true,
+          fileType: true,
+          fileSizeMb: true,
+          uploadedAt: true,
+          project: { select: { id: true, name: true } },
+          uploadedByUser: { select: { id: true, fullName: true } },
+        },
+      }),
+      this.prisma.taskReport.findMany({
+        where: { task: { projectId: { in: companyProjectIds } } },
+        orderBy: { submittedAt: 'desc' },
+        select: {
+          id: true,
+          taskId: true,
+          subTaskId: true,
+          workerId: true,
+          notes: true,
+          beforePhotoUrl: true,
+          afterPhotoUrl: true,
+          receiptUrl: true,
+          reviewDecision: true,
+          reviewDescription: true,
+          submittedAt: true,
+          task: { select: { id: true, title: true } },
+          subTask: { select: { id: true, title: true } },
+          worker: { select: { id: true, fullName: true, avatarUrl: true, email: true } },
+        },
+      }),
+      this.prisma.expense.findMany({
+        where: { projectId: { in: companyProjectIds } },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          taskId: true,
+          subTaskId: true,
+          workerId: true,
+          description: true,
+          category: true,
+          amount: true,
+          receiptUrl: true,
+          status: true,
+          reviewedAt: true,
+          createdAt: true,
+          task: { select: { id: true, title: true } },
+          subTask: { select: { id: true, title: true } },
+          worker: { select: { id: true, fullName: true, avatarUrl: true, email: true } },
+        },
+      }),
     ]);
 
+    const mappedCompanyDocs = companyDocuments.map((document) => ({
+      id: document.id,
+      type: 'company',
+      title: document.fileName,
+      fileName: document.fileName,
+      fileUrl: document.fileUrl,
+      fileType: document.fileType,
+      fileSizeMb: document.fileSizeMb,
+      uploadedAt: document.uploadedAt,
+      uploadedBy: document.uploadedByUser,
+      company: document.company,
+      project: null,
+      task: null,
+      subTask: null,
+      expense: null,
+    }));
+
+    const mappedProjectDocs = projectDocuments.map((document) => ({
+      id: document.id,
+      type: 'project',
+      title: document.fileName,
+      fileName: document.fileName,
+      fileUrl: document.fileUrl,
+      fileType: document.fileType,
+      fileSizeMb: document.fileSizeMb,
+      uploadedAt: document.uploadedAt,
+      uploadedBy: document.uploadedByUser,
+      company: { id: company.id, name: company.name },
+      project: document.project,
+      task: null,
+      subTask: null,
+      expense: null,
+    }));
+
+    const mappedTaskDocs = taskReports
+      .filter((report) => isPdfUrl(report.receiptUrl))
+      .map((report) => ({
+        id: report.id,
+        type: 'task',
+        title: report.subTask?.title ?? report.task?.title ?? 'Task Report',
+        fileName: report.receiptUrl ?? 'Task Report',
+        fileUrl: report.receiptUrl ?? null,
+        fileType: null,
+        fileSizeMb: null,
+        uploadedAt: report.submittedAt,
+        uploadedBy: report.worker,
+        company: { id: company.id, name: company.name },
+        project: report.task ? { id: companyProjectIds.length ? report.taskId : null, name: null } : null,
+        task: report.task,
+        subTask: report.subTask,
+        expense: null,
+      }));
+
+    const mappedExpenseDocs = expenses
+      .filter((expense) => isPdfUrl(expense.receiptUrl))
+      .map((expense) => ({
+        id: expense.id,
+        type: 'expense',
+        title: expense.description,
+        fileName: expense.description,
+        fileUrl: expense.receiptUrl,
+        fileType: null,
+        fileSizeMb: null,
+        uploadedAt: expense.createdAt,
+        uploadedBy: expense.worker,
+        company: { id: company.id, name: company.name },
+        project: null,
+        task: expense.task,
+        subTask: expense.subTask,
+        expense: {
+          id: expense.id,
+          description: expense.description,
+          category: expense.category,
+          amount: expense.amount,
+          status: expense.status,
+        },
+      }));
+
+    let documents: any[] = [...mappedCompanyDocs, ...mappedProjectDocs, ...mappedTaskDocs, ...mappedExpenseDocs];
+
+    if (normalizedType) {
+      documents = documents.filter((doc) => doc.type === normalizedType);
+    }
+
+    if (normalizedSearch) {
+      documents = documents.filter((doc) => {
+        const haystack = [
+          doc.title,
+          doc.fileName,
+          doc.project?.name,
+          doc.task?.title,
+          doc.subTask?.title,
+          doc.expense?.description,
+          doc.company?.name,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+
+        return haystack.includes(normalizedSearch);
+      });
+    }
+
+    const total = documents.length;
+    const paginated = documents
+      .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())
+      .slice(skip, skip + limit);
+
     return {
-      data: documents,
+      data: paginated,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }

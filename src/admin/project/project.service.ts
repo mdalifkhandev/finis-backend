@@ -1365,9 +1365,25 @@ export class ProjectService {
       });
     }
 
-    return documents.sort(
+    const sortedDocuments = documents.sort(
       (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
     );
+
+    return {
+      project: {
+        id: projectId,
+      },
+      documents: sortedDocuments,
+      taskDocuments: sortedDocuments.filter((document) => document.type === 'task'),
+      expenseDocuments: sortedDocuments.filter((document) => document.type === 'expense'),
+      projectDocuments: sortedDocuments.filter((document) => document.type === 'project'),
+      meta: {
+        total: sortedDocuments.length,
+        taskTotal: sortedDocuments.filter((document) => document.type === 'task').length,
+        expenseTotal: sortedDocuments.filter((document) => document.type === 'expense').length,
+        projectTotal: sortedDocuments.filter((document) => document.type === 'project').length,
+      },
+    };
   }
 
   async uploadProjectDocument(
