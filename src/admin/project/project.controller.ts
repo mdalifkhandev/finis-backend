@@ -100,15 +100,17 @@ export class ProjectController {
   }
 
   /** GET /admin/projects/:id/documents
-   *  Returns: all documents uploaded for the project
+   *  Returns: project docs, task docs and expense docs
    */
   @Get(':id/documents')
   getProjectDocuments(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
+    @Query('type') type?: string,
+    @Query('search') search?: string,
   ) {
-    return this.projectService.getProjectDocuments(id, userId, userRole);
+    return this.projectService.getProjectDocuments(id, userId, userRole, { type, search });
   }
 
   /** POST /admin/projects/:id/documents

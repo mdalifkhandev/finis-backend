@@ -1219,33 +1219,155 @@ export class ProjectService {
     };
   }
 
-  async getProjectDocuments(projectId: string, userId: string, userRole: string) {
+  async getProjectDocuments(
+    projectId: string,
+    userId: string,
+    userRole: string,
+    query: { type?: string; search?: string } = {},
+  ) {
     await this.verifyProjectAccess(projectId, userId, userRole);
 
-    const documents = await this.prisma.document.findMany({
-      where: { projectId },
-      orderBy: { uploadedAt: 'desc' },
-      include: {
-        uploadedByUser: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            avatarUrl: true,
+    const normalizedType = query.type?.trim().toLowerCase();
+    const normalizedSearch = query.search?.trim().toLowerCase();
+    const isPdfUrl = (value?: string | null) => Boolean(value && /\.pdf(\?|#|$)/i.test(value));
+
+    const [projectDocuments, taskReports, expenses] = await Promise.all([
+      this.prisma.document.findMany({
+        where: { projectId },
+        orderBy: { uploadedAt: 'desc' },
+        include: {
+          uploadedByUser: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              avatarUrl: true,
+            },
           },
         },
-      },
-    });
+      }),
+      this.prisma.taskReport.findMany({
+        where: { task: { projectId } },
+        orderBy: { submittedAt: 'desc' },
+        select: {
+          id: true,
+          taskId: true,
+          subTaskId: true,
+          workerId: true,
+          notes: true,
+          beforePhotoUrl: true,
+          afterPhotoUrl: true,
+          receiptUrl: true,
+          reviewDecision: true,
+          reviewDescription: true,
+          submittedAt: true,
+          task: { select: { id: true, title: true } },
+          subTask: { select: { id: true, title: true } },
+          worker: { select: { id: true, fullName: true, avatarUrl: true, email: true } },
+        },
+      }),
+      this.prisma.expense.findMany({
+        where: { projectId },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          taskId: true,
+          subTaskId: true,
+          workerId: true,
+          description: true,
+          category: true,
+          amount: true,
+          receiptUrl: true,
+          status: true,
+          reviewedAt: true,
+          createdAt: true,
+          task: { select: { id: true, title: true } },
+          subTask: { select: { id: true, title: true } },
+          worker: { select: { id: true, fullName: true, avatarUrl: true, email: true } },
+        },
+      }),
+    ]);
 
-    return documents.map((document) => ({
+    const mappedProjectDocs = projectDocuments.map((document) => ({
       id: document.id,
+      type: 'project',
+      title: document.fileName,
       fileName: document.fileName,
       fileUrl: document.fileUrl,
       fileType: document.fileType,
       fileSizeMb: document.fileSizeMb,
       uploadedAt: document.uploadedAt,
       uploadedBy: document.uploadedByUser,
+      task: null,
+      expense: null,
     }));
+
+    const mappedTaskDocs = taskReports
+      .filter((report) => isPdfUrl(report.receiptUrl))
+      .map((report) => ({
+        id: report.id,
+        type: 'task',
+        title: report.subTask?.title ?? report.task?.title ?? 'Task Report',
+        fileName: report.receiptUrl ?? 'Task Report',
+        fileUrl: report.receiptUrl ?? null,
+        fileType: null,
+        fileSizeMb: null,
+        uploadedAt: report.submittedAt,
+        uploadedBy: report.worker,
+        task: report.task,
+        subTask: report.subTask,
+        expense: null,
+      }));
+
+    const mappedExpenseDocs = expenses
+      .filter((expense) => isPdfUrl(expense.receiptUrl))
+      .map((expense) => ({
+        id: expense.id,
+        type: 'expense',
+        title: expense.description,
+        fileName: expense.description,
+        fileUrl: expense.receiptUrl,
+        fileType: null,
+        fileSizeMb: null,
+        uploadedAt: expense.createdAt,
+        uploadedBy: expense.worker,
+        task: expense.task,
+        subTask: expense.subTask,
+        expense: {
+          id: expense.id,
+          description: expense.description,
+          category: expense.category,
+          amount: expense.amount,
+          status: expense.status,
+        },
+      }));
+
+    let documents: any[] = [...mappedProjectDocs, ...mappedTaskDocs, ...mappedExpenseDocs];
+
+    if (normalizedType) {
+      documents = documents.filter((doc) => doc.type === normalizedType);
+    }
+
+    if (normalizedSearch) {
+      documents = documents.filter((doc) => {
+        const haystack = [
+          doc.title,
+          doc.fileName,
+          doc.task?.title,
+          doc.subTask?.title,
+          doc.expense?.description,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+
+        return haystack.includes(normalizedSearch);
+      });
+    }
+
+    return documents.sort(
+      (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
+    );
   }
 
   async uploadProjectDocument(
