@@ -590,6 +590,10 @@ export class ProjectService {
     if (!project) throw new NotFoundException('Project not found');
 
     const primaryContact = project.company.contacts?.[0] ?? null;
+    const floorRangeCount =
+      (typeof (project as any).numFloorsMin === 'number' && typeof (project as any).numFloorsMax === 'number')
+        ? Math.max(0, (project as any).numFloorsMax - (project as any).numFloorsMin + 1)
+        : project.numFloors;
 
     return {
       id: project.id,
@@ -604,7 +608,8 @@ export class ProjectService {
       endDate: project.endDate,
       location: project.location,
       description: project.description,
-      numFloors: project.numFloors,
+      numFloors: floorRangeCount,
+      floorCount: floorRangeCount,
       numFloorsMin: (project as any).numFloorsMin,
       numFloorsMax: (project as any).numFloorsMax,
       unitPerFloor: project.unitPerFloor,

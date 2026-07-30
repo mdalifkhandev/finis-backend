@@ -2055,8 +2055,8 @@ export class TaskService {
   }
 
   async assignWorker(taskId: string, dto: AssignTaskDto, userId: string, userRole: string) {
-    if (userRole !== UserRole.admin && userRole !== UserRole.super_admin) {
-      throw new ForbiddenException('Only admin can assign workers');
+    if (userRole !== UserRole.admin && userRole !== UserRole.manager && userRole !== UserRole.super_admin) {
+      throw new ForbiddenException('Only admin or manager can assign workers');
     }
 
     const task = await this.verifyTaskAccess(taskId, userId, userRole);

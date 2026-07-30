@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Query,
+  ParseUUIDPipe,
   UseGuards,
   UseInterceptors,
   UploadedFile,
@@ -55,7 +56,7 @@ export class TaskController {
   /** GET /admin/tasks/:id — task details with reports and sub tasks */
   @Get(':id')
   getTaskDetails(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
   ) {
@@ -65,7 +66,7 @@ export class TaskController {
   /** GET /admin/tasks/:id/locations — selected floors and units only */
   @Get(':id/locations')
   getTaskLocations(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
   ) {
@@ -75,7 +76,7 @@ export class TaskController {
   /** GET /admin/tasks/:id/subtasks — sub task list */
   @Get(':id/subtasks')
   getSubTasks(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
   ) {
@@ -95,7 +96,7 @@ export class TaskController {
   /** POST /admin/tasks/:id/assign — পুরো task এক worker-কে assign করা */
   @Post(':id/assign')
   assignWorker(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: AssignTaskDto,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
@@ -106,7 +107,7 @@ export class TaskController {
   /** POST /admin/tasks/:id/subtasks — sub task create */
   @Post(':id/subtasks')
   createSubTask(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: CreateSubTaskDto,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
@@ -117,7 +118,7 @@ export class TaskController {
   /** PUT /admin/tasks/:id/subtasks/:subTaskId/approval — worker sub task approval */
   @Put(':id/subtasks/:subTaskId/approval')
   reviewSubTaskCreation(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Param('subTaskId') subTaskId: string,
     @Body() dto: ReviewTaskDto,
     @CurrentUser('id') userId: string,
@@ -129,7 +130,7 @@ export class TaskController {
   /** GET /admin/tasks/:id/available-workers */
   @Get(':id/available-workers')
   getAvailableWorkers(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
     @Query('search') search?: string,
@@ -141,7 +142,7 @@ export class TaskController {
   /** PUT /admin/tasks/:id/approval — task creation approval/rejection */
   @Put(':id/approval')
   reviewTaskApproval(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: ReviewTaskDto,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
@@ -152,7 +153,7 @@ export class TaskController {
   /** PUT /admin/tasks/:id/status — Manager পারবে */
   @Put(':id/status')
   updateTaskStatus(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateTaskStatusDto,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
@@ -164,7 +165,7 @@ export class TaskController {
   @Put(':id')
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
   async updateTask(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateTaskDto,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
@@ -179,7 +180,7 @@ export class TaskController {
   /** PUT /admin/tasks/:id/reports/:reportId/review — Manager approve/reject করবে */
   @Put(':id/reports/:reportId/review')
   reviewTaskReport(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Param('reportId') reportId: string,
     @Body() dto: ReviewTaskDto,
     @CurrentUser('id') userId: string,
@@ -191,7 +192,7 @@ export class TaskController {
   /** PUT /admin/tasks/:id/completion-review — final approval after all units complete */
   @Put(':id/completion-review')
   reviewTaskCompletion(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: ReviewTaskDto,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
@@ -203,7 +204,7 @@ export class TaskController {
   @Delete(':id')
   @Roles(UserRole.admin, UserRole.super_admin)
   deleteTask(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
   ) {
