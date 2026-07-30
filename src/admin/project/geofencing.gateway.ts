@@ -438,6 +438,7 @@ export class GeofencingGateway
       if (state) {
         state.sessionId = existingOpenSession.id;
         state.trackingActive = true;
+        state.projectId = projectId;
         state.lat = lat;
         state.lng = lng;
         state.totalZoneSeconds = existingOpenSession.zoneSeconds ?? 0;
@@ -480,6 +481,7 @@ export class GeofencingGateway
     if (state) {
       state.sessionId = session.id;
       state.trackingActive = true;
+      state.projectId = projectId;
       state.lat = lat;
       state.lng = lng;
       state.totalZoneSeconds = 0;
@@ -592,6 +594,7 @@ export class GeofencingGateway
     // State reset — location tracking off
     state.sessionId = null;
     state.trackingActive = false;
+    state.projectId = projectId;
     state.totalZoneSeconds = 0;
     state.zoneEnteredAt = null;
     state.isInsideZone = false;
@@ -987,6 +990,24 @@ export class GeofencingGateway
     userId: string,
     projectId?: string,
   ): Promise<string | null> {
+    const liveState = this.workerStates.get(userId);
+    if (liveState?.trackingActive && liveState.projectId) {
+      return liveState.projectId;
+    }
+
+    const openSession = await this.prisma.attendanceSession.findFirst({
+      where: {
+        attendance: { userId },
+        checkOutTime: null,
+      },
+      select: { projectId: true },
+      orderBy: { checkInTime: 'desc' },
+    });
+
+    if (openSession?.projectId) {
+      return openSession.projectId;
+    }
+
     if (projectId) {
       return projectId;
     }
