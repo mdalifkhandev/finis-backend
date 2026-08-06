@@ -4,7 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AdminModule } from '../admin/admin.module';
 import { NotificationsModule } from '../notifications/notifications.module';
-import { S3Module } from '../s3/s3.module';
+import { StorageModule } from '../storage/storage.module';
 import { WorkerController } from './worker.controller';
 import { WorkerService } from './worker.service';
 
@@ -13,7 +13,7 @@ import { WorkerService } from './worker.service';
     PrismaModule,
     AdminModule,
     NotificationsModule,
-    S3Module,
+    StorageModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'secret',
       signOptions: { expiresIn: '7d' },

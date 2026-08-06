@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MailService } from '../../auth/mail.service';
-import { S3Service } from '../../s3/s3.service';
+import { StorageService } from '../../storage/storage.service';
 import {
   GetCompaniesQueryDto,
   CreateCompanyDto,
@@ -21,7 +21,7 @@ export class SuperAdminCompaniesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
-    private readonly s3Service: S3Service,
+    private readonly storageService: StorageService,
   ) { }
 
   // ─── HELPER: build a { gte, lte } date range for a given period ───────────
@@ -963,7 +963,7 @@ export class SuperAdminCompaniesService {
     }
 
     if (document.fileUrl) {
-      await this.s3Service.deleteFile(document.fileUrl);
+      await this.storageService.deleteFile(document.fileUrl);
     }
 
     await this.prisma.document.delete({

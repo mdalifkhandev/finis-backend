@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { S3Module } from '../s3/s3.module';
+import { StorageModule } from '../storage/storage.module';
 import { SuperAdminDashboardController } from './dashboard/dashboard.controller';
 import { SuperAdminDashboardService } from './dashboard/dashboard.service';
 import { SuperAdminCompaniesController } from './company/companies.controller';
@@ -19,7 +19,7 @@ import { SubscriptionModule } from './subscription/subscription.module';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [PrismaModule, SubscriptionModule, AuthModule, S3Module],
+  imports: [PrismaModule, SubscriptionModule, AuthModule, StorageModule],
   controllers: [
     SuperAdminDashboardController,
     SuperAdminCompaniesController,

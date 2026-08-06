@@ -30,7 +30,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { MessageGateway } from './message.gateway';
-import { S3Service } from '../s3/s3.service';
+import { StorageService } from '../storage/storage.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('messages')
@@ -38,7 +38,7 @@ export class MessageController {
   constructor(
     private readonly messageService: MessageService,
     private readonly messageGateway: MessageGateway,
-    private readonly s3Service: S3Service,
+    private readonly storageService: StorageService,
   ) {}
 
   // ═════════════════════════════════════════════
@@ -187,7 +187,7 @@ export class MessageController {
       return { message: 'No file uploaded' };
     }
 
-    const url = await this.s3Service.uploadFile(file, 'messages');
+    const url = await this.storageService.uploadFile(file, 'messages');
 
     return {
       data: {

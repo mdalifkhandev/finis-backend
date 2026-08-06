@@ -4,12 +4,12 @@ import { MessageController } from './message.controller';
 import { MessageService } from './message.service';
 import { MessageGateway } from './message.gateway';
 import { NotificationsModule } from '../notifications/notifications.module';
-import { S3Module } from '../s3/s3.module';
+import { StorageModule } from '../storage/storage.module';
 
 @Module({
   imports: [
     NotificationsModule,
-    S3Module,
+    StorageModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'secret',
       signOptions: { expiresIn: '7d' },

@@ -33,7 +33,7 @@ import {
   UpdateTaskInventoryDto,
   CreateSubTaskDto,
 } from './dto/worker.dto';
-import { S3Service } from '../s3/s3.service';
+import { StorageService } from '../storage/storage.service';
 
 @Controller('worker')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -41,7 +41,7 @@ import { S3Service } from '../s3/s3.service';
 export class WorkerController {
   constructor(
     private readonly workerService: WorkerService,
-    private readonly s3Service: S3Service,
+    private readonly storageService: StorageService,
   ) {}
 
   // DASHBOARD
@@ -544,7 +544,7 @@ export class WorkerController {
     @Body() dto: UpdateProfileDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const uploadedUrl = file ? await this.s3Service.uploadFile(file, 'avatars') : undefined;
+    const uploadedUrl = file ? await this.storageService.uploadFile(file, 'avatars') : undefined;
     const avatarFile = uploadedUrl ? { ...file!, filename: uploadedUrl } : undefined;
     return this.workerService.updateProfile(workerId, dto, avatarFile as any);
   }
@@ -599,9 +599,9 @@ export class WorkerController {
     const receipt = files?.receipt?.[0];
 
     return {
-      beforePhoto: beforePhoto ? [{ ...beforePhoto, filename: await this.s3Service.uploadFile(beforePhoto, 'task-reports') }] : undefined,
-      afterPhoto: afterPhoto ? [{ ...afterPhoto, filename: await this.s3Service.uploadFile(afterPhoto, 'task-reports') }] : undefined,
-      receipt: receipt ? [{ ...receipt, filename: await this.s3Service.uploadFile(receipt, 'task-reports') }] : undefined,
+      beforePhoto: beforePhoto ? [{ ...beforePhoto, filename: await this.storageService.uploadFile(beforePhoto, 'task-reports') }] : undefined,
+      afterPhoto: afterPhoto ? [{ ...afterPhoto, filename: await this.storageService.uploadFile(afterPhoto, 'task-reports') }] : undefined,
+      receipt: receipt ? [{ ...receipt, filename: await this.storageService.uploadFile(receipt, 'task-reports') }] : undefined,
     };
   }
 

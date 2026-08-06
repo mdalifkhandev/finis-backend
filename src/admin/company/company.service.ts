@@ -7,7 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
-import { S3Service } from '../../s3/s3.service';
+import { StorageService } from '../../storage/storage.service';
 import { CreateCompanyDto, UpdateCompanyDto, CreateContactDto, UpdateContactDto, PaginationQueryDto } from './dto/company.dto';
 
 
@@ -17,7 +17,7 @@ export class CompanyService {
     private prisma: PrismaService,
     private config: ConfigService,
     private notificationsService: NotificationsService,
-    private s3Service: S3Service,
+    private storageService: StorageService,
   ) { }
 
   private async getAccessibleCompanyIds(userId: string, userRole: string) {
@@ -381,7 +381,7 @@ export class CompanyService {
     if (doc.companyId !== companyId) throw new ForbiddenException('Document does not belong to this company');
 
     if (doc.fileUrl) {
-      await this.s3Service.deleteFile(doc.fileUrl);
+      await this.storageService.deleteFile(doc.fileUrl);
     }
 
     await this.prisma.document.delete({ where: { id: documentId } });

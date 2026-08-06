@@ -6,14 +6,14 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
-import { S3Service } from '../../s3/s3.service';
+import { StorageService } from '../../storage/storage.service';
 import { UpdateProfileDto, ChangePasswordDto } from './dto/profile.dto';
 
 @Injectable()
 export class ProfileService {
   constructor(
     private prisma: PrismaService,
-    private s3: S3Service,
+    private s3: StorageService,
   ) { }
 
   async getProfile(userId: string) {

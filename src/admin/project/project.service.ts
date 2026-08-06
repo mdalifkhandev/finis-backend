@@ -832,27 +832,52 @@ export class ProjectService {
       include: {
         floors: {
           orderBy: { floorNumber: 'asc' },
-          include: {
-            tasks: {
-              include: { assignee: { select: { id: true, fullName: true, avatarUrl: true } } },
-              orderBy: { createdAt: 'desc' },
-            },
-          },
         },
       },
     });
 
     if (!project) throw new NotFoundException('Project not found');
 
+    const tasks = await this.prisma.task.findMany({
+      where: { projectId },
+      include: {
+        assignee: { select: { id: true, fullName: true, avatarUrl: true } },
+        taskFloors: { select: { floorId: true } },
+        taskUnits: {
+          include: {
+            unit: { select: { id: true, floorId: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const tasksByFloor = new Map<string, typeof tasks>();
+    for (const floor of project.floors) {
+      tasksByFloor.set(floor.id, []);
+    }
+
+    for (const task of tasks) {
+      const floorIds = new Set<string>();
+      if (task.floorId) floorIds.add(task.floorId);
+      for (const taskFloor of task.taskFloors) floorIds.add(taskFloor.floorId);
+      for (const taskUnit of task.taskUnits) floorIds.add(taskUnit.unit.floorId);
+
+      for (const floorId of floorIds) {
+        const floorTasks = tasksByFloor.get(floorId);
+        if (floorTasks) floorTasks.push(task);
+      }
+    }
+
     const checklist = project.floors.map((floor) => ({
       floorId: floor.id,
       floorName: floor.name,
       floorStatus: floor.status,
-      tasks: floor.tasks.map((task) => ({
+      tasks: (tasksByFloor.get(floor.id) ?? []).map((task) => ({
         id: task.id,
         title: task.title,
         isCompleted: task.status === 'completed',
-        unitCount: task.estimatedHours ?? 0,
+        unitCount: task.taskUnits.filter((taskUnit) => taskUnit.unit.floorId === floor.id).length,
         dueDate: task.dueDate,
         assignee: task.assignee,
         status: task.status,

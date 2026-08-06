@@ -20,7 +20,7 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { UserRole } from '../../generated/prisma/client';
-import { S3Service } from '../../s3/s3.service';
+import { StorageService } from '../../storage/storage.service';
 import {
   CreateProjectDto,
   UpdateProjectDto,
@@ -38,7 +38,7 @@ import {
 export class ProjectController {
   constructor(
     private projectService: ProjectService,
-    private readonly s3Service: S3Service,
+    private readonly storageService: StorageService,
   ) { }
   // ─── PROJECTS ──────────────────────────────────────────────────────────────
 
@@ -124,7 +124,7 @@ export class ProjectController {
     @CurrentUser('role') userRole: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const fileUrl = file ? await this.s3Service.uploadFile(file, 'project-documents') : undefined;
+    const fileUrl = file ? await this.storageService.uploadFile(file, 'project-documents') : undefined;
     return this.projectService.uploadProjectDocument(id, userId, userRole, file, fileUrl);
   }
 

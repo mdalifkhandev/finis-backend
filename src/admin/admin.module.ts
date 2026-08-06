@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
-import { S3Module } from '../s3/s3.module';
+import { StorageModule } from '../storage/storage.module';
 
 import { DashboardController } from './dashboard/dashboard.controller';
 import { DashboardService } from './dashboard/dashboard.service';
@@ -33,7 +33,7 @@ import { ReimbursementExpensesService } from './reimbursement-expenses/reimburse
 import { ReportsService } from '../super-admin/reports/reports.service';
 
 @Module({
-  imports: [PrismaModule, ConfigModule, NotificationsModule, S3Module],
+  imports: [PrismaModule, ConfigModule, NotificationsModule, StorageModule],
   controllers: [
     DashboardController,
     CompanyController,

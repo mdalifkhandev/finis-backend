@@ -6,7 +6,7 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
-import { S3Service } from '../../s3/s3.service';
+import { StorageService } from '../../storage/storage.service';
 import { CreateReimbursementExpenseDto, ReimbursementExpenseFilterDto, RejectReimbursementExpenseDto, UpdateReimbursementExpenseDto } from './dto/reimbursement-expense.dto';
 import { ReimbursementExpensesService } from './reimbursement-expenses.service';
 
@@ -17,7 +17,7 @@ const allowedReceiptTypes = ['image/jpeg', 'image/jpg', 'image/png', 'applicatio
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager, UserRole.worker)
 export class ReimbursementExpensesController {
-  constructor(private readonly service: ReimbursementExpensesService, private readonly s3: S3Service) {}
+  constructor(private readonly service: ReimbursementExpensesService, private readonly s3: StorageService) {}
 
   private async uploadReceipt(file?: Express.Multer.File) {
     if (!file) return undefined;

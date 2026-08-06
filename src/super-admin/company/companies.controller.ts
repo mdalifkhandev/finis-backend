@@ -28,7 +28,7 @@ import {
   ContactCompanyDto,
   PaginationQueryDto,
 } from './dto/companies.dto';
-import { S3Service } from '../../s3/s3.service';
+import { StorageService } from '../../storage/storage.service';
 
   const imageLogoFileFilter = (_: unknown, file: any, cb: (error: Error | null, acceptFile: boolean) => void) => {
     const extension = file.originalname.toLowerCase().match(/\.[^.]+$/)?.[0] ?? '';
@@ -49,7 +49,7 @@ import { S3Service } from '../../s3/s3.service';
 export class SuperAdminCompaniesController {
   constructor(
     private readonly companiesService: SuperAdminCompaniesService,
-    private readonly s3Service: S3Service,
+    private readonly storageService: StorageService,
   ) {}
 
     // Upload document
@@ -81,7 +81,7 @@ export class SuperAdminCompaniesController {
     @Body() dto: CreateCompanyDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const logoUrl = file ? await this.s3Service.uploadFile(file, 'company-logos') : undefined;
+    const logoUrl = file ? await this.storageService.uploadFile(file, 'company-logos') : undefined;
     return this.companiesService.createCompany(dto, logoUrl);
   }
 
@@ -109,7 +109,7 @@ export class SuperAdminCompaniesController {
     @Body() dto: UpdateCompanyDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const logoUrl = file ? await this.s3Service.uploadFile(file, 'company-logos') : undefined;
+    const logoUrl = file ? await this.storageService.uploadFile(file, 'company-logos') : undefined;
     return this.companiesService.updateCompany(companyId, dto, logoUrl);
   }
 
@@ -159,7 +159,7 @@ export class SuperAdminCompaniesController {
     @Param('id', ParseUUIDPipe) companyId: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const fileUrl = file ? await this.s3Service.uploadFile(file, 'company-documents') : undefined;
+    const fileUrl = file ? await this.storageService.uploadFile(file, 'company-documents') : undefined;
     return this.companiesService.uploadCompanyDocument(companyId, file, fileUrl);
   }
 

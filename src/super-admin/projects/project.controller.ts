@@ -20,7 +20,7 @@ import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { UserRole } from '../../generated/prisma/client';
 import { SuperAdminProjectService } from './project.service';
 import { ApproveRejectReportDto } from './dto/project.dto';
-import { S3Service } from '../../s3/s3.service';
+import { StorageService } from '../../storage/storage.service';
 
 @Controller('super-admin/projects')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -28,7 +28,7 @@ import { S3Service } from '../../s3/s3.service';
 export class SuperAdminProjectController {
   constructor(
     private superAdminProjectService: SuperAdminProjectService,
-    private s3Service: S3Service,
+    private storageService: StorageService,
   ) {}
 
   // ─── PROJECT STATS (Image 1 — Total/Active/Completed/Delayed with % change) ──
@@ -169,7 +169,7 @@ export class SuperAdminProjectController {
     @CurrentUser('id') userId: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const fileUrl = file ? await this.s3Service.uploadFile(file, 'project-documents') : undefined;
+    const fileUrl = file ? await this.storageService.uploadFile(file, 'project-documents') : undefined;
     return this.superAdminProjectService.uploadDocument(id, file, userId, fileUrl);
   }
 

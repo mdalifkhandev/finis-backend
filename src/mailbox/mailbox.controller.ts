@@ -27,7 +27,7 @@ import { UserRole } from '../generated/prisma/client';
 import { MailboxService } from './mailbox.service';
 import { SendMailDto } from './dto/send-mail.dto';
 import { UpdateMailboxStatusDto } from './dto/update-status.dto';
-import { S3Service } from '../s3/s3.service';
+import { StorageService } from '../storage/storage.service';
 
 const pdfFileFilter = (_: unknown, file: any, cb: (error: Error | null, acceptFile: boolean) => void) => {
   const extension = extname(file.originalname).toLowerCase();
@@ -46,7 +46,7 @@ const pdfFileFilter = (_: unknown, file: any, cb: (error: Error | null, acceptFi
 export class MailboxController {
   constructor(
     private readonly mailboxService: MailboxService,
-    private readonly s3Service: S3Service,
+    private readonly storageService: StorageService,
   ) {}
 
   @Post('mail/send')
@@ -65,7 +65,7 @@ export class MailboxController {
     const attachments = [...(dto.attachments ?? [])];
 
     if (file) {
-      const url = await this.s3Service.uploadFile(file, 'mailbox-pdfs');
+      const url = await this.storageService.uploadFile(file, 'mailbox-pdfs');
       attachments.push({
         name: file.originalname,
         url,

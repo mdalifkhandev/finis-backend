@@ -20,7 +20,7 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { UserRole } from '../../generated/prisma/client';
-import { S3Service } from '../../s3/s3.service';
+import { StorageService } from '../../storage/storage.service';
 import {
   CreateTaskDto,
   UpdateTaskDto,
@@ -36,7 +36,7 @@ import {
 export class TaskController {
   constructor(
     private taskService: TaskService,
-    private s3Service: S3Service,
+    private storageService: StorageService,
   ) {}
 
   /** GET /admin/tasks — Manager শুধু assigned project-এর tasks পাবে */
@@ -172,7 +172,7 @@ export class TaskController {
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const uploadedFile = file
-      ? { ...file, filename: await this.s3Service.uploadFile(file, 'task-expenses') }
+      ? { ...file, filename: await this.storageService.uploadFile(file, 'task-expenses') }
       : undefined;
     return this.taskService.updateTask(id, dto, userId, userRole, uploadedFile);
   }

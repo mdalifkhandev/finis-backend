@@ -18,7 +18,7 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { UserRole } from '../../generated/prisma/client';
-import { S3Service } from '../../s3/s3.service';
+import { StorageService } from '../../storage/storage.service';
 import { ReviewTaskDto, UpdateSubTaskDto } from './dto/task.dto';
 
 @Controller('admin/subtasks')
@@ -27,7 +27,7 @@ import { ReviewTaskDto, UpdateSubTaskDto } from './dto/task.dto';
 export class SubTaskController {
   constructor(
     private readonly taskService: TaskService,
-    private readonly s3Service: S3Service,
+    private readonly storageService: StorageService,
   ) {}
 
   @Put(':id')
@@ -138,7 +138,7 @@ export class SubTaskController {
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const uploadedFile = file
-      ? { ...file, filename: await this.s3Service.uploadFile(file, 'task-expenses') }
+      ? { ...file, filename: await this.storageService.uploadFile(file, 'task-expenses') }
       : undefined;
     return this.taskService.reviewSubTaskApproval(id, dto, userId, userRole, uploadedFile);
   }
@@ -154,7 +154,7 @@ export class SubTaskController {
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const uploadedFile = file
-      ? { ...file, filename: await this.s3Service.uploadFile(file, 'task-expenses') }
+      ? { ...file, filename: await this.storageService.uploadFile(file, 'task-expenses') }
       : undefined;
     return this.taskService.reviewSubTaskReport(id, dto, userId, userRole, uploadedFile);
   }

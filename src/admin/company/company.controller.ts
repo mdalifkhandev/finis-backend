@@ -28,7 +28,7 @@ import {
   UpdateContactDto,
   PaginationQueryDto,
 } from './dto/company.dto';
-import { S3Service } from '../../s3/s3.service';
+import { StorageService } from '../../storage/storage.service';
 
 const imageLogoFileFilter = (_: unknown, file: any, cb: (error: Error | null, acceptFile: boolean) => void) => {
   const extension = extname(file.originalname).toLowerCase();
@@ -49,7 +49,7 @@ const imageLogoFileFilter = (_: unknown, file: any, cb: (error: Error | null, ac
 export class CompanyController {
   constructor(
     private companyService: CompanyService,
-    private s3Service: S3Service,
+    private storageService: StorageService,
   ) { }
 
   // ─── COMPANIES ────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ export class CompanyController {
     @CurrentUser('id') adminId: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const logoUrl = file ? await this.s3Service.uploadFile(file, 'company-logos') : undefined;
+    const logoUrl = file ? await this.storageService.uploadFile(file, 'company-logos') : undefined;
     return this.companyService.createCompany(dto, adminId, logoUrl);
   }
 
@@ -96,7 +96,7 @@ export class CompanyController {
     @CurrentUser('role') userRole: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const logoUrl = file ? await this.s3Service.uploadFile(file, 'company-logos') : undefined;
+    const logoUrl = file ? await this.storageService.uploadFile(file, 'company-logos') : undefined;
     return this.companyService.updateCompany(companyId, dto, adminId, logoUrl, userRole);
   }
 
@@ -167,7 +167,7 @@ export class CompanyController {
     @CurrentUser('role') userRole: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    const fileUrl = file ? await this.s3Service.uploadFile(file, 'company-documents') : undefined;
+    const fileUrl = file ? await this.storageService.uploadFile(file, 'company-documents') : undefined;
     return this.companyService.uploadDocument(companyId, adminId, file, userRole, fileUrl);
   }
 
