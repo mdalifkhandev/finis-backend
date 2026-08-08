@@ -18,6 +18,7 @@ import { SubscriptionModule } from './subscription/subscription.module';
 import { ConfigModule } from '@nestjs/config';
 import { PublicContentModule } from './public-content/public-content.module';
 import { MailboxModule } from './mailbox/mailbox.module';
+import { PublicShareModule } from './public-share/public-share.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { MailboxModule } from './mailbox/mailbox.module';
       storage: memoryStorage(),
       limits: { fileSize: 20 * 1024 * 1024 },
     }),
+    PublicShareModule,
   ],
   controllers: [AppController],
   providers: [AppService],

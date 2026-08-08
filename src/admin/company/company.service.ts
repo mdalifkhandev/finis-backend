@@ -387,4 +387,27 @@ export class CompanyService {
     await this.prisma.document.delete({ where: { id: documentId } });
     return { message: 'Document deleted successfully' };
   }
+  async generateShareLink(companyId: string, adminId: string, userRole: string) {
+    await this.verifyCompanyAccess(companyId, adminId, userRole);
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { shareToken: true },
+    });
+    
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
+    if (company.shareToken) {
+      return { shareToken: company.shareToken };
+    }
+
+    const shareToken = require('crypto').randomUUID();
+    await this.prisma.company.update({
+      where: { id: companyId },
+      data: { shareToken },
+    });
+
+    return { shareToken };
+  }
 }

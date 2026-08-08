@@ -1848,4 +1848,28 @@ export class ProjectService {
 
     return { projectId, date: targetDate, workers: result };
   }
+
+  async generateShareLink(projectId: string, userId: string, userRole: string) {
+    await this.verifyProjectAccess(projectId, userId, userRole);
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { shareToken: true },
+    });
+
+    if (!project) {
+      throw new NotFoundException('Project not found');
+    }
+
+    if (project.shareToken) {
+      return { shareToken: project.shareToken };
+    }
+
+    const shareToken = require('crypto').randomUUID();
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: { shareToken },
+    });
+
+    return { shareToken };
+  }
 }

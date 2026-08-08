@@ -132,8 +132,8 @@ model User {
   taskAssignees           TaskAssignee[]           @relation("TaskAssigneeUser")
   createdSubTasks         SubTask[]                @relation("SubTaskCreator")
   threadParticipants      ThreadParticipant[]
-  mailboxConversations    Conversation[]       @relation("MailboxManager")
-  mailboxMessagesSent     MailboxMessage[]     @relation("MailboxMessageSender")
+  mailboxConversations    Conversation[]           @relation("MailboxManager")
+  mailboxMessagesSent     MailboxMessage[]         @relation("MailboxMessageSender")
   messageBlocksCreated    MessageBlock[]           @relation("MessageBlocker")
   messageBlocksReceived   MessageBlock[]           @relation("MessageBlockedUser")
   timeAdjustments         TimeAdjustmentRequest[]
@@ -143,8 +143,8 @@ model User {
   workScheduleAssignments WorkScheduleAssignment[]
   managedWorkers          WorkerManagerMap[]       @relation("ManagerWorkers")
   myManager               WorkerManagerMap?        @relation("WorkerManager")
-  supportRequestsCreated   SupportRequest[]
-  reimbursementExpenses    ReimbursementExpense[] @relation("ReimbursementExpenseCreator")
+  supportRequestsCreated  SupportRequest[]
+  reimbursementExpenses   ReimbursementExpense[]   @relation("ReimbursementExpenseCreator")
 
   @@map("users")
 }
@@ -248,6 +248,7 @@ model Company {
   revenue        Float?
   projectLevel   String?                @map("project_level")
   isActive       Boolean                @default(true) @map("is_active")
+  shareToken     String?                @unique @map("share_token")
   createdAt      DateTime               @default(now()) @map("created_at")
   updatedAt      DateTime               @updatedAt @map("updated_at")
   owner          User                   @relation("CompanyOwner", fields: [ownerId], references: [id])
@@ -303,68 +304,69 @@ model Contact {
 }
 
 model Project {
-  id             String          @id @default(uuid()) @db.Uuid
-  companyId      String          @map("company_id") @db.Uuid
-  managerId      String?         @map("manager_id") @db.Uuid
-  name           String
-  type           ProjectType?
-  startDate      DateTime?       @map("start_date") @db.Date
-  endDate        DateTime?       @map("end_date") @db.Date
-  budget         Float?
-  spent          Float?
-  remaining      Float?
-  location       String?
-  description    String?
-  status         ProjectStatus   @default(planning)
-  priority       String?
-  isWholeHouse   Boolean         @default(false) @map("is_whole_house")
-  houseSections  String[]        @default([]) @map("house_sections")
-  numFloors      Int?            @map("num_floors")
-  numFloorsMin   Int?            @map("num_floors_min")
-  numFloorsMax   Int?            @map("num_floors_max")
-  roomsPerFloor  Int?            @map("rooms_per_floor")
-  unitPerFloor   Int?            @map("unit_per_floor")
-  unitPerFloorMin Int?           @map("unit_per_floor_min")
-  unitPerFloorMax Int?           @map("unit_per_floor_max")
-  progress       Float?          @default(0)
-  createdAt      DateTime        @default(now()) @map("created_at")
-  updatedAt      DateTime        @updatedAt @map("updated_at")
-  expenses       Expense[]
+  id                    String                 @id @default(uuid()) @db.Uuid
+  companyId             String                 @map("company_id") @db.Uuid
+  managerId             String?                @map("manager_id") @db.Uuid
+  name                  String
+  type                  ProjectType?
+  startDate             DateTime?              @map("start_date") @db.Date
+  endDate               DateTime?              @map("end_date") @db.Date
+  budget                Float?
+  spent                 Float?
+  remaining             Float?
+  location              String?
+  description           String?
+  status                ProjectStatus          @default(planning)
+  priority              String?
+  isWholeHouse          Boolean                @default(false) @map("is_whole_house")
+  houseSections         String[]               @default([]) @map("house_sections")
+  numFloors             Int?                   @map("num_floors")
+  numFloorsMin          Int?                   @map("num_floors_min")
+  numFloorsMax          Int?                   @map("num_floors_max")
+  roomsPerFloor         Int?                   @map("rooms_per_floor")
+  unitPerFloor          Int?                   @map("unit_per_floor")
+  unitPerFloorMin       Int?                   @map("unit_per_floor_min")
+  unitPerFloorMax       Int?                   @map("unit_per_floor_max")
+  progress              Float?                 @default(0)
+  shareToken            String?                @unique @map("share_token")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  expenses              Expense[]
   reimbursementExpenses ReimbursementExpense[]
-  documents      Document[]
-  floors         Floor[]
-  geofences      Geofence[]
-  inventoryItems InventoryItem[]
-  payrolls       Payroll[]
-  teamMembers    ProjectMember[]
-  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  tasks          Task[]
-  attendanceSessions AttendanceSession[]
+  documents             Document[]
+  floors                Floor[]
+  geofences             Geofence[]
+  inventoryItems        InventoryItem[]
+  payrolls              Payroll[]
+  teamMembers           ProjectMember[]
+  company               Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  tasks                 Task[]
+  attendanceSessions    AttendanceSession[]
 
   @@map("projects")
 }
 
 model Quote {
-  id           String   @id @default(uuid()) @db.Uuid
-  createdById  String   @map("created_by_id") @db.Uuid
-  workItemId   String?  @map("work_item_id") @db.Uuid
-  workCategoryId String? @map("work_category_id") @db.Uuid
-  projectType  String   @map("project_type")
-  propertyType String   @map("property_type")
-  unitType     String   @map("unit_type")
-  title        String
-  quantity     Float    @default(1)
-  unit         String?
-  measurementType String? @map("measurement_type")
-  unitPrice    Float    @default(0) @map("unit_price")
-  subtotal     Float    @default(0)
-  notes        String?
-  isCustom     Boolean  @default(false) @map("is_custom")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-  createdBy    User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
-  workItem     QuoteWorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
-  workCategory QuoteWorkCategory? @relation(fields: [workCategoryId], references: [id], onDelete: SetNull)
+  id              String             @id @default(uuid()) @db.Uuid
+  createdById     String             @map("created_by_id") @db.Uuid
+  workItemId      String?            @map("work_item_id") @db.Uuid
+  workCategoryId  String?            @map("work_category_id") @db.Uuid
+  projectType     String             @map("project_type")
+  propertyType    String             @map("property_type")
+  unitType        String             @map("unit_type")
+  title           String
+  quantity        Float              @default(1)
+  unit            String?
+  measurementType String?            @map("measurement_type")
+  unitPrice       Float              @default(0) @map("unit_price")
+  subtotal        Float              @default(0)
+  notes           String?
+  isCustom        Boolean            @default(false) @map("is_custom")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+  createdBy       User               @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  workItem        QuoteWorkItem?     @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  workCategory    QuoteWorkCategory? @relation(fields: [workCategoryId], references: [id], onDelete: SetNull)
 
   @@index([projectType, propertyType, unitType])
   @@index([workCategoryId])
@@ -373,13 +375,13 @@ model Quote {
 }
 
 model QuoteWorkCategory {
-  id          String   @id @default(uuid()) @db.Uuid
-  name        String   @unique
+  id          String          @id @default(uuid()) @db.Uuid
+  name        String          @unique
   description String?
-  isActive    Boolean  @default(true) @map("is_active")
-  sortOrder   Int      @default(0) @map("sort_order")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  isActive    Boolean         @default(true) @map("is_active")
+  sortOrder   Int             @default(0) @map("sort_order")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
   workItems   QuoteWorkItem[]
   quotes      Quote[]
 
@@ -388,18 +390,18 @@ model QuoteWorkCategory {
 }
 
 model QuoteWorkItem {
-  id              String   @id @default(uuid()) @db.Uuid
-  categoryId      String   @map("category_id") @db.Uuid
-  projectType     String   @map("project_type")
-  propertyType    String   @map("property_type")
-  unitType        String   @map("unit_type")
+  id              String            @id @default(uuid()) @db.Uuid
+  categoryId      String            @map("category_id") @db.Uuid
+  projectType     String            @map("project_type")
+  propertyType    String            @map("property_type")
+  unitType        String            @map("unit_type")
   name            String
-  measurementType String   @map("measurement_type")
-  unitCost        Float?   @map("unit_cost")
-  isActive        Boolean  @default(true) @map("is_active")
-  sortOrder       Int      @default(0) @map("sort_order")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  measurementType String            @map("measurement_type")
+  unitCost        Float?            @map("unit_cost")
+  isActive        Boolean           @default(true) @map("is_active")
+  sortOrder       Int               @default(0) @map("sort_order")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
   category        QuoteWorkCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   quotes          Quote[]
 
@@ -452,90 +454,90 @@ model Floor {
 }
 
 model Unit {
-  id       String     @id @default(uuid()) @db.Uuid
-  floorId  String     @map("floor_id") @db.Uuid
-  name     String
-  type     String?
-  sizeSqft Float?     @map("size_sqft")
-  status   RoomStatus @default(pending)
-  progress Float?     @default(0)
-  floor    Floor      @relation(fields: [floorId], references: [id], onDelete: Cascade)
-  tasks    Task[]
-  taskUnits TaskUnit[]
+  id            String         @id @default(uuid()) @db.Uuid
+  floorId       String         @map("floor_id") @db.Uuid
+  name          String
+  type          String?
+  sizeSqft      Float?         @map("size_sqft")
+  status        RoomStatus     @default(pending)
+  progress      Float?         @default(0)
+  floor         Floor          @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  tasks         Task[]
+  taskUnits     TaskUnit[]
   taskAssignees TaskAssignee[]
-  subTasks SubTask[]
-  subTaskUnits SubTaskUnit[]
+  subTasks      SubTask[]
+  subTaskUnits  SubTaskUnit[]
 
   @@map("units")
 }
 
 model Task {
-  id              String          @id @default(uuid()) @db.Uuid
-  projectId       String          @map("project_id") @db.Uuid
-  floorId         String?         @map("floor_id") @db.Uuid
-  unitId          String?         @map("unit_id") @db.Uuid
-  assignedTo      String?         @map("assigned_to") @db.Uuid
-  createdBy       String          @map("created_by") @db.Uuid
-  title           String
-  description     String?
-  priority        TaskPriority    @default(medium)
-  status          TaskStatus      @default(pending)
-  approvalDecision ReviewDecision  @default(pending) @map("approval_decision")
-  approvalReviewedBy String?       @map("approval_reviewed_by") @db.Uuid
-  approvalReviewedAt DateTime?     @map("approval_reviewed_at")
-  approvalNotes    String?         @map("approval_notes")
-  completionDecision ReviewDecision @default(pending) @map("completion_decision")
-  completionReviewedBy String?     @map("completion_reviewed_by") @db.Uuid
-  completionReviewedAt DateTime?    @map("completion_reviewed_at")
-  completionNotes  String?         @map("completion_notes")
-  allowSubTaskCreation Boolean     @default(false) @map("allow_sub_task_creation")
-  dueDate         DateTime?       @map("due_date") @db.Date
-  estimatedHours  Int?            @map("estimated_hours")
-  actualHours     Float?          @map("actual_hours")
-  createdAt       DateTime        @default(now()) @map("created_at")
-  updatedAt       DateTime        @updatedAt @map("updated_at")
-  taskInventories TaskInventory[]
-  taskFloors      TaskFloor[]
-  taskUnits       TaskUnit[]
-  subTasks        SubTask[]
-  expenses        Expense[]
-  reports         TaskReport[]
-  taskAssignees   TaskAssignee[]  @relation("TaskAssignees")
-  assignee        User?           @relation("TaskAssignee", fields: [assignedTo], references: [id])
-  creator         User            @relation("TaskCreator", fields: [createdBy], references: [id])
-  floor           Floor?          @relation(fields: [floorId], references: [id])
-  project         Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  unit            Unit?           @relation(fields: [unitId], references: [id])
+  id                   String          @id @default(uuid()) @db.Uuid
+  projectId            String          @map("project_id") @db.Uuid
+  floorId              String?         @map("floor_id") @db.Uuid
+  unitId               String?         @map("unit_id") @db.Uuid
+  assignedTo           String?         @map("assigned_to") @db.Uuid
+  createdBy            String          @map("created_by") @db.Uuid
+  title                String
+  description          String?
+  priority             TaskPriority    @default(medium)
+  status               TaskStatus      @default(pending)
+  approvalDecision     ReviewDecision  @default(pending) @map("approval_decision")
+  approvalReviewedBy   String?         @map("approval_reviewed_by") @db.Uuid
+  approvalReviewedAt   DateTime?       @map("approval_reviewed_at")
+  approvalNotes        String?         @map("approval_notes")
+  completionDecision   ReviewDecision  @default(pending) @map("completion_decision")
+  completionReviewedBy String?         @map("completion_reviewed_by") @db.Uuid
+  completionReviewedAt DateTime?       @map("completion_reviewed_at")
+  completionNotes      String?         @map("completion_notes")
+  allowSubTaskCreation Boolean         @default(false) @map("allow_sub_task_creation")
+  dueDate              DateTime?       @map("due_date") @db.Date
+  estimatedHours       Int?            @map("estimated_hours")
+  actualHours          Float?          @map("actual_hours")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+  taskInventories      TaskInventory[]
+  taskFloors           TaskFloor[]
+  taskUnits            TaskUnit[]
+  subTasks             SubTask[]
+  expenses             Expense[]
+  reports              TaskReport[]
+  taskAssignees        TaskAssignee[]  @relation("TaskAssignees")
+  assignee             User?           @relation("TaskAssignee", fields: [assignedTo], references: [id])
+  creator              User            @relation("TaskCreator", fields: [createdBy], references: [id])
+  floor                Floor?          @relation(fields: [floorId], references: [id])
+  project              Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  unit                 Unit?           @relation(fields: [unitId], references: [id])
 
   @@map("tasks")
 }
 
 model SubTask {
-  id                    String         @id @default(uuid()) @db.Uuid
-  taskId                String         @map("task_id") @db.Uuid
-  unitId                String         @map("unit_id") @db.Uuid
-  taskAssigneeId        String?        @map("task_assignee_id") @db.Uuid
-  createdBy             String         @map("created_by") @db.Uuid
+  id                    String          @id @default(uuid()) @db.Uuid
+  taskId                String          @map("task_id") @db.Uuid
+  unitId                String          @map("unit_id") @db.Uuid
+  taskAssigneeId        String?         @map("task_assignee_id") @db.Uuid
+  createdBy             String          @map("created_by") @db.Uuid
   title                 String
   description           String?
-  priority              TaskPriority   @default(medium)
-  dueDate               DateTime?      @map("due_date") @db.Date
-  estimatedHours        Int?           @map("estimated_hours")
-  status                TaskStatus     @default(pending)
-  approvalDecision      ReviewDecision @default(pending) @map("approval_decision")
-  approvalReviewedBy    String?        @map("approval_reviewed_by") @db.Uuid
-  approvalReviewedAt    DateTime?      @map("approval_reviewed_at")
-  approvalNotes         String?        @map("approval_notes")
-  approvalAttachmentUrl String?        @map("approval_attachment_url")
-  startedAt             DateTime?      @map("started_at")
-  submittedAt           DateTime?      @map("submitted_at")
-  completedAt           DateTime?      @map("completed_at")
-  createdAt             DateTime       @default(now()) @map("created_at")
-  updatedAt             DateTime       @updatedAt @map("updated_at")
-  task                  Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  unit                  Unit           @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  taskAssignee          TaskAssignee?  @relation(fields: [taskAssigneeId], references: [id], onDelete: SetNull)
-  creator               User           @relation("SubTaskCreator", fields: [createdBy], references: [id])
+  priority              TaskPriority    @default(medium)
+  dueDate               DateTime?       @map("due_date") @db.Date
+  estimatedHours        Int?            @map("estimated_hours")
+  status                TaskStatus      @default(pending)
+  approvalDecision      ReviewDecision  @default(pending) @map("approval_decision")
+  approvalReviewedBy    String?         @map("approval_reviewed_by") @db.Uuid
+  approvalReviewedAt    DateTime?       @map("approval_reviewed_at")
+  approvalNotes         String?         @map("approval_notes")
+  approvalAttachmentUrl String?         @map("approval_attachment_url")
+  startedAt             DateTime?       @map("started_at")
+  submittedAt           DateTime?       @map("submitted_at")
+  completedAt           DateTime?       @map("completed_at")
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @updatedAt @map("updated_at")
+  task                  Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  unit                  Unit            @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  taskAssignee          TaskAssignee?   @relation(fields: [taskAssigneeId], references: [id], onDelete: SetNull)
+  creator               User            @relation("SubTaskCreator", fields: [createdBy], references: [id])
   reports               TaskReport[]
   inventories           TaskInventory[]
   expense               Expense?
@@ -558,11 +560,11 @@ model SubTaskUnit {
 }
 
 model TaskFloor {
-  id       String @id @default(uuid()) @db.Uuid
-  taskId   String @map("task_id") @db.Uuid
-  floorId  String @map("floor_id") @db.Uuid
-  task     Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  floor    Floor  @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  id      String @id @default(uuid()) @db.Uuid
+  taskId  String @map("task_id") @db.Uuid
+  floorId String @map("floor_id") @db.Uuid
+  task    Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  floor   Floor  @relation(fields: [floorId], references: [id], onDelete: Cascade)
 
   @@unique([taskId, floorId])
   @@map("task_floors")
@@ -583,14 +585,14 @@ model TaskUnit {
 }
 
 model TaskAssignee {
-  id         String   @id @default(uuid()) @db.Uuid
-  taskId     String   @map("task_id") @db.Uuid
-  userId     String   @map("user_id") @db.Uuid
-  unitId     String?  @map("unit_id") @db.Uuid
-  assignedAt DateTime @default(now()) @map("assigned_at")
-  task       Task     @relation("TaskAssignees", fields: [taskId], references: [id], onDelete: Cascade)
-  user       User     @relation("TaskAssigneeUser", fields: [userId], references: [id], onDelete: Cascade)
-  unit       Unit?    @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid()) @db.Uuid
+  taskId     String    @map("task_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  unitId     String?   @map("unit_id") @db.Uuid
+  assignedAt DateTime  @default(now()) @map("assigned_at")
+  task       Task      @relation("TaskAssignees", fields: [taskId], references: [id], onDelete: Cascade)
+  user       User      @relation("TaskAssigneeUser", fields: [userId], references: [id], onDelete: Cascade)
+  unit       Unit?     @relation(fields: [unitId], references: [id], onDelete: Cascade)
   subTasks   SubTask[]
 
   @@unique([taskId, userId, unitId])
@@ -598,23 +600,23 @@ model TaskAssignee {
 }
 
 model TaskReport {
-  id                String         @id @default(uuid()) @db.Uuid
-  taskId            String         @map("task_id") @db.Uuid
-  subTaskId         String?        @map("sub_task_id") @db.Uuid
-  workerId          String         @map("worker_id") @db.Uuid
-  notes             String?
-  beforePhotoUrl    String?        @map("before_photo_url")
-  afterPhotoUrl     String?        @map("after_photo_url")
-  receiptUrl        String?        @map("receipt_url")
-  reviewDecision    ReviewDecision @default(pending) @map("review_decision")
-  reviewDescription String?        @map("review_description")
-  reviewAttachmentUrl String?      @map("review_attachment_url")
-  reviewedBy        String?        @map("reviewed_by") @db.Uuid
-  reviewedAt        DateTime?      @map("reviewed_at")
-  submittedAt       DateTime       @default(now()) @map("submitted_at")
-  task              Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  worker            User           @relation(fields: [workerId], references: [id])
-  subTask           SubTask?       @relation(fields: [subTaskId], references: [id], onDelete: SetNull)
+  id                  String         @id @default(uuid()) @db.Uuid
+  taskId              String         @map("task_id") @db.Uuid
+  subTaskId           String?        @map("sub_task_id") @db.Uuid
+  workerId            String         @map("worker_id") @db.Uuid
+  notes               String?
+  beforePhotoUrl      String?        @map("before_photo_url")
+  afterPhotoUrl       String?        @map("after_photo_url")
+  receiptUrl          String?        @map("receipt_url")
+  reviewDecision      ReviewDecision @default(pending) @map("review_decision")
+  reviewDescription   String?        @map("review_description")
+  reviewAttachmentUrl String?        @map("review_attachment_url")
+  reviewedBy          String?        @map("reviewed_by") @db.Uuid
+  reviewedAt          DateTime?      @map("reviewed_at")
+  submittedAt         DateTime       @default(now()) @map("submitted_at")
+  task                Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  worker              User           @relation(fields: [workerId], references: [id])
+  subTask             SubTask?       @relation(fields: [subTaskId], references: [id], onDelete: SetNull)
 
   @@map("task_reports")
 }
@@ -780,28 +782,28 @@ model Expense {
 }
 
 model ReimbursementExpense {
-  id            String                      @id @default(uuid()) @db.Uuid
+  id            String                     @id @default(uuid()) @db.Uuid
   title         String
-  expenseDate   DateTime                    @map("expense_date") @db.Date
-  amount        Decimal                     @db.Decimal(12, 2)
-  currency      String                      @default("BDT")
+  expenseDate   DateTime                   @map("expense_date") @db.Date
+  amount        Decimal                    @db.Decimal(12, 2)
+  currency      String                     @default("BDT")
   category      String
   vendor        String?
-  paymentMethod String?                     @map("payment_method")
-  projectId     String?                     @map("project_id") @db.Uuid
+  paymentMethod String?                    @map("payment_method")
+  projectId     String?                    @map("project_id") @db.Uuid
   notes         String?
-  receiptUrl    String?                     @map("receipt_url")
-  status        ReimbursementExpenseStatus  @default(DRAFT)
-  createdById   String                      @map("created_by_id") @db.Uuid
-  submittedAt   DateTime?                   @map("submitted_at")
-  approvedAt    DateTime?                   @map("approved_at")
-  rejectedAt    DateTime?                   @map("rejected_at")
-  paidAt        DateTime?                   @map("paid_at")
-  rejectionNote String?                     @map("rejection_note")
-  createdAt     DateTime                    @default(now()) @map("created_at")
-  updatedAt     DateTime                    @updatedAt @map("updated_at")
-  createdBy     User                        @relation("ReimbursementExpenseCreator", fields: [createdById], references: [id])
-  project       Project?                    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  receiptUrl    String?                    @map("receipt_url")
+  status        ReimbursementExpenseStatus @default(DRAFT)
+  createdById   String                     @map("created_by_id") @db.Uuid
+  submittedAt   DateTime?                  @map("submitted_at")
+  approvedAt    DateTime?                  @map("approved_at")
+  rejectedAt    DateTime?                  @map("rejected_at")
+  paidAt        DateTime?                  @map("paid_at")
+  rejectionNote String?                    @map("rejection_note")
+  createdAt     DateTime                   @default(now()) @map("created_at")
+  updatedAt     DateTime                   @updatedAt @map("updated_at")
+  createdBy     User                       @relation("ReimbursementExpenseCreator", fields: [createdById], references: [id])
+  project       Project?                   @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([createdById])
   @@index([projectId])
@@ -809,6 +811,7 @@ model ReimbursementExpense {
   @@index([expenseDate])
   @@map("reimbursement_expenses")
 }
+
 model InventoryItem {
   id              String              @id @default(uuid()) @db.Uuid
   name            String
@@ -890,17 +893,17 @@ model Geofence {
 }
 
 model LocationLog {
-  id           String            @id @default(uuid()) @db.Uuid
-  userId       String            @map("user_id") @db.Uuid
-  geofenceId   String?           @map("geofence_id") @db.Uuid
-  lat          Float
-  lng          Float
-  eventType    LocationEventType @map("event_type")
-  loggedAt     DateTime          @default(now()) @map("logged_at")
-  durationSeconds Int?           @map("duration_seconds")
-  isInsideZone Boolean?          @default(false) @map("is_inside_zone")
-  geofence     Geofence?         @relation(fields: [geofenceId], references: [id])
-  user         User              @relation(fields: [userId], references: [id])
+  id              String            @id @default(uuid()) @db.Uuid
+  userId          String            @map("user_id") @db.Uuid
+  geofenceId      String?           @map("geofence_id") @db.Uuid
+  lat             Float
+  lng             Float
+  eventType       LocationEventType @map("event_type")
+  loggedAt        DateTime          @default(now()) @map("logged_at")
+  durationSeconds Int?              @map("duration_seconds")
+  isInsideZone    Boolean?          @default(false) @map("is_inside_zone")
+  geofence        Geofence?         @relation(fields: [geofenceId], references: [id])
+  user            User              @relation(fields: [userId], references: [id])
 
   @@map("location_logs")
 }
@@ -980,16 +983,16 @@ model MessageThread {
 }
 
 model Conversation {
-  id           String    @id @default(uuid()) @db.Uuid
-  managerId    String    @map("manager_id") @db.Uuid
-  clientEmail  String    @map("client_email")
-  clientName   String    @map("client_name")
-  proxyAddress String    @unique @map("proxy_address")
-  status       String    @default("active")
-  isStarred    Boolean   @default(false) @map("is_starred")
-  createdAt    DateTime  @default(now()) @map("created_at")
+  id           String           @id @default(uuid()) @db.Uuid
+  managerId    String           @map("manager_id") @db.Uuid
+  clientEmail  String           @map("client_email")
+  clientName   String           @map("client_name")
+  proxyAddress String           @unique @map("proxy_address")
+  status       String           @default("active")
+  isStarred    Boolean          @default(false) @map("is_starred")
+  createdAt    DateTime         @default(now()) @map("created_at")
   messages     MailboxMessage[]
-  manager      User      @relation("MailboxManager", fields: [managerId], references: [id], onDelete: Cascade)
+  manager      User             @relation("MailboxManager", fields: [managerId], references: [id], onDelete: Cascade)
 
   @@index([managerId, status])
   @@index([managerId, isStarred])
@@ -1026,19 +1029,19 @@ model Message {
 
 model MailboxMessage {
   id             String       @id @default(uuid()) @db.Uuid
-  conversationId  String       @map("conversation_id") @db.Uuid
+  conversationId String       @map("conversation_id") @db.Uuid
   senderId       String?      @map("sender_id") @db.Uuid
-  direction       String
-  fromEmail       String       @map("from_email")
-  toEmail         String       @map("to_email")
-  subject         String
-  bodyText        String?      @map("body_text")
-  bodyHtml        String?      @map("body_html")
-  attachments     Json?
-  isRead          Boolean      @default(false) @map("is_read")
-  createdAt       DateTime     @default(now()) @map("created_at")
-  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender          User?        @relation("MailboxMessageSender", fields: [senderId], references: [id], onDelete: SetNull)
+  direction      String
+  fromEmail      String       @map("from_email")
+  toEmail        String       @map("to_email")
+  subject        String
+  bodyText       String?      @map("body_text")
+  bodyHtml       String?      @map("body_html")
+  attachments    Json?
+  isRead         Boolean      @default(false) @map("is_read")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User?        @relation("MailboxMessageSender", fields: [senderId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
   @@map("mailbox_messages")
@@ -1242,6 +1245,7 @@ enum ReimbursementExpenseStatus {
   REJECTED
   PAID
 }
+
 enum InventoryDamageStatus {
   unresolved
   in_repair
@@ -1297,4 +1301,3 @@ enum ShiftDay {
   sat
   sun
 }
-

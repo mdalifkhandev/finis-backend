@@ -181,4 +181,13 @@ export class CompanyController {
   ) {
     return this.companyService.deleteDocument(companyId, docId, adminId, userRole);
   }
+  /** POST /admin/companies/:id/share */
+  @Post(':id/share')
+  generateShareLink(
+    @Param('id') companyId: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.companyService.generateShareLink(companyId, adminId, userRole);
+  }
 }

@@ -505,4 +505,14 @@ export class ProjectController {
   ) {
     return this.projectService.getTimeSummary(id, userId, userRole, date);
   }
+  /** POST /admin/projects/:id/share */
+  @Post(':id/share')
+  @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
+  generateShareLink(
+    @Param('id') projectId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.generateShareLink(projectId, userId, userRole);
+  }
 }
