@@ -267,8 +267,10 @@ export class TaskService {
     }
 
     if (subTaskCount === completedCount) {
-      // সব SubTask completed — main task review-এ থাকবে (admin final approve করবে)
-      // main task ইতিমধ্যে review-এ আছে (submitTaskReport থেকে set হয়েছে)
+      await this.prisma.task.update({
+        where: { id: taskId },
+        data: { status: 'completed' },
+      });
       return;
     }
 
