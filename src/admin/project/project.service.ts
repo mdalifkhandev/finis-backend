@@ -1215,7 +1215,25 @@ export class ProjectService {
 
     const workers = await this.prisma.projectMember.findMany({
       where: { projectId, role: 'worker' },
-      include: { user: { select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true, status: true, department: true } } },
+      include: { 
+        user: { 
+          select: { 
+            id: true, 
+            fullName: true, 
+            email: true, 
+            phone: true, 
+            avatarUrl: true, 
+            role: true, 
+            status: true, 
+            department: true,
+            workScheduleAssignments: {
+              include: { schedule: true },
+              orderBy: { assignedAt: 'desc' },
+              take: 1
+            }
+          } 
+        } 
+      },
     });
 
     return workers.map((w) => ({ memberId: w.id, managerId: w.managerId, ...w.user }));
@@ -1521,7 +1539,25 @@ export class ProjectService {
 
     const workers = await this.prisma.projectMember.findMany({
       where: { projectId, role: 'worker', managerId },
-      include: { user: { select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true, status: true, department: true } } },
+      include: { 
+        user: { 
+          select: { 
+            id: true, 
+            fullName: true, 
+            email: true, 
+            phone: true, 
+            avatarUrl: true, 
+            role: true, 
+            status: true, 
+            department: true,
+            workScheduleAssignments: {
+              include: { schedule: true },
+              orderBy: { assignedAt: 'desc' },
+              take: 1
+            }
+          } 
+        } 
+      },
     });
 
     return workers.map((w) => ({ memberId: w.id, managerId: w.managerId, ...w.user }));
@@ -1698,6 +1734,52 @@ export class ProjectService {
 
     await this.prisma.projectMember.delete({ where: { id: member.id } });
     return { message: 'Member removed successfully' };
+  }
+
+  async assignSchedule(projectId: string, userIds: string[], startTime: string, endTime: string, adminId: string, userRole: string) {
+    await this.verifyProjectAccess(projectId, adminId, userRole);
+
+    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) throw new NotFoundException('Project not found');
+
+    const scheduleName = `${startTime} - ${endTime}`;
+
+    let schedule = await this.prisma.workSchedule.findFirst({
+      where: { companyId: project.companyId, startTime, endTime }
+    });
+
+    if (!schedule) {
+      schedule = await this.prisma.workSchedule.create({
+        data: {
+          companyId: project.companyId,
+          name: scheduleName,
+          startTime,
+          endTime,
+        }
+      });
+    }
+
+    for (const userId of userIds) {
+      const existingAssignment = await this.prisma.workScheduleAssignment.findUnique({
+        where: {
+          scheduleId_userId: {
+            scheduleId: schedule.id,
+            userId
+          }
+        }
+      });
+
+      if (!existingAssignment) {
+        await this.prisma.workScheduleAssignment.create({
+          data: {
+            scheduleId: schedule.id,
+            userId
+          }
+        });
+      }
+    }
+
+    return { success: true, message: 'Schedules assigned successfully' };
   }
 
   // ─── GEOFENCES ─────────────────────────────────────────────────────────────

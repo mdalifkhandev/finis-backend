@@ -403,6 +403,18 @@ export class ProjectController {
     return this.projectService.removeTeamMember(id, userId, adminId, userRole);
   }
 
+  /** POST /admin/projects/:id/schedule/assign */
+  @Post(':id/schedule/assign')
+  @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
+  assignSchedule(
+    @Param('id') id: string,
+    @Body() body: { userIds: string[]; startTime: string; endTime: string },
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.assignSchedule(id, body.userIds, body.startTime, body.endTime, adminId, userRole);
+  }
+
   // ─── GEOFENCES ─────────────────────────────────────────────────────────────
 
   /** GET /admin/projects/:id/geofences */
