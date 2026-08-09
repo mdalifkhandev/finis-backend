@@ -284,7 +284,7 @@ export class MessageService {
     const threads = await this.prisma.messageThread.findMany({
       where: {
         isActive: true,
-        type: 'direct',
+        type: { in: ['direct', 'group'] },
         participants: { some: { userId } },
       },
       orderBy: { createdAt: 'desc' },
@@ -307,6 +307,8 @@ export class MessageService {
     const filtered = await Promise.all(
       threads
       .filter((thread) => {
+        if (thread.type === 'group' && thread.projectId) return true;
+        
         // শুধু user-to-user thread — কোনো super_admin নেই
         const others = thread.participants.filter((p) => p.userId !== userId);
         return others.every((p) => {
@@ -319,6 +321,9 @@ export class MessageService {
       })
       .filter((thread) => {
         if (!search) return true;
+        if (thread.type === 'group' && thread.projectId) {
+          return (thread.name || '').toLowerCase().includes(search.toLowerCase());
+        }
         const others = thread.participants.filter((p) => p.userId !== userId);
         const name = others[0]?.user?.fullName ?? '';
         return name.toLowerCase().includes(search.toLowerCase());
@@ -328,11 +333,22 @@ export class MessageService {
         const unreadCount = thread.messages.filter(
           (m) => !m.isRead && m.senderId !== userId,
         ).length;
-        const blockState = await this.getDirectThreadBlockState(thread, userId);
+        
+        let blockState = { isBlocked: false, blockedByMe: false, blockedByOther: false };
+        if (thread.type === 'direct') {
+           blockState = await this.getDirectThreadBlockState(thread, userId);
+        }
+        
+        const isProjectChat = thread.type === 'group' && thread.projectId;
+        const threadName = isProjectChat 
+          ? `Project: ${thread.name}` 
+          : (others[0]?.user?.fullName ?? 'Unknown');
+        const resolvedType = isProjectChat ? 'project' : thread.type;
+
         return {
           id: thread.id,
-          type: thread.type,
-          name: others[0]?.user?.fullName ?? 'Unknown',
+          type: resolvedType,
+          name: threadName,
           isActive: thread.isActive,
           lastMessage: thread.messages[0] ?? null,
           unreadCount,

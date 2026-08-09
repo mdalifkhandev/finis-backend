@@ -501,6 +501,22 @@ export class ProjectService {
       },
     });
 
+    // Auto-create a project chat thread
+    await this.prisma.messageThread.create({
+      data: {
+        type: 'group',
+        name: project.name,
+        projectId: project.id,
+        isActive: true,
+        participants: {
+          create: {
+            userId: adminId,
+            role: userRole || 'admin',
+          },
+        },
+      },
+    });
+
     const company = await this.prisma.company.findUnique({
       where: { id: dto.companyId },
       select: { id: true, name: true },
@@ -751,6 +767,12 @@ export class ProjectService {
   // ─── DELETE PROJECT ────────────────────────────────────────────────────────
   async deleteProject(projectId: string, adminId: string, userRole?: string) {
     await this.verifyProjectAccess(projectId, adminId, userRole);
+
+    // Delete associated project chat thread
+    await this.prisma.messageThread.deleteMany({
+      where: { projectId, type: 'group' },
+    });
+
     await this.prisma.project.delete({ where: { id: projectId } });
     return { message: 'Project deleted successfully' };
   }
@@ -1621,6 +1643,24 @@ export class ProjectService {
         });
       }
 
+      // Add to project chat group
+      const projectThread = await this.prisma.messageThread.findFirst({
+        where: { projectId, type: 'group' }
+      });
+      if (projectThread) {
+        await this.prisma.threadParticipant.upsert({
+          where: {
+            threadId_userId: { threadId: projectThread.id, userId }
+          },
+          update: { role },
+          create: {
+            threadId: projectThread.id,
+            userId,
+            role,
+          }
+        });
+      }
+
       return { message: `${role} added successfully`, member: { memberId: member.id, ...member.user } };
     } catch (error: any) {
       if (error?.code === 'P2002') {
@@ -1644,6 +1684,16 @@ export class ProjectService {
     }
     if (member.role === 'worker') {
       await this.prisma.workerManagerMap.deleteMany({ where: { workerId: userId } });
+    }
+
+    // Remove from project chat group
+    const projectThread = await this.prisma.messageThread.findFirst({
+      where: { projectId, type: 'group' }
+    });
+    if (projectThread) {
+      await this.prisma.threadParticipant.deleteMany({
+        where: { threadId: projectThread.id, userId }
+      });
     }
 
     await this.prisma.projectMember.delete({ where: { id: member.id } });
@@ -1873,3 +1923,4 @@ export class ProjectService {
     return { shareToken };
   }
 }
+
