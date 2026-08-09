@@ -3009,10 +3009,28 @@ export class WorkerService {
         companyMembers: {
           include: { company: { select: { id: true, name: true, logoUrl: true } } },
         },
+        workScheduleAssignments: {
+          include: { schedule: true },
+        },
       },
     });
     if (!user) throw new NotFoundException('User not found');
-    return user;
+
+    const completedTasks = await this.prisma.taskAssignee.count({
+      where: { userId: workerId, task: { status: 'completed' } },
+    });
+
+    const revisionTasks = await this.prisma.taskAssignee.count({
+      where: { userId: workerId, task: { status: 'revision' } },
+    });
+
+    return {
+      ...user,
+      taskStats: {
+        completed: completedTasks,
+        revision: revisionTasks,
+      },
+    };
   }
 
   async updateProfile(workerId: string, dto: UpdateProfileDto, avatarFile?: Express.Multer.File) {
