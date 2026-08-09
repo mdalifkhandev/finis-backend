@@ -88,6 +88,36 @@ export class TimeAdjustmentsService {
             data: { checkOutTime: request.adjustedTime },
           });
         }
+      } else {
+        // Fallback: This is a schedule change request
+        const assignment = await this.prisma.workScheduleAssignment.findFirst({
+          where: { userId: request.workerId },
+          include: { schedule: true },
+        });
+        
+        if (assignment && assignment.schedule) {
+          const hours = request.adjustedTime.getHours();
+          const minutes = request.adjustedTime.getMinutes();
+          const ampm = hours >= 12 ? 'PM' : 'AM';
+          const hrs12 = hours % 12 || 12;
+          const minsStr = minutes < 10 ? '0' + minutes : minutes.toString();
+          const timeStr = `${hrs12.toString().padStart(2, '0')}:${minsStr} ${ampm}`;
+
+          const newSchedule = await this.prisma.workSchedule.create({
+            data: {
+              companyId: assignment.schedule.companyId,
+              name: assignment.schedule.name + ' (Adjusted)',
+              startTime: request.requestType === 'check_in' ? timeStr : assignment.schedule.startTime,
+              endTime: request.requestType === 'check_out' ? timeStr : assignment.schedule.endTime,
+              days: assignment.schedule.days
+            }
+          });
+
+          await this.prisma.workScheduleAssignment.update({
+            where: { id: assignment.id },
+            data: { scheduleId: newSchedule.id }
+          });
+        }
       }
     }
 
