@@ -45,7 +45,7 @@ const imageLogoFileFilter = (_: unknown, file: any, cb: (error: Error | null, ac
 
 @Controller('admin/companies')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.admin, UserRole.manager)
+@Roles(UserRole.admin, UserRole.manager, UserRole.super_admin)
 export class CompanyController {
   constructor(
     private companyService: CompanyService,

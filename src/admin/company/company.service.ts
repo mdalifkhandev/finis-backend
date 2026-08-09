@@ -58,6 +58,10 @@ export class CompanyService {
       throw new NotFoundException('Company not found');
     }
 
+    if (userRole === 'super_admin') {
+      return company;
+    }
+
     if (userRole === 'admin' && company.ownerId === userId) {
       return company;
     }
