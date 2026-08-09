@@ -655,7 +655,7 @@ export class MessageService {
     const { search } = query;
 
     const threads = await this.prisma.messageThread.findMany({
-      where: { type: 'direct' },
+      where: { type: { in: ['direct', 'group'] } },
       orderBy: { createdAt: 'desc' },
       include: {
         participants: {
@@ -681,10 +681,18 @@ export class MessageService {
       })
       .filter((thread) => {
         if (!search) return true;
-        const names = thread.participants.map((p) => p.user.fullName).join(' ');
+        const isProjectChat = thread.type === 'group' && thread.projectId;
+        const names = isProjectChat && thread.name 
+          ? thread.name 
+          : thread.participants.map((p) => p.user.fullName).join(' ');
         return names.toLowerCase().includes(search.toLowerCase());
       })
       .map((thread) => {
+        const isProjectChat = thread.type === 'group' && thread.projectId;
+        const threadName = isProjectChat 
+          ? `Project: ${thread.name}` 
+          : thread.participants.map((p) => p.user.fullName).join(', ');
+          
         const participants = thread.participants.map((p) => ({
           ...p.user,
           ...this.getPresence(p.user.id, null),
@@ -692,8 +700,8 @@ export class MessageService {
         const blockState = false;
         return {
           id: thread.id,
-          type: thread.type,
-          name: participants.map((p) => p.fullName).join(', '),
+          type: isProjectChat ? 'project' : thread.type,
+          name: threadName,
           isActive: thread.isActive,
           lastMessage: thread.messages[0] ?? null,
           unreadCount: 0,
@@ -715,7 +723,7 @@ export class MessageService {
     const thread = await this.prisma.messageThread.findFirst({
       where: {
         id: threadId,
-        type: 'direct',
+        type: { in: ['direct', 'group'] },
       },
       include: {
         participants: {
