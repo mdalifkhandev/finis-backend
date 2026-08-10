@@ -1074,7 +1074,7 @@ export class TaskService {
             },
             subTaskUnits: {
               include: {
-                unit: { select: { id: true, name: true } },
+                unit: { select: { id: true, name: true, floorId: true, floor: { select: { id: true, name: true, floorNumber: true } } } },
               },
             },
             reports: {
@@ -1206,7 +1206,7 @@ export class TaskService {
       include: {
         subTaskUnits: {
           include: {
-            unit: { select: { id: true, name: true } },
+            unit: { select: { id: true, name: true, floorId: true, floor: { select: { id: true, name: true, floorNumber: true } } } },
           },
         },
         task: {
@@ -1313,7 +1313,7 @@ export class TaskService {
         },
         subTaskUnits: {
           include: {
-            unit: { select: { id: true, name: true } },
+            unit: { select: { id: true, name: true, floorId: true, floor: { select: { id: true, name: true, floorNumber: true } } } },
           },
         },
         creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
@@ -1444,7 +1444,7 @@ export class TaskService {
           unit: { select: { id: true, name: true } },
           subTaskUnits: {
             include: {
-              unit: { select: { id: true, name: true } },
+              unit: { select: { id: true, name: true, floorId: true, floor: { select: { id: true, name: true, floorNumber: true } } } },
             },
           },
         },
@@ -1582,7 +1582,7 @@ export class TaskService {
           unit: { select: { id: true, name: true } },
           subTaskUnits: {
             include: {
-              unit: { select: { id: true, name: true } },
+              unit: { select: { id: true, name: true, floorId: true, floor: { select: { id: true, name: true, floorNumber: true } } } },
             },
           },
           creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
@@ -1679,7 +1679,7 @@ export class TaskService {
         },
         subTaskUnits: {
           include: {
-            unit: { select: { id: true, name: true } },
+            unit: { select: { id: true, name: true, floorId: true, floor: { select: { id: true, name: true, floorNumber: true } } } },
           },
         },
         creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
@@ -2325,7 +2325,7 @@ export class TaskService {
             unit: { select: { id: true, name: true } },
             subTaskUnits: {
               include: {
-                unit: { select: { id: true, name: true } },
+                unit: { select: { id: true, name: true, floorId: true, floor: { select: { id: true, name: true, floorNumber: true } } } },
               },
             },
             taskAssignee: {
