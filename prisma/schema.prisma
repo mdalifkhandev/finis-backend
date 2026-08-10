@@ -498,6 +498,7 @@ model Task {
   updatedAt            DateTime        @updatedAt @map("updated_at")
   taskInventories      TaskInventory[]
   taskFloors           TaskFloor[]
+  reimbursementExpenses ReimbursementExpense[]
   taskUnits            TaskUnit[]
   subTasks             SubTask[]
   expenses             Expense[]
@@ -791,6 +792,7 @@ model ReimbursementExpense {
   vendor        String?
   paymentMethod String?                    @map("payment_method")
   projectId     String?                    @map("project_id") @db.Uuid
+  taskId        String?                    @map("task_id") @db.Uuid
   notes         String?
   receiptUrl    String?                    @map("receipt_url")
   status        ReimbursementExpenseStatus @default(DRAFT)
@@ -804,9 +806,11 @@ model ReimbursementExpense {
   updatedAt     DateTime                   @updatedAt @map("updated_at")
   createdBy     User                       @relation("ReimbursementExpenseCreator", fields: [createdById], references: [id])
   project       Project?                   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  task          Task?                      @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
   @@index([createdById])
   @@index([projectId])
+  @@index([taskId])
   @@index([status])
   @@index([expenseDate])
   @@map("reimbursement_expenses")

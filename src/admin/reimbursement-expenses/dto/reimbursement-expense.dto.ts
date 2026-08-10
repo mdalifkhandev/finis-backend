@@ -79,6 +79,10 @@ export class CreateReimbursementExpenseDto {
   projectId!: string;
 
   @IsOptional()
+  @IsUUID()
+  taskId?: string;
+
+  @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(1000)
@@ -139,6 +143,10 @@ export class UpdateReimbursementExpenseDto {
   @IsOptional()
   @IsUUID()
   projectId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  taskId?: string;
 
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
