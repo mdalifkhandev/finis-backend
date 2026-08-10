@@ -106,7 +106,7 @@ export class TimeAdjustmentsService {
           const newSchedule = await this.prisma.workSchedule.create({
             data: {
               companyId: assignment.schedule.companyId,
-              name: assignment.schedule.name + ' (Adjusted)',
+              name: assignment.schedule.name.replace(/ \(Adjusted\)/g, '') + ' (Adjusted)',
               startTime: request.requestType === 'check_in' ? timeStr : assignment.schedule.startTime,
               endTime: request.requestType === 'check_out' ? timeStr : assignment.schedule.endTime,
               days: assignment.schedule.days

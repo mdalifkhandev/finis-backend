@@ -3012,6 +3012,9 @@ export class WorkerService {
         workScheduleAssignments: {
           include: { schedule: true },
         },
+        timeAdjustments: {
+          where: { status: 'pending' },
+        },
       },
     });
     if (!user) throw new NotFoundException('User not found');
