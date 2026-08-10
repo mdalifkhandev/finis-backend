@@ -363,7 +363,7 @@ export class ReportsService {
             members: {
               some: {
                 userId,
-                role: 'admin',
+                role: { in: ['admin', 'manager'] },
               },
             },
           },
@@ -387,11 +387,11 @@ export class ReportsService {
 
     switch (dto.type) {
       case ReportType.payroll:
-        return this.generatePayrollReport(start, end, companyIds, dto);
+        return this.generatePayrollReport(start, end, companyIds, dto, userId, userRole);
       case ReportType.project_invoices:
-        return this.generateProjectInvoicesReport(start, end, companyIds, dto);
+        return this.generateProjectInvoicesReport(start, end, companyIds, dto, userId, userRole);
       case ReportType.worker_performance:
-        return this.generateWorkerPerformanceReport(start, end, companyIds, dto);
+        return this.generateWorkerPerformanceReport(start, end, companyIds, dto, userId, userRole);
       case ReportType.expense:
         return this.generateExpenseReport(start, end, companyIds, dto, userId, userRole);
       default:
@@ -405,6 +405,8 @@ export class ReportsService {
     end: Date,
     companyIds: string[],
     dto: GenerateReportDto,
+    userId: string,
+    userRole: string,
   ) {
     const payrolls = await this.prisma.payroll.findMany({
       where: {
@@ -500,12 +502,22 @@ export class ReportsService {
     end: Date,
     companyIds: string[],
     dto: GenerateReportDto,
+    userId: string,
+    userRole: string,
   ) {
     const projects = await this.prisma.project.findMany({
       where: {
         companyId: { in: companyIds },
         ...(dto.projectId && { id: dto.projectId }),
         createdAt: { gte: start, lte: end },
+        ...(userRole === 'manager' && {
+          teamMembers: {
+            some: {
+              userId,
+              role: 'manager',
+            },
+          },
+        }),
       },
       include: {
         company:  { select: { id: true, name: true, logoUrl: true } },
@@ -573,6 +585,8 @@ export class ReportsService {
     end: Date,
     companyIds: string[],
     dto: GenerateReportDto,
+    userId: string,
+    userRole: string,
   ) {
     if (companyIds.length === 0) {
       return {
@@ -656,6 +670,13 @@ export class ReportsService {
         assignedTasks: {
           where: {
             createdAt: { gte: start, lte: end },
+            ...(userRole === 'manager' && {
+              project: {
+                teamMembers: {
+                  some: { userId, role: 'manager' }
+                }
+              }
+            }),
           },
           select: {
             id:           true,
@@ -671,6 +692,11 @@ export class ReportsService {
             task: {
               project: {
                 companyId: { in: companyIds },
+                ...(userRole === 'manager' && {
+                  teamMembers: {
+                    some: { userId, role: 'manager' }
+                  }
+                }),
               },
             },
           },

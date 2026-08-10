@@ -11,7 +11,7 @@ import { AdminExportReportDto, AdminGenerateReportDto } from './dto/admin-report
 
 @Controller('admin/reports')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.admin)
+@Roles(UserRole.admin, UserRole.manager)
 export class AdminReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
