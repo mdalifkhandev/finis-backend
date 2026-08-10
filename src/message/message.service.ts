@@ -893,7 +893,7 @@ export class MessageService {
       .map((p) => p.userId);
     let otherParticipants = thread.participants.filter((p) => p.userId !== senderId);
     let otherRoles = otherParticipants.map((p) => p.user.role);
-    const isSupportThread = otherRoles.includes('super_admin') && otherRoles.some((role) => role !== 'super_admin');
+    const isSupportThread = otherRoles.includes('super_admin') || sender?.role === 'super_admin';
 
     if (otherRoles.includes('super_admin') && !isSupportThread) {
       if (sender?.role === 'super_admin') {
@@ -908,14 +908,14 @@ export class MessageService {
       otherRoles = otherParticipants.map((p) => p.user.role);
     }
 
-    const effectiveIsSupportThread = otherRoles.includes('super_admin') && otherRoles.some((role) => role !== 'super_admin');
+    const effectiveIsSupportThread = otherRoles.includes('super_admin') || sender?.role === 'super_admin';
 
     if (sender?.role === 'worker' && !effectiveIsSupportThread) {
       const hasAdminParticipant = otherRoles.includes('admin');
       const hasManagerParticipant = otherRoles.includes('manager');
 
       if (!hasManagerParticipant && !hasAdminParticipant) {
-        throw new ForbiddenException('Workers can only chat with managers');
+        throw new ForbiddenException('Workers can only chat with managers or admins');
       }
     }
 

@@ -3087,6 +3087,16 @@ export class WorkerService {
         include: { manager: { select: { id: true } } },
       });
       targetUserId = managerMap?.manager?.id ?? null;
+
+      if (!targetUserId) {
+        const projectMember = await this.prisma.projectMember.findFirst({
+          where: { userId: workerId },
+          include: { project: { include: { teamMembers: { where: { role: 'manager' } } } } }
+        });
+        if (projectMember?.project?.teamMembers?.[0]) {
+          targetUserId = projectMember.project.teamMembers[0].userId;
+        }
+      }
     } else {
       // Admin — worker  company    owner
       const companyMember = await this.prisma.companyMember.findFirst({
@@ -3094,6 +3104,14 @@ export class WorkerService {
         include: { company: { select: { ownerId: true } } },
       });
       targetUserId = companyMember?.company?.ownerId ?? null;
+
+      if (!targetUserId) {
+        const projectMember = await this.prisma.projectMember.findFirst({
+          where: { userId: workerId },
+          include: { project: { include: { company: { select: { ownerId: true } } } } }
+        });
+        targetUserId = projectMember?.project?.company?.ownerId ?? null;
+      }
     }
 
     if (!targetUserId)
