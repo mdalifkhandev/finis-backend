@@ -1331,34 +1331,20 @@ export class PayrollService {
     month?: string,
     year?: string,
     projectId?: string,
+    range?: 'custom' | 'weekly' | 'bi-weekly' | 'monthly' | 'bi-monthly' | 'yearly',
+    startDate?: string,
+    endDate?: string,
   ) {
     await this.assertPayrollSubscriptionActive(adminId, userRole);
     const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
-    const now = new Date();
-    const hasDate = Boolean(date);
-    const startDate = hasDate
-      ? this.parseDateOnly(date as string)
-      : new Date(
-          year ? parseInt(year) : now.getFullYear(),
-          month ? parseInt(month) - 1 : now.getMonth(),
-          1,
-        );
-    const endDate = hasDate
-      ? this.parseDateOnly(date as string)
-      : new Date(
-          year ? parseInt(year) : now.getFullYear(),
-          month ? parseInt(month) : now.getMonth() + 1,
-          0,
-        );
-    startDate.setHours(0, 0, 0, 0);
-    endDate.setHours(23, 59, 59, 999);
+    const window = this.buildDateWindow({ date, month, year, range, startDate, endDate });
 
     const payrolls = await this.prisma.payroll.findMany({
       where: {
         ...(accessibleCompanyIds.length > 0 ? { companyId: { in: accessibleCompanyIds } } : {}),
         status: 'approved',
-        payPeriodStart: { gte: startDate },
-        payPeriodEnd: { lte: endDate },
+        payPeriodStart: { lte: window.endDate },
+        payPeriodEnd: { gte: window.startDate },
         ...(projectId && { projectId }),
       },
       include: {
@@ -1412,34 +1398,20 @@ export class PayrollService {
     month?: string,
     year?: string,
     projectId?: string,
+    range?: 'custom' | 'weekly' | 'bi-weekly' | 'monthly' | 'bi-monthly' | 'yearly',
+    startDate?: string,
+    endDate?: string,
   ) {
     await this.assertPayrollSubscriptionActive(adminId, userRole);
     const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
-    const now = new Date();
-    const hasDate = Boolean(date);
-    const startDate = hasDate
-      ? this.parseDateOnly(date as string)
-      : new Date(
-          year ? parseInt(year) : now.getFullYear(),
-          month ? parseInt(month) - 1 : now.getMonth(),
-          1,
-        );
-    const endDate = hasDate
-      ? this.parseDateOnly(date as string)
-      : new Date(
-          year ? parseInt(year) : now.getFullYear(),
-          month ? parseInt(month) : now.getMonth() + 1,
-          0,
-        );
-    startDate.setHours(0, 0, 0, 0);
-    endDate.setHours(23, 59, 59, 999);
+    const window = this.buildDateWindow({ date, month, year, range, startDate, endDate });
 
     const payrolls = await this.prisma.payroll.findMany({
       where: {
         ...(accessibleCompanyIds.length > 0 ? { companyId: { in: accessibleCompanyIds } } : {}),
         status: 'approved',
-        payPeriodStart: { gte: startDate },
-        payPeriodEnd: { lte: endDate },
+        payPeriodStart: { lte: window.endDate },
+        payPeriodEnd: { gte: window.startDate },
         ...(projectId && { projectId }),
       },
       include: {

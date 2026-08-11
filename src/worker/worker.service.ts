@@ -37,6 +37,28 @@ export class WorkerService {
     return `${h}h ${m}m`;
   }
 
+  private parseDateOnly(value: string) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return new Date(value);
+
+    const [, year, month, day] = match;
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  }
+
+  private parseDbDateOnlyStart(value: string) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return new Date(value);
+
+    const [, year, month, day] = match;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 0, 0, 0, 0));
+  }
+
+  private parseDbDateOnlyEnd(value: string) {
+    const start = this.parseDbDateOnlyStart(value);
+    start.setUTCHours(23, 59, 59, 999);
+    return start;
+  }
+
   private buildWorkflowSnapshot(entity: any) {
     const latestReport = entity?.reports?.[0] ?? entity?.latestReport ?? null;
     const status = entity?.status ?? 'pending';
@@ -3405,18 +3427,25 @@ export class WorkerService {
   async getMyPayroll(workerId: string, date?: string, startDate?: string, endDate?: string) {
     let start: Date;
     let end: Date;
+    let payrollStart: Date;
+    let payrollEnd: Date;
 
     if (startDate && endDate) {
-      start = new Date(startDate);
+      start = this.parseDateOnly(startDate);
       start.setHours(0, 0, 0, 0);
-      end = new Date(endDate);
+      end = this.parseDateOnly(endDate);
       end.setHours(23, 59, 59, 999);
+      payrollStart = this.parseDbDateOnlyStart(startDate);
+      payrollEnd = this.parseDbDateOnlyEnd(endDate);
     } else {
-      const selected = date ? new Date(date) : new Date();
+      const selected = date ? this.parseDateOnly(date) : new Date();
       selected.setHours(0, 0, 0, 0);
       start = selected;
       end = new Date(selected);
       end.setHours(23, 59, 59, 999);
+      const selectedDateKey = date ?? `${selected.getFullYear()}-${String(selected.getMonth() + 1).padStart(2, '0')}-${String(selected.getDate()).padStart(2, '0')}`;
+      payrollStart = this.parseDbDateOnlyStart(selectedDateKey);
+      payrollEnd = this.parseDbDateOnlyEnd(selectedDateKey);
     }
 
     const [worker, payrolls, allTimePayrolls] = await Promise.all([
@@ -3437,12 +3466,8 @@ export class WorkerService {
       this.prisma.payroll.findMany({
         where: {
           workerId,
-          OR: [
-            { payPeriodStart: { gte: start, lte: end } },
-            { payPeriodEnd: { gte: start, lte: end } },
-            { processedAt: { gte: start, lte: end } },
-            { createdAt: { gte: start, lte: end } },
-          ],
+          payPeriodStart: { lte: payrollEnd },
+          payPeriodEnd: { gte: payrollStart },
         },
         include: {
           company: { select: { id: true, name: true, logoUrl: true } },
@@ -3478,6 +3503,16 @@ export class WorkerService {
     const lifetimePay = allTimePayrolls.reduce((sum, p) => sum + p.netPay, 0);
     const lifetimeAverageHourlyRate = allTimePayrolls.length
       ? Math.round((allTimePayrolls.reduce((sum, p) => sum + p.ratePerHour, 0) / allTimePayrolls.length) * 100) / 100
+      : 0;
+    const periodTotalHours = payrolls.reduce(
+      (sum, p) => sum + (p.regularHours ?? 0) + (p.overtimeHours ?? 0),
+      0,
+    );
+    const periodGrossPay = payrolls.reduce((sum, p) => sum + p.grossPay, 0);
+    const periodDeductions = payrolls.reduce((sum, p) => sum + p.deductions, 0);
+    const periodPay = payrolls.reduce((sum, p) => sum + p.netPay, 0);
+    const periodAverageHourlyRate = payrolls.length
+      ? Math.round((payrolls.reduce((sum, p) => sum + p.ratePerHour, 0) / payrolls.length) * 100) / 100
       : 0;
 
     const projectMap = new Map<
@@ -3562,6 +3597,14 @@ export class WorkerService {
       },
       projects,
       statusSummary,
+      periodSummary: {
+        totalHours: Math.round(periodTotalHours * 100) / 100,
+        totalHoursDisplay: this.formatHoursAndMinutes(periodTotalHours),
+        totalPay: Math.round(periodPay * 100) / 100,
+        totalDeductions: Math.round(periodDeductions * 100) / 100,
+        grossPay: Math.round(periodGrossPay * 100) / 100,
+        averageHourlyRate: periodAverageHourlyRate,
+      },
       lifetimeSummary: {
         totalHours: Math.round(lifetimeTotalHours * 100) / 100,
         totalHoursDisplay: this.formatHoursAndMinutes(lifetimeTotalHours),

@@ -58,6 +58,9 @@ export class PayrollController {
       query.month,
       query.year,
       projectId,
+      query.range,
+      query.startDate,
+      query.endDate,
     );
   }
 
@@ -77,6 +80,9 @@ export class PayrollController {
       query.month,
       query.year,
       projectId,
+      query.range,
+      query.startDate,
+      query.endDate,
     );
   }
 
