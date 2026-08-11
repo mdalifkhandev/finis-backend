@@ -1,10 +1,12 @@
 import './common/timezone';
+
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { NextFunction, Request, Response } from 'express';
+
+import { AppModule } from './app.module';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 
@@ -12,10 +14,10 @@ async function bootstrap() {
   const logger = new Logger('HTTP');
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-    rawBody: true, 
+    rawBody: true,
   });
 
-  const safeStringify = (value: unknown) => {
+  const safeStringify = (value: unknown): string => {
     try {
       return JSON.stringify(value);
     } catch {
@@ -63,23 +65,23 @@ async function bootstrap() {
     }),
   );
 
-    // Global Exception Filter
   app.useGlobalFilters(new GlobalExceptionFilter());
-
-  // Global Response Interceptor
   app.useGlobalInterceptors(new ResponseInterceptor());
-  
   app.enableCors();
+  app.enableShutdownHooks();
 
-app.useStaticAssets(join(process.cwd(), 'uploads'), {
-  prefix: '',
-});
+  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+    prefix: '',
+  });
 
-  const port =  6000;
+  const port = Number(process.env.PORT) || 6000;
 
   await app.listen(port, '0.0.0.0');
 
-  console.log(`Server running on port ${port}`);
+  logger.log(`API running on http://localhost:${port}`);
 }
 
-bootstrap();
+bootstrap().catch((error) => {
+  console.error('Failed to start application:', error);
+  process.exit(1);
+});
