@@ -2799,8 +2799,31 @@ export class WorkerService {
       this.prisma.attendance.count({ where: { userId: workerId } }),
     ]);
 
+    const dates = data.map((d) => d.date);
+    const adjustments = await this.prisma.timeAdjustmentRequest.findMany({
+      where: {
+        workerId,
+        date: { in: dates },
+      },
+    });
+
+    const enrichedData = data.map((attendance) => {
+      const dateString = attendance.date.toISOString().split('T')[0];
+      const reqs = adjustments.filter(a => a.date.toISOString().split('T')[0] === dateString);
+      const latestAdjustment = reqs.length > 0 
+        ? reqs.sort((a,b) => b.submittedAt.getTime() - a.submittedAt.getTime())[0] 
+        : null;
+
+      return {
+        ...attendance,
+        adjustmentStatus: latestAdjustment ? latestAdjustment.status : null,
+        adjustmentRequestedTime: latestAdjustment ? latestAdjustment.adjustedTime : null,
+        adjustmentRequestType: latestAdjustment ? latestAdjustment.requestType : null,
+      };
+    });
+
     return {
-      data,
+      data: enrichedData,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }

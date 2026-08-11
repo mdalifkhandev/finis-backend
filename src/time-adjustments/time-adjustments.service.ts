@@ -88,6 +88,24 @@ export class TimeAdjustmentsService {
             data: { checkOutTime: request.adjustedTime },
           });
         }
+
+        // Recalculate total hours for attendance
+        const updatedAttendance = await this.prisma.attendance.findUnique({
+          where: { id: attendance.id },
+          include: { sessions: true },
+        });
+
+        if (updatedAttendance) {
+          const totalHours = updatedAttendance.sessions.reduce((sum, session) => {
+            if (!session.checkInTime || !session.checkOutTime) return sum;
+            const diffMs = session.checkOutTime.getTime() - session.checkInTime.getTime();
+            return sum + (diffMs > 0 ? diffMs / (1000 * 60 * 60) : 0);
+          }, 0);
+          await this.prisma.attendance.update({
+            where: { id: attendance.id },
+            data: { totalHours: Math.round(totalHours * 100) / 100 },
+          });
+        }
       } else {
         // Fallback: This is a schedule change request
         const assignment = await this.prisma.workScheduleAssignment.findFirst({
