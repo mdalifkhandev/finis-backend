@@ -187,6 +187,33 @@ export class PayrollService {
     return new Date(Number(year), Number(month) - 1, Number(day));
   }
 
+  private toDbDateWindow(window: { startDate: Date; endDate: Date }) {
+    const startDate = new Date(
+      Date.UTC(
+        window.startDate.getFullYear(),
+        window.startDate.getMonth(),
+        window.startDate.getDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+    const endDate = new Date(
+      Date.UTC(
+        window.endDate.getFullYear(),
+        window.endDate.getMonth(),
+        window.endDate.getDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
+
+    return { startDate, endDate };
+  }
+
   private async syncPayrollDraftsFromAttendance(
     companyIds: string[],
     startDate: Date,
@@ -892,6 +919,7 @@ export class PayrollService {
     const subscription = await this.assertPayrollSubscriptionActive(adminId, userRole);
     const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
     const window = this.buildDateWindow({ range, startDate, endDate, date, month, year });
+    const dbWindow = this.toDbDateWindow(window);
 
     await this.syncPayrollDraftsFromAttendance(
       accessibleCompanyIds,
@@ -903,15 +931,8 @@ export class PayrollService {
     const payrolls = await this.prisma.payroll.findMany({
       where: {
         ...(accessibleCompanyIds.length > 0 ? { companyId: { in: accessibleCompanyIds } } : {}),
-        OR: [
-          {
-            payPeriodStart: { lte: window.endDate },
-            payPeriodEnd: { gte: window.startDate },
-          },
-          {
-            status: 'paid',
-          },
-        ],
+        payPeriodStart: { lte: dbWindow.endDate },
+        payPeriodEnd: { gte: dbWindow.startDate },
         ...(projectId && { projectId }),
       },
       include: {
@@ -1338,13 +1359,14 @@ export class PayrollService {
     await this.assertPayrollSubscriptionActive(adminId, userRole);
     const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
     const window = this.buildDateWindow({ date, month, year, range, startDate, endDate });
+    const dbWindow = this.toDbDateWindow(window);
 
     const payrolls = await this.prisma.payroll.findMany({
       where: {
         ...(accessibleCompanyIds.length > 0 ? { companyId: { in: accessibleCompanyIds } } : {}),
         status: 'approved',
-        payPeriodStart: { lte: window.endDate },
-        payPeriodEnd: { gte: window.startDate },
+        payPeriodStart: { lte: dbWindow.endDate },
+        payPeriodEnd: { gte: dbWindow.startDate },
         ...(projectId && { projectId }),
       },
       include: {
@@ -1405,13 +1427,14 @@ export class PayrollService {
     await this.assertPayrollSubscriptionActive(adminId, userRole);
     const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
     const window = this.buildDateWindow({ date, month, year, range, startDate, endDate });
+    const dbWindow = this.toDbDateWindow(window);
 
     const payrolls = await this.prisma.payroll.findMany({
       where: {
         ...(accessibleCompanyIds.length > 0 ? { companyId: { in: accessibleCompanyIds } } : {}),
         status: 'approved',
-        payPeriodStart: { lte: window.endDate },
-        payPeriodEnd: { gte: window.startDate },
+        payPeriodStart: { lte: dbWindow.endDate },
+        payPeriodEnd: { gte: dbWindow.startDate },
         ...(projectId && { projectId }),
       },
       include: {
@@ -1670,6 +1693,7 @@ export class PayrollService {
     const subscription = await this.assertPayrollSubscriptionActive(adminId, userRole);
     const companyIds = await this.getAdminCompanyIds(adminId, userRole);
     const window = this.buildDateWindow({ date, month, year, range, startDate, endDate });
+    const dbWindow = this.toDbDateWindow(window);
 
     await this.syncPayrollDraftsFromAttendance(
       companyIds,
@@ -1681,8 +1705,8 @@ export class PayrollService {
       this.prisma.payroll.findMany({
         where: {
           ...(companyIds.length > 0 ? { companyId: { in: companyIds } } : {}),
-          payPeriodStart: { lte: window.endDate },
-          payPeriodEnd: { gte: window.startDate },
+          payPeriodStart: { lte: dbWindow.endDate },
+          payPeriodEnd: { gte: dbWindow.startDate },
         },
         select: {
           id: true,
