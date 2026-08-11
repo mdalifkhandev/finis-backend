@@ -69,9 +69,9 @@ export class PayrollService {
   }
 
   /**
-   * Selected date-এর attendance sessions থেকে zone-এর ভেতরের total worked hours বের করো।
-   * প্রতিটা session-এর zoneSeconds যোগ করা হয়, raw checkIn-checkOut duration নয়।
-   * চলমান (checkOut নেই) session-ও তার zoneSeconds অনুযায়ী count হবে।
+   * Selected date-এর attendance sessions থেকে total worked hours বের করো।
+   * Prefer persisted zone time, but fall back to stored session hours or raw
+   * check-in/check-out duration so older rows do not show as 0h in payroll.
    */
   private async getWorkedHoursForDate(
     workerId: string,
@@ -112,7 +112,7 @@ export class PayrollService {
       };
     }
 
-    let totalZoneSeconds = 0;
+    let totalWorkedSeconds = 0;
     const sessionDetails: Array<{
       checkInTime: Date;
       checkOutTime: Date | null;
@@ -121,19 +121,35 @@ export class PayrollService {
 
     for (const session of attendance.sessions) {
       const zoneSeconds = session.zoneSeconds ?? 0;
-      totalZoneSeconds += zoneSeconds;
+      const storedHoursSeconds = session.hoursWorked
+        ? Math.round(session.hoursWorked * 3600)
+        : 0;
+      const closedDurationSeconds = session.checkOutTime
+        ? Math.max(
+            0,
+            Math.floor(
+              (session.checkOutTime.getTime() - session.checkInTime.getTime()) / 1000,
+            ),
+          )
+        : 0;
+      const workedSeconds = zoneSeconds || storedHoursSeconds || closedDurationSeconds;
+      totalWorkedSeconds += workedSeconds;
 
       sessionDetails.push({
         checkInTime: session.checkInTime,
         checkOutTime: session.checkOutTime,
-        durationMinutes: Math.floor(zoneSeconds / 60),
+        durationMinutes: Math.floor(workedSeconds / 60),
       });
     }
 
-    const totalMinutes = Math.floor(totalZoneSeconds / 60);
+    if (totalWorkedSeconds <= 0 && attendance.totalHours) {
+      totalWorkedSeconds = Math.round(attendance.totalHours * 3600);
+    }
+
+    const totalMinutes = Math.floor(totalWorkedSeconds / 60);
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
-    const totalHours = Math.round((totalZoneSeconds / 3600) * 100) / 100;
+    const totalHours = Math.round((totalWorkedSeconds / 3600) * 100) / 100;
 
     return {
       totalHours,
@@ -161,6 +177,163 @@ export class PayrollService {
       wsibRate: 0.0142,
       vacationPayRate: 0.04,
     };
+  }
+
+  private parseDateOnly(value: string) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return new Date(value);
+
+    const [, year, month, day] = match;
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  }
+
+  private async syncPayrollDraftsFromAttendance(
+    companyIds: string[],
+    startDate: Date,
+    endDate: Date,
+    projectId?: string,
+  ) {
+    const attendances = await this.prisma.attendance.findMany({
+      where: {
+        date: { gte: startDate, lte: endDate },
+        user: {
+          role: UserRole.worker,
+          OR: [
+            { companyMembers: { some: { companyId: { in: companyIds } } } },
+            { projectMemberships: { some: { project: { companyId: { in: companyIds } } } } },
+          ],
+        },
+        ...(projectId && { sessions: { some: { projectId } } }),
+      },
+      include: {
+        sessions: {
+          orderBy: { checkInTime: 'asc' },
+        },
+        user: {
+          select: {
+            id: true,
+            hourlyRate: true,
+            companyMembers: {
+              where: { companyId: { in: companyIds } },
+              select: { companyId: true },
+              take: 1,
+            },
+            projectMemberships: {
+              where: {
+                project: { companyId: { in: companyIds } },
+                ...(projectId && { projectId }),
+              },
+              select: {
+                projectId: true,
+                project: {
+                  select: {
+                    id: true,
+                    companyId: true,
+                  },
+                },
+              },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+
+    for (const attendance of attendances) {
+      const fallbackProject = attendance.user.projectMemberships[0]?.project ?? null;
+      const companyId =
+        fallbackProject?.companyId ?? attendance.user.companyMembers[0]?.companyId;
+      if (!companyId) continue;
+
+      const sessionsByProject = new Map<string | null, number>();
+
+      for (const session of attendance.sessions) {
+        if (projectId && session.projectId !== projectId) continue;
+
+        const zoneSeconds = session.zoneSeconds ?? 0;
+        const storedHoursSeconds = session.hoursWorked
+          ? Math.round(session.hoursWorked * 3600)
+          : 0;
+        const closedDurationSeconds = session.checkOutTime
+          ? Math.max(
+              0,
+              Math.floor(
+                (session.checkOutTime.getTime() - session.checkInTime.getTime()) / 1000,
+              ),
+            )
+          : 0;
+        const workedSeconds = zoneSeconds || storedHoursSeconds || closedDurationSeconds;
+        if (workedSeconds <= 0) continue;
+
+        const resolvedProjectId = session.projectId ?? fallbackProject?.id ?? null;
+        sessionsByProject.set(
+          resolvedProjectId,
+          (sessionsByProject.get(resolvedProjectId) ?? 0) + workedSeconds,
+        );
+      }
+
+      if (sessionsByProject.size === 0 && attendance.totalHours && !projectId) {
+        sessionsByProject.set(
+          fallbackProject?.id ?? null,
+          Math.round(attendance.totalHours * 3600),
+        );
+      }
+
+      for (const [resolvedProjectId, workedSeconds] of sessionsByProject) {
+        const regularHours = Math.round((workedSeconds / 3600) * 100) / 100;
+        if (regularHours <= 0) continue;
+
+        const existingPayroll = await this.prisma.payroll.findFirst({
+          where: {
+            workerId: attendance.userId,
+            companyId,
+            projectId: resolvedProjectId,
+            payPeriodStart: attendance.date,
+            payPeriodEnd: attendance.date,
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (existingPayroll && existingPayroll.status !== 'draft') continue;
+
+        const ratePerHour =
+          existingPayroll?.ratePerHour ?? attendance.user.hourlyRate ?? 0;
+        const computed = this.calculatePayrollFields(
+          regularHours,
+          0,
+          ratePerHour,
+          this.getDefaultConfig(),
+        );
+
+        const data = {
+          companyId,
+          workerId: attendance.userId,
+          projectId: resolvedProjectId,
+          payPeriodStart: attendance.date,
+          payPeriodEnd: attendance.date,
+          regularHours,
+          overtimeHours: 0,
+          ratePerHour,
+          grossPay: computed.grossPay,
+          deductions: computed.deductions,
+          netPay: computed.netPay,
+          employerCost: computed.employerCost,
+          status: 'draft' as const,
+          processedBy: null,
+          processedAt: null,
+        };
+
+        if (existingPayroll) {
+          await this.prisma.payroll.update({
+            where: { id: existingPayroll.id },
+            data,
+          });
+        } else {
+          await this.prisma.payroll.create({ data });
+        }
+      }
+    }
   }
 
   /**
@@ -199,13 +372,13 @@ export class PayrollService {
     };
 
     if (query.startDate || query.endDate) {
-      const start = query.startDate ? normalizeStart(new Date(query.startDate)) : normalizeStart(now);
-      const end = query.endDate ? normalizeEnd(new Date(query.endDate)) : normalizeEnd(start);
+      const start = query.startDate ? normalizeStart(this.parseDateOnly(query.startDate)) : normalizeStart(now);
+      const end = query.endDate ? normalizeEnd(this.parseDateOnly(query.endDate)) : normalizeEnd(start);
       return { startDate: start, endDate: end };
     }
 
     if (query.range === 'weekly') {
-      const ref = query.date ? new Date(query.date) : now;
+      const ref = query.date ? this.parseDateOnly(query.date) : now;
       const day = ref.getDay();
       const start = new Date(ref);
       start.setDate(ref.getDate() - day);
@@ -215,7 +388,7 @@ export class PayrollService {
     }
 
     if (query.range === 'bi-weekly') {
-      const ref = query.date ? new Date(query.date) : now;
+      const ref = query.date ? this.parseDateOnly(query.date) : now;
       const start = normalizeStart(ref);
       const end = new Date(start);
       end.setDate(start.getDate() + 13);
@@ -223,24 +396,24 @@ export class PayrollService {
     }
 
     if (query.range === 'monthly') {
-      const ref = query.date ? new Date(query.date) : now;
+      const ref = query.date ? this.parseDateOnly(query.date) : now;
       return makeMonthWindow(ref, 1);
     }
 
     if (query.range === 'bi-monthly') {
-      const ref = query.date ? new Date(query.date) : now;
+      const ref = query.date ? this.parseDateOnly(query.date) : now;
       return makeMonthWindow(ref, 2);
     }
 
     if (query.range === 'yearly') {
-      const ref = query.date ? new Date(query.date) : now;
+      const ref = query.date ? this.parseDateOnly(query.date) : now;
       const start = new Date(ref.getFullYear(), 0, 1);
       const end = new Date(ref.getFullYear(), 11, 31);
       return { startDate: normalizeStart(start), endDate: normalizeEnd(end) };
     }
 
     if (query.date) {
-      const selected = new Date(query.date);
+      const selected = this.parseDateOnly(query.date);
       return { startDate: normalizeStart(selected), endDate: normalizeEnd(selected) };
     }
 
@@ -720,6 +893,13 @@ export class PayrollService {
     const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
     const window = this.buildDateWindow({ range, startDate, endDate, date, month, year });
 
+    await this.syncPayrollDraftsFromAttendance(
+      accessibleCompanyIds,
+      window.startDate,
+      window.endDate,
+      projectId,
+    );
+
     const payrolls = await this.prisma.payroll.findMany({
       where: {
         ...(accessibleCompanyIds.length > 0 ? { companyId: { in: accessibleCompanyIds } } : {}),
@@ -752,6 +932,46 @@ export class PayrollService {
     });
 
     const dayKey = (value: Date) => new Date(value).toISOString().slice(0, 10);
+
+    for (const payroll of payrolls) {
+      if (
+        payroll.status !== 'draft' ||
+        payroll.regularHours + payroll.overtimeHours > 0
+      ) {
+        continue;
+      }
+
+      const workedData = await this.getWorkedHoursForDate(
+        payroll.workerId,
+        payroll.payPeriodStart,
+      );
+      if (workedData.totalHours <= 0) continue;
+
+      const computed = this.calculatePayrollFields(
+        workedData.totalHours,
+        payroll.overtimeHours,
+        payroll.ratePerHour,
+        this.getDefaultConfig(),
+      );
+
+      const updatedPayroll = await this.prisma.payroll.update({
+        where: { id: payroll.id },
+        data: {
+          regularHours: workedData.totalHours,
+          grossPay: computed.grossPay,
+          deductions: computed.deductions,
+          netPay: computed.netPay,
+          employerCost: computed.employerCost,
+        },
+      });
+
+      payroll.regularHours = updatedPayroll.regularHours;
+      payroll.grossPay = updatedPayroll.grossPay;
+      payroll.deductions = updatedPayroll.deductions;
+      payroll.netPay = updatedPayroll.netPay;
+      payroll.employerCost = updatedPayroll.employerCost;
+    }
+
     const summaryMap = new Map<
       string,
       (typeof payrolls)[number] & {
@@ -1117,14 +1337,14 @@ export class PayrollService {
     const now = new Date();
     const hasDate = Boolean(date);
     const startDate = hasDate
-      ? new Date(date as string)
+      ? this.parseDateOnly(date as string)
       : new Date(
           year ? parseInt(year) : now.getFullYear(),
           month ? parseInt(month) - 1 : now.getMonth(),
           1,
         );
     const endDate = hasDate
-      ? new Date(date as string)
+      ? this.parseDateOnly(date as string)
       : new Date(
           year ? parseInt(year) : now.getFullYear(),
           month ? parseInt(month) : now.getMonth() + 1,
@@ -1198,14 +1418,14 @@ export class PayrollService {
     const now = new Date();
     const hasDate = Boolean(date);
     const startDate = hasDate
-      ? new Date(date as string)
+      ? this.parseDateOnly(date as string)
       : new Date(
           year ? parseInt(year) : now.getFullYear(),
           month ? parseInt(month) - 1 : now.getMonth(),
           1,
         );
     const endDate = hasDate
-      ? new Date(date as string)
+      ? this.parseDateOnly(date as string)
       : new Date(
           year ? parseInt(year) : now.getFullYear(),
           month ? parseInt(month) : now.getMonth() + 1,
@@ -1479,6 +1699,12 @@ export class PayrollService {
     const companyIds = await this.getAdminCompanyIds(adminId, userRole);
     const window = this.buildDateWindow({ date, month, year, range, startDate, endDate });
 
+    await this.syncPayrollDraftsFromAttendance(
+      companyIds,
+      window.startDate,
+      window.endDate,
+    );
+
     const [payrolls, activeWorkers, inventoryAlerts] = await Promise.all([
       this.prisma.payroll.findMany({
         where: {
@@ -1487,8 +1713,12 @@ export class PayrollService {
           payPeriodEnd: { gte: window.startDate },
         },
         select: {
+          id: true,
+          workerId: true,
+          payPeriodStart: true,
           regularHours: true,
           overtimeHours: true,
+          ratePerHour: true,
           grossPay: true,
           status: true,
         },
@@ -1509,6 +1739,42 @@ export class PayrollService {
         },
       }),
     ]);
+
+    for (const payroll of payrolls) {
+      if (
+        payroll.status !== 'draft' ||
+        payroll.regularHours + payroll.overtimeHours > 0
+      ) {
+        continue;
+      }
+
+      const workedData = await this.getWorkedHoursForDate(
+        payroll.workerId,
+        payroll.payPeriodStart,
+      );
+      if (workedData.totalHours <= 0) continue;
+
+      const computed = this.calculatePayrollFields(
+        workedData.totalHours,
+        payroll.overtimeHours,
+        payroll.ratePerHour,
+        this.getDefaultConfig(),
+      );
+
+      await this.prisma.payroll.update({
+        where: { id: payroll.id },
+        data: {
+          regularHours: workedData.totalHours,
+          grossPay: computed.grossPay,
+          deductions: computed.deductions,
+          netPay: computed.netPay,
+          employerCost: computed.employerCost,
+        },
+      });
+
+      payroll.regularHours = workedData.totalHours;
+      payroll.grossPay = computed.grossPay;
+    }
 
     const paidPayrolls = payrolls.filter((payroll) => payroll.status === 'paid');
     const totalHours = payrolls.reduce((sum, payroll) => sum + payroll.regularHours + payroll.overtimeHours, 0);

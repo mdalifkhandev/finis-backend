@@ -2647,8 +2647,12 @@ export class WorkerService {
     // Worker zone-এর ভেতরে থাকতে থাকতেই checkout করতে পারে, তখন এখন পর্যন্ত
     // চলমান সময়টাও যোগ হওয়া দরকার, যেটা closeWorkerSession() করে দেয়।
     const liveZoneSeconds = this.geofencingGateway.closeWorkerSession(workerId);
+    const fallbackSessionSeconds = Math.max(
+      0,
+      Math.floor((now.getTime() - openSession.checkInTime.getTime()) / 1000),
+    );
     const sessionZoneSeconds =
-      liveZoneSeconds > 0 ? liveZoneSeconds : (openSession.zoneSeconds ?? 0);
+      liveZoneSeconds > 0 ? liveZoneSeconds : (openSession.zoneSeconds || fallbackSessionSeconds);
     const hoursWorked = sessionZoneSeconds / 3600;
 
     // Session close করো — zoneSeconds-টাও persist করো, আগে এটা miss হতো
@@ -2698,7 +2702,12 @@ export class WorkerService {
     // শুধু closed session এর zone time যোগ করো
     const totalHours = allSessions
       .filter((s) => s.checkOutTime !== null)
-      .reduce((sum, s) => sum + ((s.zoneSeconds ?? 0) / 3600), 0);
+      .reduce((sum, s) => {
+        const durationSeconds = s.checkOutTime
+          ? Math.max(0, Math.floor((s.checkOutTime.getTime() - s.checkInTime.getTime()) / 1000))
+          : 0;
+        return sum + ((s.zoneSeconds || durationSeconds) / 3600);
+      }, 0);
 
     await this.prisma.attendance.update({
       where: { id: attendance.id },
