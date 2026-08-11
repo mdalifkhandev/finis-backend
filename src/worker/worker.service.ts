@@ -3393,11 +3393,22 @@ export class WorkerService {
   // PAYROLL
   // ─────────────────────────────────────────────
 
-  async getMyPayroll(workerId: string, date?: string) {
-    const selected = date ? new Date(date) : new Date();
-    selected.setHours(0, 0, 0, 0);
-    const selectedEnd = new Date(selected);
-    selectedEnd.setHours(23, 59, 59, 999);
+  async getMyPayroll(workerId: string, date?: string, startDate?: string, endDate?: string) {
+    let start: Date;
+    let end: Date;
+
+    if (startDate && endDate) {
+      start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+    } else {
+      const selected = date ? new Date(date) : new Date();
+      selected.setHours(0, 0, 0, 0);
+      start = selected;
+      end = new Date(selected);
+      end.setHours(23, 59, 59, 999);
+    }
 
     const [worker, payrolls, allTimePayrolls] = await Promise.all([
       this.prisma.user.findUnique({
@@ -3418,10 +3429,10 @@ export class WorkerService {
         where: {
           workerId,
           OR: [
-            { payPeriodStart: { gte: selected, lte: selectedEnd } },
-            { payPeriodEnd: { gte: selected, lte: selectedEnd } },
-            { processedAt: { gte: selected, lte: selectedEnd } },
-            { createdAt: { gte: selected, lte: selectedEnd } },
+            { payPeriodStart: { gte: start, lte: end } },
+            { payPeriodEnd: { gte: start, lte: end } },
+            { processedAt: { gte: start, lte: end } },
+            { createdAt: { gte: start, lte: end } },
           ],
         },
         include: {
@@ -3528,7 +3539,7 @@ export class WorkerService {
     }));
 
     return {
-      date: selected,
+      date: start,
       worker: {
         id: worker.id,
         fullName: worker.fullName,

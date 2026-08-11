@@ -421,8 +421,10 @@ export class WorkerController {
   getMyPayroll(
     @CurrentUser('id') workerId: string,
     @Query('date') date?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
-    return this.workerService.getMyPayroll(workerId, date);
+    return this.workerService.getMyPayroll(workerId, date, startDate, endDate);
   }
 
   // ATTENDANCE
