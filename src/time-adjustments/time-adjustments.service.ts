@@ -69,21 +69,31 @@ export class TimeAdjustmentsService {
         where: { userId: request.workerId },
         include: { sessions: { orderBy: { checkInTime: 'asc' } } },
       });
-      const reqDateStr = request.date.toISOString().split('T')[0];
-      const attendance = attendances.find(a => a.date.toISOString().split('T')[0] === reqDateStr);
+      
+      let attendance: any = null;
+      let targetSession: any = null;
+      for (const a of attendances) {
+        for (const s of a.sessions) {
+          const inDiff = s.checkInTime ? Math.abs(s.checkInTime.getTime() - request.originalTime.getTime()) : Infinity;
+          const outDiff = s.checkOutTime ? Math.abs(s.checkOutTime.getTime() - request.originalTime.getTime()) : Infinity;
+          if (inDiff < 1000 || outDiff < 1000) {
+            attendance = a;
+            targetSession = s;
+            break;
+          }
+        }
+        if (attendance) break;
+      }
 
-      if (attendance && attendance.sessions.length > 0) {
-        const sessions = attendance.sessions;
+      if (attendance && targetSession) {
         if (request.requestType === 'check_in') {
-          const firstSession = sessions[0];
           await this.prisma.attendanceSession.update({
-            where: { id: firstSession.id },
+            where: { id: targetSession.id },
             data: { checkInTime: request.adjustedTime },
           });
         } else {
-          const lastSession = sessions[sessions.length - 1];
           await this.prisma.attendanceSession.update({
-            where: { id: lastSession.id },
+            where: { id: targetSession.id },
             data: { checkOutTime: request.adjustedTime },
           });
         }
