@@ -2814,8 +2814,13 @@ export class WorkerService {
         ? reqs.sort((a,b) => b.submittedAt.getTime() - a.submittedAt.getTime())[0] 
         : null;
 
+      const checkInReqs = reqs.filter(r => r.requestType === 'check_in').sort((a,b) => b.submittedAt.getTime() - a.submittedAt.getTime());
+      const checkOutReqs = reqs.filter(r => r.requestType === 'check_out').sort((a,b) => b.submittedAt.getTime() - a.submittedAt.getTime());
+
       return {
         ...attendance,
+        latestCheckInRequest: checkInReqs.length > 0 ? checkInReqs[0] : null,
+        latestCheckOutRequest: checkOutReqs.length > 0 ? checkOutReqs[0] : null,
         adjustmentStatus: latestAdjustment ? latestAdjustment.status : null,
         adjustmentRequestedTime: latestAdjustment ? latestAdjustment.adjustedTime : null,
         adjustmentRequestType: latestAdjustment ? latestAdjustment.requestType : null,

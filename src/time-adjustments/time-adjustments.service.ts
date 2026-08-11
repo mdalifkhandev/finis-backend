@@ -65,13 +65,12 @@ export class TimeAdjustmentsService {
     });
 
     if (status === 'approved') {
-      const attendance = await this.prisma.attendance.findFirst({
-        where: {
-          userId: request.workerId,
-          date: request.date,
-        },
+      const attendances = await this.prisma.attendance.findMany({
+        where: { userId: request.workerId },
         include: { sessions: { orderBy: { checkInTime: 'asc' } } },
       });
+      const reqDateStr = request.date.toISOString().split('T')[0];
+      const attendance = attendances.find(a => a.date.toISOString().split('T')[0] === reqDateStr);
 
       if (attendance && attendance.sessions.length > 0) {
         const sessions = attendance.sessions;
@@ -96,9 +95,9 @@ export class TimeAdjustmentsService {
         });
 
         if (updatedAttendance) {
-          const totalHours = updatedAttendance.sessions.reduce((sum, session) => {
-            if (!session.checkInTime || !session.checkOutTime) return sum;
-            const diffMs = session.checkOutTime.getTime() - session.checkInTime.getTime();
+          const totalHours = updatedAttendance.sessions.reduce((sum, s) => {
+            if (!s.checkInTime || !s.checkOutTime) return sum;
+            const diffMs = s.checkOutTime.getTime() - s.checkInTime.getTime();
             return sum + (diffMs > 0 ? diffMs / (1000 * 60 * 60) : 0);
           }, 0);
           await this.prisma.attendance.update({
