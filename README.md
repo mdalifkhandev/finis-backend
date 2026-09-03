@@ -19,26 +19,104 @@ This README is written for developers who want to integrate the API from a front
 
 ---
 
-## Base Setup
+## Local Setup and Connection
+
+The backend is the central service for both sibling clients:
+
+- `finis-dashboard` connects through `VITE_API_BASE_URL`
+- `finis` connects through `EXPO_PUBLIC_API_BASE_URL`
+- REST and Socket.IO use the same backend origin and port
+
+The default local API address is `http://localhost:6000`.
+
+### Requirements
+
+- Node.js 20 or 22
+- pnpm
+- PostgreSQL
+- JDK/Android tooling is not required for the backend
+
+### Install and configure
+
+```bash
+cd ~/Desktop/project/finis/finis-backend
+pnpm install
+cp .env.example .env
+```
+
+Set at least these values in `.env`:
+
+```dotenv
+PORT=6000
+DATABASE_URL="postgresql://user:password@localhost:5432/finis_db?schema=public"
+JWT_SECRET="replace_with_a_long_random_secret"
+FRONTEND_URL="http://localhost:5173"
+```
+
+`FRONTEND_URL` must be the dashboard origin. Stripe uses it for checkout
+success and cancellation redirects.
+
+Configure Stripe, Resend, S3/R2, and Firebase variables from `.env.example`
+only when their related features are needed. Never commit the real `.env`.
+
+### Prepare Prisma/PostgreSQL
+
+Create the PostgreSQL database referenced by `DATABASE_URL`, then run:
+
+```bash
+pnpm exec prisma generate
+pnpm exec prisma db push
+```
+
+Open Prisma Studio when database inspection is needed:
+
+```bash
+pnpm exec prisma studio
+```
+
+Prisma Studio normally opens at `http://localhost:5555`.
 
 ### Run locally
 
 ```bash
-npm install
-npm run dev
+pnpm dev
 ```
 
-### Build
+The API listens on all interfaces at port `6000`, so an emulator, physical
+phone, or another computer can connect when the firewall/network allows it.
+
+### Build and production
 
 ```bash
-npm run build
+pnpm build
+pnpm start:prod
 ```
 
-### Production
+### Stripe webhook during local development
+
+Stripe cannot send events directly to `localhost`. Use the Stripe CLI:
 
 ```bash
-npm run start:prod
+stripe listen --forward-to localhost:6000/subscription/webhook
 ```
+
+Copy the displayed `whsec_...` value into `STRIPE_WEBHOOK_SECRET`, then restart
+the backend. Alternatively, expose port `6000` through an HTTPS tunnel and set
+this endpoint in Stripe:
+
+```text
+https://YOUR-BACKEND-TUNNEL/subscription/webhook
+```
+
+The webhook is a `POST` endpoint; opening it in a browser sends `GET` and is
+expected to return `Cannot GET /subscription/webhook`.
+
+### Verify the connection
+
+With the backend running, a request to `http://localhost:6000` should reach
+NestJS. A `404` JSON response at `/` still proves the server is reachable when
+no root route is defined. Confirm database access by opening Prisma Studio or
+using a real login/API request from either client.
 
 ---
 
@@ -383,21 +461,20 @@ Common routes:
 
 ## Environment Variables
 
-Typical values used by the backend:
+The authoritative template is `.env.example`. Main groups are:
 
-- `DATABASE_URL`
-- `JWT_SECRET`
-- `RESEND_API_KEY`
-- `RESEND_WEBHOOK_SECRET`
-- `AWS_REGION`
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_S3_BUCKET`
+- Server: `PORT`, `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`
+- Stripe: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
+- Mailbox: `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`,
+  `MAILBOX_FROM_EMAIL`, `MAILBOX_REPLY_DOMAIN`
+- Storage: `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`,
+  `S3_REGION`, `R2_ENDPOINT`, `R2_PUBLIC_URL`
+- Push notifications: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`,
+  `FIREBASE_PRIVATE_KEY`
 
-Frontend usually needs:
-
-- `VITE_API_BASE_URL`
-- `VITE_USE_MOCK_API`
+Client variables such as `VITE_API_BASE_URL` and
+`EXPO_PUBLIC_API_BASE_URL` belong in their respective client `.env` files, not
+in the backend `.env`.
 
 ---
 
