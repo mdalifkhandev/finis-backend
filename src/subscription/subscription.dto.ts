@@ -13,3 +13,16 @@ export class VerifyCheckoutDto {
   @IsIn(['monthly', 'yearly'])
   interval!: 'monthly' | 'yearly';
 }
+
+export class MobileSubscribeDto {
+  @IsUUID()
+  planId!: string;
+
+  @IsIn(['monthly', 'yearly'])
+  interval!: 'monthly' | 'yearly';
+}
+
+export class MobileConfirmDto {
+  @IsString()
+  subscriptionId!: string;
+}

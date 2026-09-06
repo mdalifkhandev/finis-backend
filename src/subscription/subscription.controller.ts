@@ -14,7 +14,11 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../generated/prisma/client';
-import { VerifyCheckoutDto } from './subscription.dto';
+import {
+  MobileConfirmDto,
+  MobileSubscribeDto,
+  VerifyCheckoutDto,
+} from './subscription.dto';
 import { SubscriptionService } from './subscription.service';
 
 @Controller('subscription')
@@ -49,5 +53,21 @@ export class AdminSubscriptionController {
   @Get('history')
   getHistory(@CurrentUser('id') userId: string) {
     return this.subscriptionService.getAdminSubscriptionHistory(userId);
+  }
+
+  @Post('mobile/subscribe')
+  mobileSubscribe(
+    @CurrentUser('id') userId: string,
+    @Body() dto: MobileSubscribeDto,
+  ) {
+    return this.subscriptionService.createMobileSubscription(userId, dto);
+  }
+
+  @Post('mobile/confirm')
+  mobileConfirm(
+    @CurrentUser('id') userId: string,
+    @Body() dto: MobileConfirmDto,
+  ) {
+    return this.subscriptionService.confirmMobileSubscription(userId, dto);
   }
 }
