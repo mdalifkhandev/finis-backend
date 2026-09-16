@@ -9,9 +9,9 @@ import {
 import { Type } from 'class-transformer';
 
 export enum PayrollPeriodEnum {
-  weekly   = 'weekly',
+  weekly = 'weekly',
   biweekly = 'biweekly',
-  monthly  = 'monthly',
+  monthly = 'monthly',
 }
 
 export class UpdatePayrollConfigDto {

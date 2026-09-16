@@ -22,7 +22,7 @@ import {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.super_admin, UserRole.admin)
 export class PayrollManagementController {
-  constructor(private payrollManagementService: PayrollManagementService) {}
+  constructor(private payrollManagementService: PayrollManagementService) { }
 
   // ─── IMAGE 1: Dashboard ───────────────────────────────────────────────────
 
