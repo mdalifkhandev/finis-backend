@@ -298,14 +298,10 @@ export class TeamManagementService {
     search?: string,
     role?: string,
   ) {
-    // শুধু super_admin সব দেখবে
-    if (userRole !== UserRole.super_admin) {
-      return [];
-    }
-
     const invitations = await this.prisma.invitation.findMany({
       where: {
         status: 'pending',
+        ...(userRole === UserRole.super_admin ? {} : { senderId: userId }),
         ...(role ? { role: role as UserRole } : {}),
         ...(search
           ? {

@@ -64,7 +64,7 @@ export class TeamManagementController {
 
   /** GET /super_admin/team/invitations/pending?role=admin&search= */
   @Get('invitations/pending')
-  @Roles(UserRole.super_admin) // শুধু super_admin
+  @Roles(UserRole.super_admin, UserRole.admin)
   getPendingInvitations(
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
