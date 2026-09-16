@@ -165,6 +165,7 @@ export class QuoteLibraryService {
   }
 
   async updateMeasurementType(id: string, dto: UpdateQuoteMeasurementTypeDto) {
+    this.ensureValidUuid(id, 'quote measurement type ID');
     const measurementType = await this.prisma.quoteMeasurementType.findUnique({ where: { id } });
     if (!measurementType) throw new NotFoundException('Quote measurement type not found');
 
@@ -196,6 +197,7 @@ export class QuoteLibraryService {
   }
 
   async disableMeasurementType(id: string) {
+    this.ensureValidUuid(id, 'quote measurement type ID');
     const measurementType = await this.prisma.quoteMeasurementType.findUnique({ where: { id } });
     if (!measurementType) throw new NotFoundException('Quote measurement type not found');
 
@@ -250,6 +252,7 @@ export class QuoteLibraryService {
   }
 
   async updateWorkCategory(id: string, dto: UpdateQuoteWorkCategoryDto) {
+    this.ensureValidUuid(id, 'quote work category ID');
     const category = await this.prisma.quoteWorkCategory.findUnique({ where: { id } });
     if (!category) throw new NotFoundException('Quote work category not found');
 
@@ -276,6 +279,7 @@ export class QuoteLibraryService {
   }
 
   async disableWorkCategory(id: string) {
+    this.ensureValidUuid(id, 'quote work category ID');
     const category = await this.prisma.quoteWorkCategory.findUnique({ where: { id } });
     if (!category) throw new NotFoundException('Quote work category not found');
 
@@ -285,6 +289,13 @@ export class QuoteLibraryService {
     });
   }
 
+  private ensureValidUuid(id: string, entityName = 'ID') {
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!id || typeof id !== 'string' || !UUID_REGEX.test(id)) {
+      throw new BadRequestException(`Invalid ${entityName}: a valid UUID is required`);
+    }
+  }
+
   async listWorkItems(params?: {
     search?: string;
     categoryId?: string;
@@ -292,6 +303,7 @@ export class QuoteLibraryService {
     propertyType?: string;
     unitType?: string;
     includeInactive?: boolean;
+    flat?: boolean;
   }) {
     const search = params?.search?.trim();
     const selectorWhere = this.buildSelectorWhere(params);
@@ -318,6 +330,10 @@ export class QuoteLibraryService {
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
 
+    if (params?.flat) {
+      return workItems;
+    }
+
     const grouped = Array.from(
       workItems.reduce((map, item) => {
         const key = item.category.id;
@@ -343,6 +359,7 @@ export class QuoteLibraryService {
   }
 
   async getWorkItemById(id: string) {
+    this.ensureValidUuid(id, 'quote work item ID');
     const item = await this.prisma.quoteWorkItem.findUnique({
       where: { id },
       include: {
@@ -396,6 +413,7 @@ export class QuoteLibraryService {
   }
 
   async updateWorkItem(id: string, dto: UpdateQuoteWorkItemDto) {
+    this.ensureValidUuid(id, 'quote work item ID');
     const item = await this.prisma.quoteWorkItem.findUnique({ where: { id } });
     if (!item) throw new NotFoundException('Quote work item not found');
 
@@ -443,6 +461,7 @@ export class QuoteLibraryService {
   }
 
   async disableWorkItem(id: string) {
+    this.ensureValidUuid(id, 'quote work item ID');
     const item = await this.prisma.quoteWorkItem.findUnique({ where: { id } });
     if (!item) throw new NotFoundException('Quote work item not found');
 
@@ -453,6 +472,7 @@ export class QuoteLibraryService {
   }
 
   async resolveWorkItemById(id: string) {
+    this.ensureValidUuid(id, 'quote work item ID');
     const item = await this.prisma.quoteWorkItem.findUnique({
       where: { id },
       include: {

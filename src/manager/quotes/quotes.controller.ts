@@ -117,6 +117,7 @@ export class QuotesController {
     @Query('propertyType') propertyType?: string,
     @Query('unitType') unitType?: string,
     @Query('includeInactive') includeInactive?: string,
+    @Query('flat') flat?: string,
   ) {
     return this.quoteLibraryService.listWorkItems({
       search,
@@ -125,6 +126,7 @@ export class QuotesController {
       propertyType,
       unitType,
       includeInactive: includeInactive === 'true',
+      flat: flat === 'true',
     });
   }
 
