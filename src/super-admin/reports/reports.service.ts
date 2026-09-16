@@ -889,22 +889,24 @@ export class ReportsService {
       orderBy: { expenseDate: 'desc' },
     });
 
-    const totalAmount    = expenses.reduce((s, e) => s + Number(e.amount), 0);
+    const getExpenseTotal = (e: any) => Number(e.totalAmount ?? (Number(e.subtotal ?? 0) + Number(e.tax ?? 0)));
+
+    const totalAmount    = expenses.reduce((s, e) => s + getExpenseTotal(e), 0);
     const approvedAmount = expenses
       .filter((e) => e.status === 'APPROVED' || e.status === 'PAID')
-      .reduce((s, e) => s + Number(e.amount), 0);
+      .reduce((s, e) => s + getExpenseTotal(e), 0);
     const pendingAmount  = expenses
       .filter((e) => e.status === 'DRAFT' || e.status === 'SUBMITTED')
-      .reduce((s, e) => s + Number(e.amount), 0);
+      .reduce((s, e) => s + getExpenseTotal(e), 0);
     const rejectedAmount = expenses
       .filter((e) => e.status === 'REJECTED')
-      .reduce((s, e) => s + Number(e.amount), 0);
+      .reduce((s, e) => s + getExpenseTotal(e), 0);
 
     // Category breakdown
     const categoryMap = new Map<string, number>();
     for (const e of expenses) {
       const cat = e.category as string;
-      categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + Number(e.amount));
+      categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + getExpenseTotal(e));
     }
 
     const byCategory = Object.fromEntries(
@@ -932,7 +934,10 @@ export class ReportsService {
         worker:      e.createdBy,
         description: e.title,
         category:    e.category,
-        amount:      Number(e.amount),
+        subtotal:    Number(e.subtotal ?? 0),
+        tax:         Number(e.tax ?? 0),
+        totalAmount: getExpenseTotal(e),
+        amount:      getExpenseTotal(e),
         project:     e.project,
         date:        e.expenseDate,
         status:      e.status,

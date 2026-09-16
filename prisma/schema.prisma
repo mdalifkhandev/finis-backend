@@ -764,7 +764,10 @@ model Expense {
   subTaskId   String?         @unique @map("sub_task_id") @db.Uuid
   description String
   category    ExpenseCategory
-  amount      Float
+  subtotal    Float           @default(0)
+  tax         Float           @default(0)
+  totalAmount Float           @default(0) @map("total_amount")
+  amount      Float           @default(0)
   receiptUrl  String?         @map("receipt_url")
   date        DateTime        @db.Date
   status      ExpenseStatus   @default(pending)
@@ -784,7 +787,9 @@ model ReimbursementExpense {
   id            String                     @id @default(uuid()) @db.Uuid
   title         String
   expenseDate   DateTime                   @map("expense_date") @db.Date
-  amount        Decimal                    @db.Decimal(12, 2)
+  subtotal      Decimal                    @default(0) @db.Decimal(12, 2)
+  tax           Decimal                    @default(0) @db.Decimal(12, 2)
+  totalAmount   Decimal                    @map("total_amount") @default(0) @db.Decimal(12, 2)
   currency      String                     @default("BDT")
   category      String
   vendor        String?

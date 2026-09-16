@@ -74,7 +74,17 @@ export class ReimbursementExpensesService {
   }
 
   private serialize(expense: any) {
-    return expense ? { ...expense, amount: Number(expense.amount) } : expense;
+    if (!expense) return expense;
+    const subtotal = Number(expense.subtotal ?? 0);
+    const tax = Number(expense.tax ?? 0);
+    const totalAmount = Number(expense.totalAmount ?? (subtotal + tax));
+    return {
+      ...expense,
+      subtotal,
+      tax,
+      totalAmount,
+      amount: totalAmount,
+    };
   }
 
   private normalizeOption(value?: string | null) {
@@ -171,9 +181,9 @@ export class ReimbursementExpensesService {
       this.prisma.reimbursementExpense.count({ where: { ...scopeWhere, status: 'APPROVED' } }),
       this.prisma.reimbursementExpense.count({ where: { ...scopeWhere, status: 'REJECTED' } }),
       this.prisma.reimbursementExpense.count({ where: { ...scopeWhere, status: 'PAID' } }),
-      this.prisma.reimbursementExpense.aggregate({ where: { ...scopeWhere, expenseDate: { gte: start, lte: end } }, _sum: { amount: true } }),
+      this.prisma.reimbursementExpense.aggregate({ where: { ...scopeWhere, expenseDate: { gte: start, lte: end } }, _sum: { totalAmount: true } }),
     ]);
-    return { summary: { totalExpenses, draft, submitted, approved, rejected, paid, totalAmountThisMonth: Number(monthly._sum.amount ?? 0) } };
+    return { summary: { totalExpenses, draft, submitted, approved, rejected, paid, totalAmountThisMonth: Number(monthly._sum.totalAmount ?? 0) } };
   }
 
   async findOne(id: string, adminId: string, role: string) { return this.serialize(await this.getExpenseOrThrow(id, adminId, role)); }
@@ -181,7 +191,10 @@ export class ReimbursementExpensesService {
   async create(dto: CreateReimbursementExpenseDto, adminId: string, role: string) {
     this.assertCreateAccess(role); if (!dto.projectId) throw new BadRequestException('Project is required'); await this.assertProject(dto.projectId); await this.assertProjectAccess(adminId, role, dto.projectId); this.assertNotFuture(dto.expenseDate);
     const status = dto.action === 'SUBMITTED' ? 'SUBMITTED' : 'DRAFT';
-    const expense = await this.prisma.reimbursementExpense.create({ data: { title: dto.title, expenseDate: new Date(dto.expenseDate), amount: this.toMoney(dto.amount), currency: this.normalizeOption(dto.currency) || 'BDT', category: this.normalizeOption(dto.category), vendor: dto.vendor || null, paymentMethod: this.normalizeOption(dto.paymentMethod) || null, projectId: dto.projectId || null, taskId: dto.taskId || null, notes: dto.notes || null, receiptUrl: dto.receiptUrl || null, createdById: adminId, status, submittedAt: status === 'SUBMITTED' ? new Date() : null }, include: { project: { select: { id: true, name: true } } } });
+    const subtotal = this.toMoney(dto.subtotal ?? 0);
+    const tax = this.toMoney(dto.tax ?? 0);
+    const totalAmount = this.toMoney(Number(subtotal) + Number(tax));
+    const expense = await this.prisma.reimbursementExpense.create({ data: { title: dto.title, expenseDate: new Date(dto.expenseDate), subtotal, tax, totalAmount, currency: this.normalizeOption(dto.currency) || 'BDT', category: this.normalizeOption(dto.category), vendor: dto.vendor || null, paymentMethod: this.normalizeOption(dto.paymentMethod) || null, projectId: dto.projectId || null, taskId: dto.taskId || null, notes: dto.notes || null, receiptUrl: dto.receiptUrl || null, createdById: adminId, status, submittedAt: status === 'SUBMITTED' ? new Date() : null }, include: { project: { select: { id: true, name: true } } } });
     return { message: status === 'SUBMITTED' ? 'Expense submitted successfully' : 'Expense draft saved successfully', ...this.serialize(expense) };
   }
 
@@ -189,7 +202,10 @@ export class ReimbursementExpensesService {
     const existing = await this.getExpenseOrThrow(id, adminId, role);
     if (this.isManager(role) && existing.createdById !== adminId) throw new ForbiddenException('Managers can only edit their own expenses'); if (!['DRAFT', 'SUBMITTED', 'REJECTED'].includes(existing.status)) throw new BadRequestException('Only draft, submitted, or rejected expenses can be updated');
     await this.assertProject(dto.projectId); await this.assertProjectAccess(adminId, role, dto.projectId); if (dto.expenseDate) this.assertNotFuture(dto.expenseDate);
-    const expense = await this.prisma.reimbursementExpense.update({ where: { id }, data: { ...(dto.title !== undefined ? { title: dto.title } : {}), ...(dto.expenseDate ? { expenseDate: new Date(dto.expenseDate) } : {}), ...(dto.amount !== undefined ? { amount: this.toMoney(dto.amount) } : {}), ...(dto.currency ? { currency: this.normalizeOption(dto.currency) } : {}), ...(dto.category ? { category: this.normalizeOption(dto.category) } : {}), ...(dto.vendor !== undefined ? { vendor: dto.vendor || null } : {}), ...(dto.paymentMethod !== undefined ? { paymentMethod: this.normalizeOption(dto.paymentMethod) || null } : {}), ...(dto.projectId !== undefined ? { projectId: dto.projectId || null } : {}), ...(dto.taskId !== undefined ? { taskId: dto.taskId || null } : {}), ...(dto.notes !== undefined ? { notes: dto.notes || null } : {}), ...(dto.receiptUrl !== undefined ? { receiptUrl: dto.receiptUrl || null } : {}) }, include: { project: { select: { id: true, name: true } } } });
+    const nextSubtotal = dto.subtotal !== undefined ? this.toMoney(dto.subtotal) : existing.subtotal;
+    const nextTax = dto.tax !== undefined ? this.toMoney(dto.tax) : existing.tax;
+    const nextTotal = this.toMoney(Number(nextSubtotal) + Number(nextTax));
+    const expense = await this.prisma.reimbursementExpense.update({ where: { id }, data: { ...(dto.title !== undefined ? { title: dto.title } : {}), ...(dto.expenseDate ? { expenseDate: new Date(dto.expenseDate) } : {}), ...(dto.subtotal !== undefined || dto.tax !== undefined ? { subtotal: nextSubtotal, tax: nextTax, totalAmount: nextTotal } : {}), ...(dto.currency ? { currency: this.normalizeOption(dto.currency) } : {}), ...(dto.category ? { category: this.normalizeOption(dto.category) } : {}), ...(dto.vendor !== undefined ? { vendor: dto.vendor || null } : {}), ...(dto.paymentMethod !== undefined ? { paymentMethod: this.normalizeOption(dto.paymentMethod) || null } : {}), ...(dto.projectId !== undefined ? { projectId: dto.projectId || null } : {}), ...(dto.taskId !== undefined ? { taskId: dto.taskId || null } : {}), ...(dto.notes !== undefined ? { notes: dto.notes || null } : {}), ...(dto.receiptUrl !== undefined ? { receiptUrl: dto.receiptUrl || null } : {}) }, include: { project: { select: { id: true, name: true } } } });
     return { message: 'Expense updated successfully', ...this.serialize(expense) };
   }
 

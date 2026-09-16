@@ -49,8 +49,18 @@ export class CreateReimbursementExpenseDto {
 
   @Transform(({ value }) => Number(value))
   @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0.01)
-  amount!: number;
+  @Min(0)
+  subtotal!: number;
+
+  @Transform(({ value }) => Number(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  tax!: number;
+
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  totalAmount?: number;
 
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
@@ -112,8 +122,19 @@ export class UpdateReimbursementExpenseDto {
   @IsOptional()
   @Transform(({ value }) => Number(value))
   @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0.01)
-  amount?: number;
+  @Min(0)
+  subtotal?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  tax?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  totalAmount?: number;
 
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
@@ -205,8 +226,8 @@ export class ReimbursementExpenseFilterDto {
   endDate?: string;
 
   @IsOptional()
-  @IsIn(['createdAt', 'expenseDate', 'amount'])
-  sortBy?: 'createdAt' | 'expenseDate' | 'amount';
+  @IsIn(['createdAt', 'expenseDate', 'amount', 'totalAmount', 'subtotal'])
+  sortBy?: 'createdAt' | 'expenseDate' | 'amount' | 'totalAmount' | 'subtotal';
 
   @IsOptional()
   @IsIn(['asc', 'desc'])
