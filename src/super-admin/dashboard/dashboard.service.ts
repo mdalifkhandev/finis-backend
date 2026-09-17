@@ -89,6 +89,8 @@ export class SuperAdminDashboardService {
       activeTenants,
       expiredPausedTenants,
       totalTenants,
+      totalAdmins,
+      prevTotalAdmins,
     ] = await Promise.all([
       this.prisma.company.count({
         where: { isActive: true, createdAt: { lte: end } },
@@ -176,6 +178,13 @@ export class SuperAdminDashboardService {
       }),
       // Total tenants — dashboard এ "Total Tenants" card
       this.prisma.tenant.count(),
+      // Total admins — potential subscribers
+      this.prisma.user.count({
+        where: { role: 'admin' },
+      }),
+      this.prisma.user.count({
+        where: { role: 'admin', createdAt: { lte: prevEnd } },
+      }),
     ]);
 
     const payrollCost = Number(payrollCostRaw._sum.netPay ?? 0);
@@ -372,6 +381,10 @@ export class SuperAdminDashboardService {
         payrollCost: {
           value: payrollCost,
           change: this.calcChange(payrollCost, prevPayrollCost),
+        },
+        totalAdmins: {
+          value: totalAdmins,
+          change: this.calcChange(totalAdmins, prevTotalAdmins),
         },
       },
 

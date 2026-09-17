@@ -126,17 +126,30 @@ export class DashboardService {
           `.then((r) => Number(r[0]?.count ?? 0));
 
       const [
-      activeProjectsCount,
-      workersOnSiteCount,
-      payrollPendingCount,
-      inventoryAlertsCount,
-      totalProjects,
-      activeProjects,
-      totalWorkersOnSite,
-      workersOnSite,
-      totalInvitations,
-      pendingInvitations,
-    ] = await Promise.all([
+        activeProjectsCount,
+        workersOnSiteCount,
+        payrollPendingCount,
+        inventoryAlertsCount,
+        totalProjects,
+        activeProjects,
+        totalWorkersOnSite,
+        workersOnSite,
+        totalInvitations,
+        pendingInvitations,
+        myCompaniesCount,
+        workforceCount,
+        projectBudgetAgg,
+        payrollAgg,
+        expenseAgg,
+        planningTasksCount,
+        inProgressTasksCount,
+        reviewTasksCount,
+        completedTasksCount,
+        adminTenantUser,
+        taskReports,
+        payrolls,
+        expenses,
+      ] = await Promise.all([
       // ── Stats ──────────────────────────────────────
       this.prisma.project.count({
         where: activeProjectQuery,
@@ -233,9 +246,198 @@ export class DashboardService {
           createdAt: true,
         },
       }),
+
+      // ── Scoped Counts & Financials ──────────────────
+      this.prisma.company.count({
+        where: { ownerId: adminId, isActive: true },
+      }),
+
+      this.prisma.user.count({
+        where: {
+          OR: [
+            { companyMembers: { some: { companyId: { in: companyIds } } } },
+            { projectMemberships: { some: { project: { companyId: { in: companyIds } } } } },
+          ],
+          role: { in: [UserRole.worker, UserRole.manager] },
+        },
+      }),
+
+      this.prisma.project.aggregate({
+        where: projectWhere,
+        _sum: { budget: true },
+      }),
+
+      this.prisma.payroll.aggregate({
+        where: {
+          companyId: { in: companyIds },
+          status: 'approved',
+        },
+        _sum: { netPay: true },
+      }),
+
+      this.prisma.expense.aggregate({
+        where: {
+          project: { companyId: { in: companyIds } },
+          status: 'approved',
+        },
+        _sum: { totalAmount: true },
+      }),
+
+      // ── Task Indicators ─────────────────────────────
+      this.prisma.task.count({ where: { project: projectWhere, status: 'pending' } }),
+      this.prisma.task.count({ where: { project: projectWhere, status: 'in_progress' } }),
+      this.prisma.task.count({ where: { project: projectWhere, status: 'review' } }),
+      this.prisma.task.count({ where: { project: projectWhere, status: 'completed' } }),
+
+      // ── Tenant & Subscription ───────────────────────
+      this.prisma.user.findUnique({
+        where: { id: adminId },
+        select: {
+          tenantId: true,
+          tenant: {
+            include: {
+              plan: true,
+              _count: { select: { users: true, companies: true } },
+            },
+          },
+        },
+      }),
+
+      // ── Scoped Recent Activity ──────────────────────
+      this.prisma.taskReport.findMany({
+        where: { task: { project: projectWhere } },
+        take: 6,
+        orderBy: { submittedAt: 'desc' },
+        include: {
+          worker: { select: { id: true, fullName: true, avatarUrl: true } },
+          task: {
+            select: {
+              title: true,
+              project: { select: { name: true } },
+            },
+          },
+        },
+      }),
+
+      this.prisma.payroll.findMany({
+        where: { companyId: { in: companyIds }, status: 'approved' },
+        take: 6,
+        orderBy: { processedAt: 'desc' },
+        include: {
+          worker: { select: { id: true, fullName: true, avatarUrl: true } },
+          company: { select: { name: true } },
+        },
+      }),
+
+      this.prisma.expense.findMany({
+        where: { project: { companyId: { in: companyIds } } },
+        take: 6,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          worker: { select: { id: true, fullName: true, avatarUrl: true } },
+          project: { select: { name: true } },
+        },
+      }),
     ]);
 
+    const tenant = adminTenantUser?.tenant;
+    const isExpired = Boolean(tenant?.currentPeriodEnd && new Date(tenant.currentPeriodEnd).getTime() < Date.now());
+
+    const unifiedActivity = [
+      ...taskReports.map((r) => ({
+        id: r.id,
+        type: (r.reviewDecision === 'approved' ? 'task_completed' : 'report_uploaded') as any,
+        actor: r.worker,
+        description: r.reviewDecision === 'approved' ? 'completed task' : 'uploaded report',
+        subject: r.task.title,
+        project: r.task.project?.name ?? null,
+        occurredAt: r.submittedAt,
+      })),
+      ...payrolls.map((p) => ({
+        id: p.id,
+        type: 'payroll_approved' as any,
+        actor: p.worker,
+        description: 'approved payroll',
+        subject: `Payroll - ${p.company.name}`,
+        project: p.company.name,
+        occurredAt: p.processedAt ?? p.createdAt,
+      })),
+      ...expenses.map((e) => ({
+        id: e.id,
+        type: 'expense_flagged' as any,
+        actor: e.worker,
+        description: 'submitted expense',
+        subject: e.description,
+        project: e.project?.name ?? null,
+        occurredAt: e.createdAt,
+      })),
+    ].sort(
+      (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime(),
+    ).slice(0, 6);
+
+    const totalTasksCount = planningTasksCount + inProgressTasksCount + reviewTasksCount + completedTasksCount;
+    const taskCompletionRate = totalTasksCount > 0 ? Math.round((completedTasksCount / totalTasksCount) * 100) : 0;
+
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    const currentMonthIdx = new Date().getMonth();
+    const forecastData = months.map((name, i) => {
+      const isCurrent = i === currentMonthIdx;
+      return {
+        month: name,
+        completionPct: isCurrent ? taskCompletionRate : 0,
+        total: isCurrent ? totalTasksCount : 0,
+        completed: isCurrent ? completedTasksCount : 0,
+      };
+    });
+
+    const forecast = {
+      overallCompletion: taskCompletionRate,
+      avgCompletion: taskCompletionRate,
+      bestMonth: { month: currentMonthIdx + 1, value: taskCompletionRate },
+      data: forecastData,
+    };
+
+    const taskIndicators = {
+      totalTasks: totalTasksCount,
+      activeTasks: { value: inProgressTasksCount, change: 0 },
+      pendingApprovals: { value: reviewTasksCount + payrollPendingCount, change: 0 },
+      completed: { value: completedTasksCount, change: 0 },
+      efficiency: taskCompletionRate,
+      teamSize: workforceCount,
+      onTimePct: 100,
+      atRisk: 0,
+    };
+
+    const formattedWorkforceStatus = workersOnSite.map((a) => {
+      const checkIn = a.sessions[0]?.checkInTime ?? null;
+      let hoursWorked = 0;
+      if (checkIn) {
+        hoursWorked = (Date.now() - new Date(checkIn).getTime()) / (1000 * 60 * 60);
+      }
+      const h = Math.floor(hoursWorked);
+      const m = Math.round((hoursWorked - h) * 60);
+      const status: 'on_time' | 'overtime' = hoursWorked >= 8 ? 'overtime' : 'on_time';
+      const companyMemberRole = a.user.companyMembers?.[0]?.role;
+
+      return {
+        id: a.user.id,
+        fullName: a.user.fullName,
+        avatarUrl: a.user.avatarUrl,
+        projectName: 'Active Site',
+        role: companyMemberRole ?? a.user.role ?? 'Worker',
+        department: null,
+        status,
+        hoursWorked: `${h}h ${m}m`,
+        checkInTime: checkIn,
+      };
+    });
+
+
     return {
+      // ── Legacy Mobile Compatibility ───────────────
       stats: {
         activeProjects: activeProjectsCount,
         workersOnSite: workersOnSiteCount,
@@ -244,7 +446,7 @@ export class DashboardService {
       },
 
       activeProjects: {
-        data: activeProjects.slice(0, 2).map((p) => ({
+        data: activeProjects.slice(0, 5).map((p) => ({
           id: p.id,
           name: p.name,
           status: p.status,
@@ -256,7 +458,7 @@ export class DashboardService {
       },
 
       workersOnSite: {
-        data: workersOnSite.slice(0, 3).map((a) => ({
+        data: workersOnSite.slice(0, 5).map((a) => ({
           id: a.user.id,
           fullName: a.user.fullName,
           avatarUrl: a.user.avatarUrl,
@@ -270,6 +472,68 @@ export class DashboardService {
             : null,
         })),
       },
+
+      // ── Scoped Web Admin Dashboard Fields ─────────
+      kpis: {
+        companies: String(myCompaniesCount),
+        activeProjects: String(activeProjectsCount),
+        workforce: String(workforceCount),
+        totalBudget: projectBudgetAgg._sum.budget ?? 0,
+        payrollCost: payrollAgg._sum.netPay ?? 0,
+        totalExpenses: expenseAgg._sum.totalAmount ?? 0,
+      },
+
+      subscriptionUsage: {
+        planName: tenant?.plan?.name ?? 'Standard Plan',
+        status: tenant?.status ?? 'active',
+        currentPeriodEnd: tenant?.currentPeriodEnd ?? null,
+        isExpired,
+        companies: {
+          used: myCompaniesCount,
+          max: tenant?.plan?.maxCompanies ?? null,
+        },
+        projects: {
+          used: totalProjects,
+          max: tenant?.plan?.maxProjects ?? null,
+        },
+        workers: {
+          used: workforceCount,
+          max: tenant?.plan?.maxUsers ?? null,
+        },
+      },
+
+      taskCards: [
+        {
+          title: 'Active Tasks',
+          value: String(inProgressTasksCount + planningTasksCount),
+          trend: 0,
+          color: 'blue' as const,
+          bgGradient: 'from-blue-50 to-indigo-50/40',
+          isCount: true,
+        },
+        {
+          title: 'Completed Tasks',
+          value: String(completedTasksCount),
+          trend: taskCompletionRate,
+          color: 'green' as const,
+          bgGradient: 'from-green-50 to-emerald-50/40',
+          isCount: true,
+        },
+        {
+          title: 'Pending Approvals',
+          value: String(reviewTasksCount + payrollPendingCount),
+          trend: 0,
+          color: 'amber' as const,
+          bgGradient: 'from-amber-50 to-orange-50/40',
+          isCount: true,
+        },
+      ],
+
+      taskIndicators,
+
+      projectCompletionForecast: forecast,
+      recentActivity: unifiedActivity,
+      workforceStatus: formattedWorkforceStatus,
     };
   }
 
