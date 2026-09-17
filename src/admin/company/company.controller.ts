@@ -132,6 +132,18 @@ export class CompanyController {
     return this.companyService.getAssignedProjects(companyId, adminId, userRole);
   }
 
+  // ─── PERFORMANCE ──────────────────────────────────────────────────────────
+
+  /** GET /admin/companies/:id/performance */
+  @Get(':id/performance')
+  getCompanyPerformance(
+    @Param('id') companyId: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.companyService.getCompanyPerformance(companyId, adminId, userRole);
+  }
+
   // ─── CONTACTS ─────────────────────────────────────────────────────────────
 
   /** GET /admin/companies/:id/contacts */

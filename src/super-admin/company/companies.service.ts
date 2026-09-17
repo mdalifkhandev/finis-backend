@@ -531,7 +531,26 @@ export class SuperAdminCompaniesService {
           location: true,
           description: true,
           priority: true,
-          _count: { select: { teamMembers: true, tasks: true } },
+          numFloors: true,
+          unitPerFloor: true,
+          floors: {
+            orderBy: { floorNumber: 'asc' as const },
+            select: {
+              id: true,
+              name: true,
+              floorNumber: true,
+              status: true,
+              units: {
+                select: {
+                  id: true,
+                  name: true,
+                  type: true,
+                  status: true,
+                },
+              },
+            },
+          },
+          _count: { select: { teamMembers: true, tasks: true, floors: true } },
           teamMembers: {
             take: 5,
             include: {

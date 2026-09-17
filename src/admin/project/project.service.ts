@@ -304,6 +304,23 @@ export class ProjectService {
       location: true,
       numFloors: true,
       unitPerFloor: true,
+      floors: {
+        orderBy: { floorNumber: 'asc' as const },
+        select: {
+          id: true,
+          name: true,
+          floorNumber: true,
+          status: true,
+          units: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              status: true,
+            },
+          },
+        },
+      },
       company: { select: { id: true, name: true, logoUrl: true, isActive: true } },
       _count: { select: { floors: true, tasks: true, teamMembers: true } },
       teamMembers: {

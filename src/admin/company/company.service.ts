@@ -249,9 +249,53 @@ export class CompanyService {
       throw new NotFoundException('Company not found');
     }
 
+    const projects = await this.prisma.project.findMany({
+      where: { companyId },
+      select: {
+        name: true,
+        progress: true,
+        budget: true,
+        spent: true,
+        startDate: true,
+        endDate: true,
+      },
+      orderBy: { startDate: 'asc' },
+      take: 12,
+    });
+
+    const performanceData = projects.map((p) => ({
+      project: p.name,
+      completionPct: p.progress ?? 0,
+      budgetAdherence:
+        p.budget && p.spent
+          ? Math.round(((p.budget - p.spent) / p.budget) * 100)
+          : 100,
+    }));
+
+    const projectsCompleted = await this.prisma.project.count({
+      where: { companyId, status: 'completed' },
+    });
+
+    const [approvedReports, totalReports] = await Promise.all([
+      this.prisma.taskReport.count({
+        where: {
+          reviewDecision: 'approved',
+          task: { project: { companyId } },
+        },
+      }),
+      this.prisma.taskReport.count({
+        where: { task: { project: { companyId } } },
+      }),
+    ]);
+
+    const safetyRating =
+      totalReports > 0
+        ? Math.round((approvedReports / totalReports) * 100)
+        : 100;
+
     return {
       ...company,
-      contacts: company.members.map((member) => ({
+      contacts: company.members.map((member: any) => ({
         id: member.user.id,
         fullName: member.user.fullName,
         role: member.role,
@@ -260,6 +304,205 @@ export class CompanyService {
         avatarUrl: member.user.avatarUrl,
         isPrimary: member.user.id === company.ownerId,
       })),
+      stats: {
+        totalMembers: company.members.length,
+        annualRevenue: company.revenue ?? 0,
+        totalEmployees: `${company.members.length}+`,
+        projectsCompleted,
+        safetyRating: `${safetyRating}%`,
+      },
+      performanceData,
+    };
+  }
+
+  // ─── HELPER: format a numeric % change as "+12%" or "-5%" ─────────────────
+  private formatChange(current: number, previous: number): string {
+    if (previous === 0) return current > 0 ? '+100%' : '0%';
+    const pct = Math.round(((current - previous) / previous) * 100);
+    return pct >= 0 ? `+${pct}%` : `${pct}%`;
+  }
+
+  private roundToOneDecimal(value: number): number {
+    return Math.round(value * 10) / 10;
+  }
+
+  private getMonthKey(date: Date): string {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  private getMonthLabel(date: Date): string {
+    return date.toLocaleString('en-US', { month: 'short' });
+  }
+
+  // ─── PERFORMANCE TAB ──────────────────────────────────────────────────────
+  async getCompanyPerformance(companyId: string, adminId: string, userRole: string = 'admin') {
+    await this.verifyCompanyAccess(companyId, adminId, userRole);
+
+    const projects = await this.prisma.project.findMany({
+      where: { companyId },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        progress: true,
+        budget: true,
+        spent: true,
+        startDate: true,
+        endDate: true,
+        updatedAt: true,
+        _count: { select: { tasks: true, teamMembers: true } },
+      },
+      orderBy: { startDate: 'asc' },
+    });
+
+    const [taskReports, totalTasks, completedTasks] = await Promise.all([
+      this.prisma.taskReport.findMany({
+        where: { task: { project: { companyId } } },
+        select: {
+          submittedAt: true,
+          reviewDecision: true,
+        },
+        orderBy: { submittedAt: 'asc' },
+      }),
+      this.prisma.task.count({ where: { project: { companyId } } }),
+      this.prisma.task.count({
+        where: { project: { companyId }, status: 'completed' },
+      }),
+      this.prisma.expense.aggregate({
+        _sum: { amount: true },
+        where: { project: { companyId } },
+      }),
+    ]);
+
+    const projectCompletionValues = projects.map((project) => project.progress ?? 0);
+    const averageCompletionRate =
+      projectCompletionValues.length > 0
+        ? this.roundToOneDecimal(
+            projectCompletionValues.reduce((sum, value) => sum + value, 0) /
+              projectCompletionValues.length,
+          )
+        : 0;
+
+    const currentMonth = new Date();
+    const currentMonthKey = this.getMonthKey(currentMonth);
+    const previousMonthKey = this.getMonthKey(
+      new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1),
+    );
+
+    const currentMonthProjects = projects.filter(
+      (project) => project.updatedAt && this.getMonthKey(project.updatedAt) === currentMonthKey,
+    );
+    const previousMonthProjects = projects.filter(
+      (project) => project.updatedAt && this.getMonthKey(project.updatedAt) === previousMonthKey,
+    );
+
+    const currentMonthCompletion =
+      currentMonthProjects.length > 0
+        ? currentMonthProjects.reduce(
+            (sum, project) => sum + (project.progress ?? 0),
+            0,
+          ) / currentMonthProjects.length
+        : 0;
+
+    const previousMonthCompletion =
+      previousMonthProjects.length > 0
+        ? previousMonthProjects.reduce(
+            (sum, project) => sum + (project.progress ?? 0),
+            0,
+          ) / previousMonthProjects.length
+        : 0;
+
+    const approvedReports = taskReports.filter(
+      (report) => report.reviewDecision === 'approved',
+    ).length;
+    const safetyCompliance =
+      taskReports.length > 0
+        ? this.roundToOneDecimal((approvedReports / taskReports.length) * 100)
+        : 0;
+
+    const workerEfficiency =
+      totalTasks > 0
+        ? this.roundToOneDecimal((completedTasks / totalTasks) * 100)
+        : 0;
+
+    const months = Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - (5 - index), 1);
+      const monthKey = this.getMonthKey(date);
+
+      const monthProjects = projects.filter(
+        (project) => project.updatedAt && this.getMonthKey(project.updatedAt) === monthKey,
+      );
+      const monthReports = taskReports.filter(
+        (report) => this.getMonthKey(report.submittedAt) === monthKey,
+      );
+
+      const monthEfficiency =
+        monthProjects.length > 0
+          ? this.roundToOneDecimal(
+              monthProjects.reduce(
+                (sum, project) => sum + (project.progress ?? 0),
+                0,
+              ) / monthProjects.length,
+            )
+          : 0;
+
+      const monthCompliance =
+        monthReports.length > 0
+          ? this.roundToOneDecimal(
+              (monthReports.filter((report) => report.reviewDecision === 'approved').length /
+                monthReports.length) *
+                100,
+            )
+          : 0;
+
+      return {
+        label: this.getMonthLabel(date),
+        efficiencyIndex: monthEfficiency,
+        complianceRate: monthCompliance,
+      };
+    });
+
+    const projectsCompleted = projects.filter(
+      (project) => project.status === 'completed',
+    ).length;
+    const projectsInProgress = projects.filter(
+      (project) => project.status === 'active' || project.status === 'on_hold',
+    ).length;
+    const projectsDelayed = projects.filter(
+      (project) => project.status === 'delayed',
+    ).length;
+    const projectsPlanning = projects.filter(
+      (project) => project.status === 'planning',
+    ).length;
+
+    return {
+      cards: {
+        avgCompletionRate: averageCompletionRate,
+        safetyCompliance,
+        workerEfficiency,
+        momGrowth: this.formatChange(currentMonthCompletion, previousMonthCompletion),
+      },
+      charts: {
+        performanceTrends: {
+          labels: months.map((month) => month.label),
+          series: [
+            {
+              name: 'Efficiency Index',
+              data: months.map((month) => month.efficiencyIndex),
+            },
+            {
+              name: 'Compliance Rate',
+              data: months.map((month) => month.complianceRate),
+            },
+          ],
+        },
+        projectDeliverySuccess: [
+          { label: 'Completed', value: projectsCompleted },
+          { label: 'In Progress', value: projectsInProgress },
+          { label: 'Delayed', value: projectsDelayed },
+          { label: 'Planning', value: projectsPlanning },
+        ],
+      },
     };
   }
 
@@ -327,9 +570,38 @@ export class CompanyService {
       where: { companyId },
       orderBy: { createdAt: 'desc' },
       select: {
-        id: true, name: true, type: true, status: true, priority: true, isWholeHouse: true, houseSections: true, progress: true,
-        startDate: true, endDate: true, budget: true, location: true,
-        _count: { select: { teamMembers: true, tasks: true } },
+        id: true,
+        name: true,
+        type: true,
+        status: true,
+        priority: true,
+        isWholeHouse: true,
+        houseSections: true,
+        progress: true,
+        startDate: true,
+        endDate: true,
+        budget: true,
+        location: true,
+        numFloors: true,
+        unitPerFloor: true,
+        floors: {
+          orderBy: { floorNumber: 'asc' as const },
+          select: {
+            id: true,
+            name: true,
+            floorNumber: true,
+            status: true,
+            units: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                status: true,
+              },
+            },
+          },
+        },
+        _count: { select: { teamMembers: true, tasks: true, floors: true } },
         teamMembers: {
           take: 5,
           include: { user: { select: { id: true, fullName: true, avatarUrl: true } } },
