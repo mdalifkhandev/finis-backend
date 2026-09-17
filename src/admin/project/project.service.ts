@@ -96,6 +96,11 @@ export class ProjectService {
       where: this.isSuperAdmin(userRole) ? { id: companyId } : { id: companyId, ownerId: userId },
     });
     if (!company) throw new ForbiddenException('Company not found or not yours');
+
+    if (!company.isActive && !this.isSuperAdmin(userRole)) {
+      throw new ForbiddenException('This company has been suspended by Super Admin. You cannot create or modify projects for a suspended company.');
+    }
+
     return company;
   }
 
@@ -107,6 +112,10 @@ export class ProjectService {
     if (!project) throw new NotFoundException('Project not found');
 
     if (this.isSuperAdmin(userRole)) return project;
+
+    if (project.company && !project.company.isActive) {
+      throw new ForbiddenException('This company has been suspended by Super Admin. You cannot access or modify projects for a suspended company.');
+    }
 
     if (project.company?.ownerId === userId) {
       return project;
@@ -295,7 +304,7 @@ export class ProjectService {
       location: true,
       numFloors: true,
       unitPerFloor: true,
-      company: { select: { id: true, name: true, logoUrl: true } },
+      company: { select: { id: true, name: true, logoUrl: true, isActive: true } },
       _count: { select: { floors: true, tasks: true, teamMembers: true } },
       teamMembers: {
         take: 4,
@@ -443,14 +452,20 @@ export class ProjectService {
 
     if (userRole === UserRole.manager) {
       return this.prisma.project.findMany({
-        where: { teamMembers: { some: { userId, role: 'manager' } } },
+        where: {
+          company: { isActive: true },
+          teamMembers: { some: { userId, role: 'manager' } },
+        },
         orderBy: { createdAt: 'desc' },
         select,
       });
     }
 
     return this.prisma.project.findMany({
-      where: { managerId: userId },
+      where: {
+        company: { isActive: true },
+        managerId: userId,
+      },
       orderBy: { createdAt: 'desc' },
       select,
     });
