@@ -54,12 +54,16 @@ export class CompanyService {
       select: { id: true, ownerId: true, isActive: true },
     });
 
-    if (!company || !company.isActive) {
+    if (!company) {
       throw new NotFoundException('Company not found');
     }
 
     if (userRole === 'super_admin') {
       return company;
+    }
+
+    if (!company.isActive) {
+      throw new ForbiddenException('This company has been suspended by Super Admin. You cannot access company details.');
     }
 
     if (userRole === 'admin' && company.ownerId === userId) {
@@ -127,7 +131,6 @@ export class CompanyService {
 
     const accessibleCompanyIds = await this.getAccessibleCompanyIds(adminId, userRole);
     const where: any = {
-      isActive: true,
       ...(userRole === 'manager'
         ? { id: { in: accessibleCompanyIds } }
         : { ownerId: adminId }),
@@ -167,6 +170,38 @@ export class CompanyService {
           logoUrl: true,
           isActive: true,
           createdAt: true,
+          owner: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              phone: true,
+              tenant: {
+                select: {
+                  id: true,
+                  name: true,
+                  status: true,
+                  subscriptionStatus: true,
+                  currentPeriodEnd: true,
+                  plan: {
+                    select: { id: true, name: true },
+                  },
+                },
+              },
+            },
+          },
+          tenant: {
+            select: {
+              id: true,
+              name: true,
+              status: true,
+              subscriptionStatus: true,
+              currentPeriodEnd: true,
+              plan: {
+                select: { id: true, name: true },
+              },
+            },
+          },
           _count: { select: { projects: true, members: true } },
         },
       }),

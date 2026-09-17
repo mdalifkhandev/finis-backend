@@ -252,10 +252,36 @@ export class SuperAdminCompaniesService {
           projectLevel: true,
           createdAt: true,
           owner: {
-            select: { id: true, fullName: true, email: true },
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              phone: true,
+              tenant: {
+                select: {
+                  id: true,
+                  name: true,
+                  status: true,
+                  subscriptionStatus: true,
+                  currentPeriodEnd: true,
+                  plan: {
+                    select: { id: true, name: true },
+                  },
+                },
+              },
+            },
           },
           tenant: {
-            select: { id: true, name: true, status: true },
+            select: {
+              id: true,
+              name: true,
+              status: true,
+              subscriptionStatus: true,
+              currentPeriodEnd: true,
+              plan: {
+                select: { id: true, name: true },
+              },
+            },
           },
           // Primary contact for the card
           contacts: {
@@ -370,6 +396,16 @@ export class SuperAdminCompaniesService {
             email: true,
             phone: true,
             avatarUrl: true,
+            tenant: {
+              select: {
+                id: true,
+                name: true,
+                status: true,
+                subscriptionStatus: true,
+                currentPeriodEnd: true,
+                plan: { select: { id: true, name: true } },
+              },
+            },
           },
         },
         tenant: {
@@ -377,6 +413,8 @@ export class SuperAdminCompaniesService {
             id: true,
             name: true,
             status: true,
+            subscriptionStatus: true,
+            currentPeriodEnd: true,
             plan: { select: { id: true, name: true } },
           },
         },

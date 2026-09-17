@@ -7,6 +7,7 @@ import {
   Patch,
   Body,
   BadRequestException,
+  ForbiddenException,
   Param,
   Query,
   UseGuards,
@@ -101,16 +102,9 @@ export class SuperAdminCompaniesController {
   }
 
     // ─── UPDATE ───────────────────────────────────────────────────────────────
-    // image: EDIT COMPANY PROFILE modal
   @Put(':id')
-  @UseInterceptors(FileInterceptor('logo', { storage: memoryStorage(), fileFilter: imageLogoFileFilter }))
-  async updateCompany(
-    @Param('id', ParseUUIDPipe) companyId: string,
-    @Body() dto: UpdateCompanyDto,
-    @UploadedFile() file?: Express.Multer.File,
-  ) {
-    const logoUrl = file ? await this.storageService.uploadFile(file, 'company-logos') : undefined;
-    return this.companiesService.updateCompany(companyId, dto, logoUrl);
+  updateCompany() {
+    throw new ForbiddenException('Super Admin cannot edit company profiles. Only company admins can edit their company information.');
   }
 
     // ─── SOFT DELETE ──────────────────────────────────────────────────────────
