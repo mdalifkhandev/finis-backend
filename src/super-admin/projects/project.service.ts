@@ -2,7 +2,6 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
-  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -139,6 +138,23 @@ export class SuperAdminProjectService {
         createdAt: true,
         company: { select: { id: true, name: true, logoUrl: true } },
         _count: { select: { floors: true, tasks: true, teamMembers: true } },
+        floors: {
+          orderBy: { floorNumber: 'asc' },
+          select: {
+            id: true,
+            name: true,
+            floorNumber: true,
+            status: true,
+            units: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                status: true,
+              },
+            },
+          },
+        },
         teamMembers: {
           take: 4,
           include: {
@@ -529,60 +545,25 @@ export class SuperAdminProjectService {
     }));
   }
 
-  async uploadDocument(
-    projectId: string,
-    file?: { originalname: string; filename: string; size: number; mimetype: string },
-    userId?: string,
-    fileUrl?: string,
-  ) {
-    const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project) throw new NotFoundException('Project not found');
+  // ─── SUSPEND PROJECT ──────────────────────────────────────────────────────
+  suspendProject(projectId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const project = await tx.project.findUnique({ where: { id: projectId } });
+      if (!project) throw new NotFoundException('Project not found');
 
-    if (!file) {
-      throw new BadRequestException('file is required');
-    }
-    if (!fileUrl) {
-      throw new BadRequestException('S3 upload failed');
-    }
+      const newStatus = project.status === 'suspended' ? 'active' : 'suspended';
+      const updated = await tx.project.update({
+        where: { id: projectId },
+        data: { status: newStatus },
+        select: { id: true, name: true, status: true },
+      });
 
-    const fileSizeMb = file.size / (1024 * 1024);
-
-    const doc = await this.prisma.document.create({
-      data: {
-        companyId: project.companyId,
-        projectId,
-        uploadedBy: userId as string,
-        fileName: file.originalname,
-        fileUrl,
-        fileType: file.mimetype,
-        fileSizeMb: Math.round(fileSizeMb * 100) / 100,
-      },
-      include: {
-        uploadedByUser: {
-          select: { id: true, fullName: true, avatarUrl: true },
-        },
-      },
+      return {
+        message: newStatus === 'suspended'
+          ? `Project "${updated.name}" has been suspended`
+          : `Project "${updated.name}" has been reactivated`,
+        project: updated,
+      };
     });
-
-    return {
-      message: 'Document uploaded successfully',
-      document: {
-        id: doc.id,
-        fileName: doc.fileName,
-        fileUrl: doc.fileUrl,
-        fileType: doc.fileType,
-        fileSizeMb: doc.fileSizeMb,
-        uploadedAt: doc.uploadedAt,
-        author: doc.uploadedByUser,
-      },
-    };
-  }
-
-  async deleteDocument(projectId: string, docId: string, userId: string) {
-    const doc = await this.prisma.document.findUnique({ where: { id: docId } });
-    if (!doc) throw new NotFoundException('Document not found');
-
-    await this.prisma.document.delete({ where: { id: docId } });
-    return { message: 'Document deleted successfully' };
   }
 }

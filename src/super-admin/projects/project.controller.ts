@@ -1,18 +1,12 @@
 import {
   Controller,
   Get,
-  Post,
   Patch,
-  Delete,
   Body,
   Param,
   Query,
   UseGuards,
-  UploadedFile,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
@@ -20,7 +14,6 @@ import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { UserRole } from '../../generated/prisma/client';
 import { SuperAdminProjectService } from './project.service';
 import { ApproveRejectReportDto } from './dto/project.dto';
-import { StorageService } from '../../storage/storage.service';
 
 @Controller('super-admin/projects')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -28,7 +21,6 @@ import { StorageService } from '../../storage/storage.service';
 export class SuperAdminProjectController {
   constructor(
     private superAdminProjectService: SuperAdminProjectService,
-    private storageService: StorageService,
   ) {}
 
   // ─── PROJECT STATS (Image 1 — Total/Active/Completed/Delayed with % change) ──
@@ -143,7 +135,7 @@ export class SuperAdminProjectController {
     return this.superAdminProjectService.reviewReport(reportId, 'rejected', userId, dto.description);
   }
 
-  // ─── DOCUMENTS ─────────────────────────────────────────────────────────────
+  // ─── DOCUMENTS (read-only) ────────────────────────────────────────────────
 
   /**
    * GET /super-admin/projects/:id/documents
@@ -158,30 +150,14 @@ export class SuperAdminProjectController {
     return this.superAdminProjectService.getProjectDocuments(id, search, category);
   }
 
-  /**
-   * POST /super-admin/projects/:id/documents
-   * Form-data: file
-   */
-  @Post(':id/documents')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
-  async uploadDocument(
-    @Param('id') id: string,
-    @CurrentUser('id') userId: string,
-    @UploadedFile() file?: Express.Multer.File,
-  ) {
-    const fileUrl = file ? await this.storageService.uploadFile(file, 'project-documents') : undefined;
-    return this.superAdminProjectService.uploadDocument(id, file, userId, fileUrl);
-  }
+  // ─── SUSPEND PROJECT ──────────────────────────────────────────────────────
 
   /**
-   * DELETE /super-admin/projects/:id/documents/:docId
+   * PATCH /super-admin/projects/:id/suspend
+   * Toggles project status between 'suspended' and 'active'
    */
-  @Delete(':id/documents/:docId')
-  deleteDocument(
-    @Param('id') id: string,
-    @Param('docId') docId: string,
-    @CurrentUser('id') userId: string,
-  ) {
-    return this.superAdminProjectService.deleteDocument(id, docId, userId);
+  @Patch(':id/suspend')
+  suspendProject(@Param('id') id: string) {
+    return this.superAdminProjectService.suspendProject(id);
   }
 }

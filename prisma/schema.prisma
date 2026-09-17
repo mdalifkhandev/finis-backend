@@ -1104,6 +1104,7 @@ enum ProjectType {
 enum ProjectStatus {
   planning
   active
+  suspended
   on_hold
   completed
   cancelled

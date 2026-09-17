@@ -75,7 +75,7 @@ export class ProjectController {
 
   /** POST /admin/projects */
   @Post()
-  @Roles(UserRole.admin, UserRole.super_admin)
+  @Roles(UserRole.admin)
   createProject(
     @Body() dto: CreateProjectDto,
     @CurrentUser('id') adminId: string,
@@ -117,6 +117,7 @@ export class ProjectController {
    *  Uploads a project document and stores the file in S3
    */
   @Post(':id/documents')
+  @Roles(UserRole.admin, UserRole.manager)
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
   async uploadProjectDocument(
     @Param('id') id: string,
@@ -130,6 +131,7 @@ export class ProjectController {
 
   /** DELETE /admin/projects/:id/documents/:docId */
   @Delete(':id/documents/:docId')
+  @Roles(UserRole.admin, UserRole.manager)
   deleteProjectDocument(
     @Param('id') id: string,
     @Param('docId') docId: string,
@@ -141,7 +143,7 @@ export class ProjectController {
 
   /** PUT /admin/projects/:id — Edit Project screen */
   @Put(':id')
-  @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
+  @Roles(UserRole.admin, UserRole.manager)
   updateProject(
     @Param('id') id: string,
     @Body() dto: UpdateProjectDto,
@@ -153,7 +155,7 @@ export class ProjectController {
 
   /** DELETE /admin/projects/:id */
   @Delete(':id')
-  @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
+  @Roles(UserRole.admin, UserRole.manager)
   deleteProject(
     @Param('id') id: string,
     @CurrentUser('id') adminId: string,
@@ -190,6 +192,7 @@ export class ProjectController {
 
   /** POST /admin/projects/:id/floors */
   @Post(':id/floors')
+  @Roles(UserRole.admin, UserRole.manager)
   addFloor(
     @Param('id') id: string,
     @Body() dto: AddFloorDto,
@@ -201,6 +204,7 @@ export class ProjectController {
 
   /** PUT /admin/projects/:id/floors/:floorId */
   @Put(':id/floors/:floorId')
+  @Roles(UserRole.admin, UserRole.manager)
   updateFloor(
     @Param('id') id: string,
     @Param('floorId') floorId: string,
@@ -213,6 +217,7 @@ export class ProjectController {
 
   /** DELETE /admin/projects/:id/floors/:floorId */
   @Delete(':id/floors/:floorId')
+  @Roles(UserRole.admin, UserRole.manager)
   deleteFloor(
     @Param('id') id: string,
     @Param('floorId') floorId: string,
@@ -226,6 +231,7 @@ export class ProjectController {
 
   /** POST /admin/projects/:id/floors/:floorId/units */
   @Post(':id/floors/:floorId/units')
+  @Roles(UserRole.admin, UserRole.manager)
   addRoom(
     @Param('id') id: string,
     @Param('floorId') floorId: string,
@@ -251,6 +257,7 @@ export class ProjectController {
 
   /** PUT /admin/projects/:id/units/:unitId */
   @Put(':id/units/:unitId')
+  @Roles(UserRole.admin, UserRole.manager)
   updateRoom(
     @Param('id') id: string,
     @Param('unitId') unitId: string,
@@ -263,6 +270,7 @@ export class ProjectController {
 
   /** PUT /admin/projects/:id/rooms/:unitId */
   @Put(':id/rooms/:unitId')
+  @Roles(UserRole.admin, UserRole.manager)
   updateRoomAlias(
     @Param('id') id: string,
     @Param('unitId') unitId: string,
@@ -275,6 +283,7 @@ export class ProjectController {
 
   /** DELETE /admin/projects/:id/units/:unitId */
   @Delete(':id/units/:unitId')
+  @Roles(UserRole.admin, UserRole.manager)
   deleteRoom(
     @Param('id') id: string,
     @Param('unitId') unitId: string,
@@ -286,6 +295,7 @@ export class ProjectController {
 
   /** DELETE /admin/projects/:id/rooms/:unitId */
   @Delete(':id/rooms/:unitId')
+  @Roles(UserRole.admin, UserRole.manager)
   deleteRoomAlias(
     @Param('id') id: string,
     @Param('unitId') unitId: string,
@@ -369,7 +379,7 @@ export class ProjectController {
 
   /** POST /admin/projects/:id/team/managers */
   @Post(':id/team/managers')
-  @Roles(UserRole.admin, UserRole.super_admin)
+  @Roles(UserRole.admin)
   addManager(
     @Param('id') id: string,
     @Body() dto: AddProjectMemberDto,
@@ -381,7 +391,7 @@ export class ProjectController {
 
   /** POST /admin/projects/:id/team/workers */
   @Post(':id/team/workers')
-  @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
+  @Roles(UserRole.admin, UserRole.manager)
   addWorker(
     @Param('id') id: string,
     @Body() dto: AddProjectMemberDto,
@@ -393,7 +403,7 @@ export class ProjectController {
 
   /** DELETE /admin/projects/:id/team/:userId */
   @Delete(':id/team/:userId')
-  @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
+  @Roles(UserRole.admin, UserRole.manager)
   removeTeamMember(
     @Param('id') id: string,
     @Param('userId') userId: string,
@@ -405,7 +415,7 @@ export class ProjectController {
 
   /** POST /admin/projects/:id/schedule/assign */
   @Post(':id/schedule/assign')
-  @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
+  @Roles(UserRole.admin, UserRole.manager)
   assignSchedule(
     @Param('id') id: string,
     @Body() body: { userIds: string[]; startTime: string; endTime: string },
@@ -429,6 +439,7 @@ export class ProjectController {
 
   /** POST /admin/projects/:id/geofences */
   @Post(':id/geofences')
+  @Roles(UserRole.admin, UserRole.manager)
   createGeofence(
     @Param('id') id: string,
     @Body() dto: CreateGeofenceDto,
@@ -440,6 +451,7 @@ export class ProjectController {
 
   /** PUT /admin/projects/:id/geofences/:geoId */
   @Put(':id/geofences/:geoId')
+  @Roles(UserRole.admin, UserRole.manager)
   updateGeofence(
     @Param('id') id: string,
     @Param('geoId') geoId: string,
@@ -451,6 +463,7 @@ export class ProjectController {
   }
 
   @Patch(':id/geofences/violations/:violationId/resolve')
+  @Roles(UserRole.admin, UserRole.manager)
   resolveViolation(
     @Param('violationId') violationId: string,
     @CurrentUser('id') userId: string,
@@ -461,6 +474,7 @@ export class ProjectController {
 
   /** DELETE /admin/projects/:id/geofences/:geoId */
   @Delete(':id/geofences/:geoId')
+  @Roles(UserRole.admin, UserRole.manager)
   deleteGeofence(
     @Param('id') id: string,
     @Param('geoId') geoId: string,
@@ -519,7 +533,7 @@ export class ProjectController {
   }
   /** POST /admin/projects/:id/share */
   @Post(':id/share')
-  @Roles(UserRole.admin, UserRole.super_admin, UserRole.manager)
+  @Roles(UserRole.admin, UserRole.manager)
   generateShareLink(
     @Param('id') projectId: string,
     @CurrentUser('id') userId: string,
