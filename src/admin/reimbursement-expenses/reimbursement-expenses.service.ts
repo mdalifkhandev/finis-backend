@@ -102,11 +102,34 @@ export class ReimbursementExpensesService {
     return [...map.values()];
   }
 
+  private async resolveTaskLink(projectId: string, taskId?: string | null, subTaskId?: string | null) {
+    if (!taskId && !subTaskId) return { taskId: null, subTaskId: null };
+
+    if (subTaskId) {
+      const subTask = await this.prisma.subTask.findFirst({
+        where: { id: subTaskId, task: { projectId } },
+        select: { id: true, taskId: true },
+      });
+      if (!subTask) throw new BadRequestException('Invalid subtask for selected project');
+      if (taskId && taskId !== subTask.taskId) {
+        throw new BadRequestException('Selected task and subtask do not match');
+      }
+      return { taskId: subTask.taskId, subTaskId: subTask.id };
+    }
+
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId ?? undefined, projectId },
+      select: { id: true },
+    });
+    if (!task) throw new BadRequestException('Invalid task for selected project');
+    return { taskId: task.id, subTaskId: null };
+  }
+
   private async getExpenseOrThrow(id: string, userId: string, role: string) {
     this.assertExpenseAccess(role);
     const expense = await this.prisma.reimbursementExpense.findUnique({
       where: { id },
-      include: { project: { select: { id: true, name: true } }, createdBy: { select: { id: true, fullName: true, email: true } } },
+      include: { project: { select: { id: true, name: true } }, task: { select: { id: true, title: true } }, subTask: { select: { id: true, title: true } }, createdBy: { select: { id: true, fullName: true, email: true } } },
     });
     if (!expense) throw new NotFoundException('Expense not found');
     if (this.isAdminReviewer(role)) return expense;
@@ -134,7 +157,7 @@ export class ReimbursementExpensesService {
       ...(query.search ? { OR: [{ title: { contains: query.search, mode: 'insensitive' } }, { vendor: { contains: query.search, mode: 'insensitive' } }] } : {}),
     };
     const [items, total] = await Promise.all([
-      this.prisma.reimbursementExpense.findMany({ where, include: { project: { select: { id: true, name: true } }, createdBy: { select: { id: true, fullName: true, email: true } } }, orderBy: { [query.sortBy ?? 'createdAt']: query.sortOrder ?? 'desc' }, skip: (page - 1) * limit, take: limit }),
+      this.prisma.reimbursementExpense.findMany({ where, include: { project: { select: { id: true, name: true } }, task: { select: { id: true, title: true } }, subTask: { select: { id: true, title: true } }, createdBy: { select: { id: true, fullName: true, email: true } } }, orderBy: { [query.sortBy ?? 'createdAt']: query.sortOrder ?? 'desc' }, skip: (page - 1) * limit, take: limit }),
       this.prisma.reimbursementExpense.count({ where }),
     ]);
     return { data: items.map((e) => this.serialize(e)), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
@@ -151,6 +174,46 @@ export class ReimbursementExpensesService {
       orderBy: { project: { name: 'asc' } },
     });
     return memberships.map((member) => member.project);
+  }
+
+  async getProjectTaskOptions(projectId: string, userId: string, role: string) {
+    this.assertExpenseAccess(role);
+    await this.assertProject(projectId);
+    await this.assertProjectAccess(userId, role, projectId);
+
+    const tasks = await this.prisma.task.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        subTasks: {
+          where: { status: { not: 'in_active' } },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, title: true, status: true },
+        },
+      },
+    });
+
+    return tasks.flatMap((task) => [
+      {
+        id: task.id,
+        taskId: task.id,
+        subTaskId: null,
+        type: 'task',
+        title: task.title,
+        status: task.status,
+      },
+      ...task.subTasks.map((subTask) => ({
+        id: subTask.id,
+        taskId: task.id,
+        subTaskId: subTask.id,
+        type: 'subtask',
+        title: `${task.title} / ${subTask.title}`,
+        status: subTask.status,
+      })),
+    ]);
   }
 
   async getOptions(adminId: string, role: string) {
@@ -190,22 +253,27 @@ export class ReimbursementExpensesService {
 
   async create(dto: CreateReimbursementExpenseDto, adminId: string, role: string) {
     this.assertCreateAccess(role); if (!dto.projectId) throw new BadRequestException('Project is required'); await this.assertProject(dto.projectId); await this.assertProjectAccess(adminId, role, dto.projectId); this.assertNotFuture(dto.expenseDate);
+    const taskLink = await this.resolveTaskLink(dto.projectId, dto.taskId, dto.subTaskId);
     const status = dto.action === 'SUBMITTED' ? 'SUBMITTED' : 'DRAFT';
     const subtotal = this.toMoney(dto.subtotal ?? 0);
     const tax = this.toMoney(dto.tax ?? 0);
     const totalAmount = this.toMoney(Number(subtotal) + Number(tax));
-    const expense = await this.prisma.reimbursementExpense.create({ data: { title: dto.title, expenseDate: new Date(dto.expenseDate), subtotal, tax, totalAmount, currency: this.normalizeOption(dto.currency) || 'BDT', category: this.normalizeOption(dto.category), vendor: dto.vendor || null, paymentMethod: this.normalizeOption(dto.paymentMethod) || null, projectId: dto.projectId || null, taskId: dto.taskId || null, notes: dto.notes || null, receiptUrl: dto.receiptUrl || null, createdById: adminId, status, submittedAt: status === 'SUBMITTED' ? new Date() : null }, include: { project: { select: { id: true, name: true } } } });
+    const expense = await this.prisma.reimbursementExpense.create({ data: { title: dto.title, expenseDate: new Date(dto.expenseDate), subtotal, tax, totalAmount, currency: this.normalizeOption(dto.currency) || 'BDT', category: this.normalizeOption(dto.category), vendor: dto.vendor || null, paymentMethod: this.normalizeOption(dto.paymentMethod) || null, projectId: dto.projectId || null, taskId: taskLink.taskId, subTaskId: taskLink.subTaskId, notes: dto.notes || null, receiptUrl: dto.receiptUrl || null, createdById: adminId, status, submittedAt: status === 'SUBMITTED' ? new Date() : null }, include: { project: { select: { id: true, name: true } }, task: { select: { id: true, title: true } }, subTask: { select: { id: true, title: true } } } });
     return { message: status === 'SUBMITTED' ? 'Expense submitted successfully' : 'Expense draft saved successfully', ...this.serialize(expense) };
   }
 
   async update(id: string, dto: UpdateReimbursementExpenseDto, adminId: string, role: string) {
     const existing = await this.getExpenseOrThrow(id, adminId, role);
     if (this.isManager(role) && existing.createdById !== adminId) throw new ForbiddenException('Managers can only edit their own expenses'); if (!['DRAFT', 'SUBMITTED', 'REJECTED'].includes(existing.status)) throw new BadRequestException('Only draft, submitted, or rejected expenses can be updated');
-    await this.assertProject(dto.projectId); await this.assertProjectAccess(adminId, role, dto.projectId); if (dto.expenseDate) this.assertNotFuture(dto.expenseDate);
+    const projectId = dto.projectId ?? existing.projectId;
+    await this.assertProject(projectId ?? undefined); await this.assertProjectAccess(adminId, role, projectId ?? undefined); if (dto.expenseDate) this.assertNotFuture(dto.expenseDate);
+    const taskLink = dto.taskId !== undefined || dto.subTaskId !== undefined
+      ? await this.resolveTaskLink(projectId, dto.taskId ?? null, dto.subTaskId ?? null)
+      : null;
     const nextSubtotal = dto.subtotal !== undefined ? this.toMoney(dto.subtotal) : existing.subtotal;
     const nextTax = dto.tax !== undefined ? this.toMoney(dto.tax) : existing.tax;
     const nextTotal = this.toMoney(Number(nextSubtotal) + Number(nextTax));
-    const expense = await this.prisma.reimbursementExpense.update({ where: { id }, data: { ...(dto.title !== undefined ? { title: dto.title } : {}), ...(dto.expenseDate ? { expenseDate: new Date(dto.expenseDate) } : {}), ...(dto.subtotal !== undefined || dto.tax !== undefined ? { subtotal: nextSubtotal, tax: nextTax, totalAmount: nextTotal } : {}), ...(dto.currency ? { currency: this.normalizeOption(dto.currency) } : {}), ...(dto.category ? { category: this.normalizeOption(dto.category) } : {}), ...(dto.vendor !== undefined ? { vendor: dto.vendor || null } : {}), ...(dto.paymentMethod !== undefined ? { paymentMethod: this.normalizeOption(dto.paymentMethod) || null } : {}), ...(dto.projectId !== undefined ? { projectId: dto.projectId || null } : {}), ...(dto.taskId !== undefined ? { taskId: dto.taskId || null } : {}), ...(dto.notes !== undefined ? { notes: dto.notes || null } : {}), ...(dto.receiptUrl !== undefined ? { receiptUrl: dto.receiptUrl || null } : {}) }, include: { project: { select: { id: true, name: true } } } });
+    const expense = await this.prisma.reimbursementExpense.update({ where: { id }, data: { ...(dto.title !== undefined ? { title: dto.title } : {}), ...(dto.expenseDate ? { expenseDate: new Date(dto.expenseDate) } : {}), ...(dto.subtotal !== undefined || dto.tax !== undefined ? { subtotal: nextSubtotal, tax: nextTax, totalAmount: nextTotal } : {}), ...(dto.currency ? { currency: this.normalizeOption(dto.currency) } : {}), ...(dto.category ? { category: this.normalizeOption(dto.category) } : {}), ...(dto.vendor !== undefined ? { vendor: dto.vendor || null } : {}), ...(dto.paymentMethod !== undefined ? { paymentMethod: this.normalizeOption(dto.paymentMethod) || null } : {}), ...(dto.projectId !== undefined ? { projectId: dto.projectId || null } : {}), ...(taskLink ? { taskId: taskLink.taskId, subTaskId: taskLink.subTaskId } : {}), ...(dto.notes !== undefined ? { notes: dto.notes || null } : {}), ...(dto.receiptUrl !== undefined ? { receiptUrl: dto.receiptUrl || null } : {}) }, include: { project: { select: { id: true, name: true } }, task: { select: { id: true, title: true } }, subTask: { select: { id: true, title: true } } } });
     return { message: 'Expense updated successfully', ...this.serialize(expense) };
   }
 
@@ -217,7 +285,7 @@ export class ReimbursementExpensesService {
 
   private async transition(id: string, userId: string, role: string, from: ReimbursementExpenseStatus, data: Prisma.ReimbursementExpenseUpdateInput, message: string) {
     const existing = await this.getExpenseOrThrow(id, userId, role); if (existing.status !== from) throw new BadRequestException(`Only ${from} expenses can use this action`);
-    const expense = await this.prisma.reimbursementExpense.update({ where: { id }, data, include: { project: { select: { id: true, name: true } }, createdBy: { select: { id: true, fullName: true, email: true } } } });
+    const expense = await this.prisma.reimbursementExpense.update({ where: { id }, data, include: { project: { select: { id: true, name: true } }, task: { select: { id: true, title: true } }, subTask: { select: { id: true, title: true } }, createdBy: { select: { id: true, fullName: true, email: true } } } });
     return { message, ...this.serialize(expense) };
   }
 

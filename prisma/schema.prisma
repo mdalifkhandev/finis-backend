@@ -542,6 +542,7 @@ model SubTask {
   unit                  Unit            @relation(fields: [unitId], references: [id], onDelete: Cascade)
   inventories           TaskInventory[]
   reports               TaskReport[]
+  reimbursementExpenses ReimbursementExpense[]
 
   @@index([taskId, unitId])
   @@index([createdBy])
@@ -796,6 +797,7 @@ model ReimbursementExpense {
   paymentMethod String?                    @map("payment_method")
   projectId     String?                    @map("project_id") @db.Uuid
   taskId        String?                    @map("task_id") @db.Uuid
+  subTaskId     String?                    @map("sub_task_id") @db.Uuid
   notes         String?
   receiptUrl    String?                    @map("receipt_url")
   status        ReimbursementExpenseStatus @default(DRAFT)
@@ -810,10 +812,12 @@ model ReimbursementExpense {
   createdBy     User                       @relation("ReimbursementExpenseCreator", fields: [createdById], references: [id])
   project       Project?                   @relation(fields: [projectId], references: [id])
   task          Task?                      @relation(fields: [taskId], references: [id])
+  subTask       SubTask?                   @relation(fields: [subTaskId], references: [id])
 
   @@index([createdById])
   @@index([projectId])
   @@index([taskId])
+  @@index([subTaskId])
   @@index([status])
   @@index([expenseDate])
   @@map("reimbursement_expenses")

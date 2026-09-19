@@ -29,6 +29,7 @@ export class ReimbursementExpensesController {
   @Get('summary') getSummary(@CurrentUser('id') adminId: string, @CurrentUser('role') role: string) { return this.service.getSummary(adminId, role); }
   @Get('options') getOptions(@CurrentUser('id') adminId: string, @CurrentUser('role') role: string) { return this.service.getOptions(adminId, role); }
   @Get('projects') getProjects(@CurrentUser('id') adminId: string, @CurrentUser('role') role: string) { return this.service.getProjects(adminId, role); }
+  @Get('projects/:projectId/tasks') getProjectTaskOptions(@Param('projectId') projectId: string, @CurrentUser('id') adminId: string, @CurrentUser('role') role: string) { return this.service.getProjectTaskOptions(projectId, adminId, role); }
   @Get(':id') findOne(@Param('id') id: string, @CurrentUser('id') adminId: string, @CurrentUser('role') role: string) { return this.service.findOne(id, adminId, role); }
 
   @Post()

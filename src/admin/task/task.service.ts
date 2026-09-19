@@ -1168,7 +1168,31 @@ export class TaskService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return this.toTaskDetailResponse(task, expenses);
+    const reimbursementExpenses = await this.prisma.reimbursementExpense.findMany({
+      where: {
+        taskId: task.id,
+        subTaskId: null,
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        createdBy: { select: { id: true, fullName: true, avatarUrl: true } },
+      },
+    });
+
+    const normalizedReimbursementExpenses = reimbursementExpenses.map((expense) => ({
+      id: expense.id,
+      description: expense.title,
+      category: expense.category,
+      amount: Number(expense.totalAmount ?? expense.subtotal ?? 0),
+      status: expense.status,
+      date: expense.expenseDate,
+      receiptUrl: expense.receiptUrl,
+      projectId: expense.projectId,
+      taskId: expense.taskId,
+      reporter: expense.createdBy,
+    }));
+
+    return this.toTaskDetailResponse(task, [...expenses, ...normalizedReimbursementExpenses]);
   }
 
   async getTaskLocations(taskId: string, userId: string, userRole: string) {
@@ -1764,7 +1788,29 @@ export class TaskService {
       },
     });
 
-    return this.toAdminSubTaskDetailResponse(subTask, taskExpenses);
+    const reimbursementExpenses = await this.prisma.reimbursementExpense.findMany({
+      where: { subTaskId: subTask.id },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        createdBy: { select: { id: true, fullName: true, avatarUrl: true } },
+      },
+    });
+
+    const normalizedReimbursementExpenses = reimbursementExpenses.map((expense) => ({
+      id: expense.id,
+      description: expense.title,
+      category: expense.category,
+      amount: Number(expense.totalAmount ?? expense.subtotal ?? 0),
+      status: expense.status,
+      date: expense.expenseDate,
+      receiptUrl: expense.receiptUrl,
+      reviewedBy: null,
+      reviewedAt: null,
+      reviewNotes: expense.notes,
+      reporter: expense.createdBy,
+    }));
+
+    return this.toAdminSubTaskDetailResponse(subTask, [...taskExpenses, ...normalizedReimbursementExpenses]);
   }
 
   async reviewSubTaskApproval(
