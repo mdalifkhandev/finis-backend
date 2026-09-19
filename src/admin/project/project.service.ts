@@ -169,6 +169,22 @@ export class ProjectService {
     ]);
   }
 
+  private deriveStatusFromTaskStatuses(statuses: string[], fallback: string) {
+    if (statuses.length === 0) return fallback;
+    if (statuses.every((status) => status === 'completed')) return 'completed';
+    if (statuses.some((status) => ['in_progress', 'review', 'revision'].includes(status))) return 'in_progress';
+    return 'pending';
+  }
+
+  private countTaskStatuses(statuses: string[]) {
+    return {
+      total: statuses.length,
+      completed: statuses.filter((status) => status === 'completed').length,
+      inProgress: statuses.filter((status) => ['in_progress', 'review', 'revision'].includes(status)).length,
+      notStarted: statuses.filter((status) => status === 'pending' || status === 'in_active').length,
+    };
+  }
+
   // ─── PLAN LIMIT CHECKS ────────────────────────────────────────────────────
 
   private async checkProjectLimit(adminId: string) {
@@ -813,49 +829,83 @@ export class ProjectService {
   async getFloorPlan(projectId: string, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
 
-    const floors = await this.prisma.floor.findMany({
-      where: { projectId },
-      orderBy: { floorNumber: 'asc' },
-      include: {
-        units: {
-          orderBy: { name: 'asc' },
-          include: {
-            _count: { select: { tasks: true } },
-            tasks: { select: { status: true } },
+    const [floors, taskLinks] = await Promise.all([
+      this.prisma.floor.findMany({
+        where: { projectId },
+        orderBy: { floorNumber: 'asc' },
+        include: {
+          units: {
+            orderBy: { name: 'asc' },
+            select: { id: true, name: true, type: true, sizeSqft: true, status: true, progress: true },
           },
         },
-        _count: { select: { tasks: true, units: true } },
-        tasks: { select: { status: true } },
-      },
-    });
+      }),
+      this.prisma.task.findMany({
+        where: { projectId },
+        select: {
+          id: true,
+          status: true,
+          floorId: true,
+          unitId: true,
+          taskFloors: { select: { floorId: true } },
+          taskUnits: {
+            select: {
+              unit: { select: { id: true, floorId: true } },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const statusesByFloorId = new Map<string, Map<string, string>>();
+    const statusesByUnitId = new Map<string, Map<string, string>>();
+
+    for (const task of taskLinks) {
+      const floorIds = new Set<string>();
+      const unitIds = new Set<string>();
+      if (task.floorId) floorIds.add(task.floorId);
+      if (task.unitId) unitIds.add(task.unitId);
+      for (const taskFloor of task.taskFloors) floorIds.add(taskFloor.floorId);
+      for (const taskUnit of task.taskUnits) {
+        if (taskUnit.unit?.id) unitIds.add(taskUnit.unit.id);
+        if (taskUnit.unit?.floorId) floorIds.add(taskUnit.unit.floorId);
+      }
+
+      for (const floorId of floorIds) {
+        const map = statusesByFloorId.get(floorId) ?? new Map<string, string>();
+        map.set(task.id, task.status);
+        statusesByFloorId.set(floorId, map);
+      }
+      for (const unitId of unitIds) {
+        const map = statusesByUnitId.get(unitId) ?? new Map<string, string>();
+        map.set(task.id, task.status);
+        statusesByUnitId.set(unitId, map);
+      }
+    }
 
     return floors.map((floor) => ({
       id: floor.id,
       name: floor.name,
       floorNumber: floor.floorNumber,
-      status: floor.status,
+      status: this.deriveStatusFromTaskStatuses(
+        Array.from(statusesByFloorId.get(floor.id)?.values() ?? []),
+        floor.status,
+      ),
       progress: floor.progress,
       totalUnits: floor.units.length,
-      taskCounts: {
-        total: floor.tasks.length,
-        completed: floor.tasks.filter((t) => t.status === 'completed').length,
-        inProgress: floor.tasks.filter((t) => t.status === 'in_progress').length,
-        notStarted: floor.tasks.filter((t) => t.status === 'pending').length,
-      },
-      units: floor.units.map((room) => ({
-        id: room.id,
-        name: room.name,
-        type: room.type,
-        sizeSqft: room.sizeSqft,
-        status: room.status,
-        progress: room.progress,
-        taskCounts: {
-          total: room.tasks.length,
-          completed: room.tasks.filter((t) => t.status === 'completed').length,
-          inProgress: room.tasks.filter((t) => t.status === 'in_progress').length,
-          notStarted: room.tasks.filter((t) => t.status === 'pending').length,
-        },
-      })),
+      taskCounts: this.countTaskStatuses(Array.from(statusesByFloorId.get(floor.id)?.values() ?? [])),
+      units: floor.units.map((room) => {
+        const roomStatuses = Array.from(statusesByUnitId.get(room.id)?.values() ?? []);
+        return {
+          id: room.id,
+          name: room.name,
+          type: room.type,
+          sizeSqft: room.sizeSqft,
+          status: this.deriveStatusFromTaskStatuses(roomStatuses, room.status),
+          progress: room.progress,
+          taskCounts: this.countTaskStatuses(roomStatuses),
+        };
+      }),
     }));
   }
 
@@ -926,22 +976,36 @@ export class ProjectService {
       }
     }
 
-    const checklist = project.floors.map((floor) => ({
-      floorId: floor.id,
-      floorName: floor.name,
-      floorStatus: floor.status,
-      totalUnits: floor._count.units,
-      tasks: (tasksByFloor.get(floor.id) ?? []).map((task) => ({
-        id: task.id,
-        title: task.title,
-        isCompleted: task.status === 'completed',
-        unitCount: task.taskUnits.filter((taskUnit) => taskUnit.unit.floorId === floor.id).length,
-        dueDate: task.dueDate,
-        assignee: task.assignee,
-        status: task.status,
-        priority: task.priority,
-      })),
-    }));
+    const checklist = project.floors.map((floor) => {
+      const floorTasks = tasksByFloor.get(floor.id) ?? [];
+      const completedCount = floorTasks.filter((task) => task.status === 'completed').length;
+      const floorStatus =
+        floorTasks.length === 0
+          ? floor.status
+          : completedCount === floorTasks.length
+            ? 'completed'
+            : floorTasks.some((task) => ['in_progress', 'review', 'revision'].includes(task.status))
+              ? 'in_progress'
+              : 'pending';
+
+      return {
+        floorId: floor.id,
+        floorName: floor.name,
+        floorStatus,
+        totalUnits: floor._count.units,
+        tasks: floorTasks.map((task) => ({
+          id: task.id,
+          title: task.title,
+          taskName: task.title,
+          isCompleted: task.status === 'completed',
+          unitCount: task.taskUnits.filter((taskUnit) => taskUnit.unit.floorId === floor.id).length,
+          dueDate: task.dueDate,
+          assignee: task.assignee,
+          status: task.status,
+          priority: task.priority,
+        })),
+      };
+    });
 
     return { checklist };
   }
