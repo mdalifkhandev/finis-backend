@@ -1882,13 +1882,15 @@ export class ProjectService {
     return { message: 'Member removed successfully' };
   }
 
-  async assignSchedule(projectId: string, userIds: string[], startTime: string, endTime: string, adminId: string, userRole: string) {
+  async assignSchedule(projectId: string, userIds: string[], startTime: string, endTime: string, adminId: string, userRole: string, days?: any[]) {
     await this.verifyProjectAccess(projectId, adminId, userRole);
 
     const project = await this.prisma.project.findUnique({ where: { id: projectId } });
     if (!project) throw new NotFoundException('Project not found');
 
     const scheduleName = `${startTime} - ${endTime}`;
+    const defaultDays = ['mon', 'tue', 'wed', 'thu', 'fri'];
+    const selectedDays = days && days.length > 0 ? days : defaultDays;
 
     let schedule = await this.prisma.workSchedule.findFirst({
       where: { companyId: project.companyId, startTime, endTime }
@@ -1901,7 +1903,13 @@ export class ProjectService {
           name: scheduleName,
           startTime,
           endTime,
+          days: selectedDays,
         }
+      });
+    } else if (schedule.days.length === 0) {
+      schedule = await this.prisma.workSchedule.update({
+        where: { id: schedule.id },
+        data: { days: selectedDays }
       });
     }
 

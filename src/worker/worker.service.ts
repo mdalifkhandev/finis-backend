@@ -3227,7 +3227,14 @@ export class WorkerService {
 
   async getMyProjects(workerId: string) {
     const memberships = await this.prisma.projectMember.findMany({
-      where: { userId: workerId },
+      where: {
+        userId: workerId,
+        project: {
+          status: {
+            notIn: ['completed', 'suspended'],
+          },
+        },
+      },
       include: {
         project: {
           select: {

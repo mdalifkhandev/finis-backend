@@ -40,6 +40,7 @@ export class TeamManagementController {
 
   /** GET /super_admin/team/users/:id */
   @Get('users/:id')
+  @Roles(UserRole.super_admin, UserRole.admin, UserRole.manager)
   getUserDetailsById(@Param('id') id: string) {
     return this.teamService.getUserDetailsById(id);
   }
@@ -81,6 +82,15 @@ export class TeamManagementController {
     @Body('status') status: string,
   ) {
     return this.teamService.updateUserStatus(id, status);
+  }
+
+  /** PATCH /super_admin/team/users/:id */
+  @Patch('users/:id')
+  updateUserDetails(
+    @Param('id') id: string,
+    @Body() data: any,
+  ) {
+    return this.teamService.updateUserDetails(id, data);
   }
 
   /** GET /super_admin/team/managers?search=&status= */

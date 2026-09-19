@@ -418,11 +418,11 @@ export class ProjectController {
   @Roles(UserRole.admin, UserRole.manager)
   assignSchedule(
     @Param('id') id: string,
-    @Body() body: { userIds: string[]; startTime: string; endTime: string },
+    @Body() body: { userIds: string[]; startTime: string; endTime: string; days?: string[] },
     @CurrentUser('id') adminId: string,
     @CurrentUser('role') userRole: string,
   ) {
-    return this.projectService.assignSchedule(id, body.userIds, body.startTime, body.endTime, adminId, userRole);
+    return this.projectService.assignSchedule(id, body.userIds, body.startTime, body.endTime, adminId, userRole, body.days as any);
   }
 
   // ─── GEOFENCES ─────────────────────────────────────────────────────────────

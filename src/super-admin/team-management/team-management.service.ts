@@ -83,6 +83,11 @@ export class TeamManagementService {
         lastLoginAt: true,
         createdAt: true,
         updatedAt: true,
+        emergencyContacts: true,
+        certifications: true,
+        workScheduleAssignments: {
+          include: { schedule: true },
+        },
         userSettings: {
           select: {
             language: true,
@@ -127,8 +132,8 @@ export class TeamManagementService {
       return { ...user, companies, projects: [] };
     }
 
-    // Manager → assigned projects (ProjectMember)
-    if (user.role === UserRole.manager) {
+    // Manager or Worker → assigned projects (ProjectMember)
+    if (user.role === UserRole.manager || user.role === UserRole.worker) {
       const projects = await this.prisma.projectMember.findMany({
         where: { userId },
         select: {
@@ -171,6 +176,19 @@ export class TeamManagementService {
         email: true,
         role: true,
         status: true,
+      },
+    });
+  }
+
+  // ── Update User Details ───────────────────────────────────────────────
+  async updateUserDetails(userId: string, data: any) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        fullName: data.fullName,
+        role: data.role as any,
+        phone: data.phone,
+        hourlyRate: data.hourlyRate ? parseFloat(data.hourlyRate) : undefined,
       },
     });
   }
