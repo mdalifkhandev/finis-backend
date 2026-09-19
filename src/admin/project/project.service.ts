@@ -121,6 +121,10 @@ export class ProjectService {
       return project;
     }
 
+    if (userRole === UserRole.admin || this.isSuperAdmin(userRole)) {
+      return project;
+    }
+
     if (userRole === UserRole.manager) {
       const member = await this.prisma.projectMember.findFirst({
         where: { projectId, userId, role: 'manager' },
