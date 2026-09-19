@@ -886,6 +886,9 @@ export class ProjectService {
       include: {
         floors: {
           orderBy: { floorNumber: 'asc' },
+          include: {
+            _count: { select: { units: true } },
+          },
         },
       },
     });
@@ -927,6 +930,7 @@ export class ProjectService {
       floorId: floor.id,
       floorName: floor.name,
       floorStatus: floor.status,
+      totalUnits: floor._count.units,
       tasks: (tasksByFloor.get(floor.id) ?? []).map((task) => ({
         id: task.id,
         title: task.title,

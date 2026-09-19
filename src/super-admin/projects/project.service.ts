@@ -291,6 +291,7 @@ export class SuperAdminProjectService {
               include: { assignee: { select: { id: true, fullName: true, avatarUrl: true } } },
               orderBy: { createdAt: 'desc' },
             },
+            _count: { select: { units: true } },
           },
         },
       },
@@ -302,6 +303,7 @@ export class SuperAdminProjectService {
       floorId: floor.id,
       floorName: floor.name,
       floorStatus: floor.status,
+      totalUnits: floor._count.units,
       tasks: floor.tasks.map((task) => ({
         id: task.id,
         title: task.title,
