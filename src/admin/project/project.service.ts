@@ -646,12 +646,29 @@ export class ProjectService {
             },
           },
         },
-        expenses: { select: { amount: true, status: true } },
+        reimbursementExpenses: {
+          select: { totalAmount: true, status: true },
+          where: { status: { in: ['APPROVED', 'PAID'] } },
+        },
         _count: { select: { tasks: true, teamMembers: true, floors: true } },
       },
     });
 
     if (!project) throw new NotFoundException('Project not found');
+
+    const calculatedSpent = project.reimbursementExpenses.reduce((sum, exp) => sum + Number(exp.totalAmount || 0), 0);
+    const actualSpent = Math.max(project.spent ?? 0, calculatedSpent);
+    const actualRemaining = Math.max(0, (project.budget ?? 0) - actualSpent);
+
+    const completedTasksCount = await this.prisma.task.count({
+      where: { projectId: project.id, status: 'completed' }
+    });
+
+    const calculatedProgress = project._count.tasks > 0 
+      ? Math.round((completedTasksCount / project._count.tasks) * 100)
+      : 0;
+    
+    const actualProgress = Math.max(project.progress ?? 0, calculatedProgress);
 
     const primaryContact = project.company.contacts?.[0] ?? null;
     const floorRangeCount =
@@ -667,7 +684,7 @@ export class ProjectService {
       priority: project.priority,
       isWholeHouse: project.isWholeHouse,
       houseSections: project.houseSections,
-      progress: project.progress,
+      progress: actualProgress,
       startDate: project.startDate,
       endDate: project.endDate,
       location: project.location,
@@ -681,8 +698,8 @@ export class ProjectService {
       unitPerFloorMin: (project as any).unitPerFloorMin,
       unitPerFloorMax: (project as any).unitPerFloorMax,
       budget: project.budget,
-      spent: project.spent,
-      remaining: project.remaining,
+      spent: actualSpent,
+      remaining: actualRemaining,
       client: {
         companyId: project.company.id,
         companyName: project.company.name,
@@ -938,6 +955,9 @@ export class ProjectService {
           orderBy: { floorNumber: 'asc' },
           include: {
             _count: { select: { units: true } },
+            units: {
+              select: { id: true, name: true, type: true },
+            },
           },
         },
       },
@@ -988,11 +1008,33 @@ export class ProjectService {
               ? 'in_progress'
               : 'pending';
 
+      const progress = floorTasks.length > 0 ? Math.round((completedCount / floorTasks.length) * 100) : 0;
+      const inProgressCount = floorTasks.filter((task) => ['in_progress', 'review', 'revision'].includes(task.status)).length;
+      const notStartedCount = floorTasks.filter((task) => task.status === 'pending').length;
+
       return {
         floorId: floor.id,
         floorName: floor.name,
         floorStatus,
+        progress,
+        taskCounts: {
+          total: floorTasks.length,
+          completed: completedCount,
+          inProgress: inProgressCount,
+          notStarted: notStartedCount,
+        },
         totalUnits: floor._count.units,
+        rooms: floor.units.map((unit) => {
+          const unitTasks = floorTasks.filter((task) => 
+            task.taskUnits.some((tu) => tu.unit.id === unit.id)
+          );
+          return {
+            id: unit.id,
+            name: unit.name,
+            type: unit.type,
+            tasks: unitTasks.map((task) => ({ status: task.status })),
+          };
+        }),
         tasks: floorTasks.map((task) => ({
           id: task.id,
           title: task.title,

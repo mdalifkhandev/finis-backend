@@ -275,10 +275,10 @@ export class DashboardService {
         _sum: { netPay: true },
       }),
 
-      this.prisma.expense.aggregate({
+      this.prisma.reimbursementExpense.aggregate({
         where: {
           project: { companyId: { in: companyIds } },
-          status: 'approved',
+          status: { in: ['APPROVED', 'PAID'] },
         },
         _sum: { totalAmount: true },
       }),

@@ -281,6 +281,16 @@ export class TaskService {
     });
   }
 
+  public async refreshProjectProgress(projectId: string) {
+    if (!projectId) return;
+    const [totalTasks, completedTasks] = await Promise.all([
+      this.prisma.task.count({ where: { projectId } }),
+      this.prisma.task.count({ where: { projectId, status: 'completed' } })
+    ]);
+    const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+    await this.prisma.project.update({ where: { id: projectId }, data: { progress } });
+  }
+
   private buildTaskLocations(task: any) {
     const floorMap = new Map<
       string,
@@ -2733,6 +2743,7 @@ export class TaskService {
         [userId],
       );
 
+      await this.refreshProjectProgress(task.projectId);
       return { message: 'Task completed' };
     }
 
@@ -2790,6 +2801,7 @@ export class TaskService {
       [userId, ...workerTargets],
     );
 
+    await this.refreshProjectProgress(task.projectId);
     return { message: 'Task sent back to in progress' };
   }
 }

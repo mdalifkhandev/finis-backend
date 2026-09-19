@@ -197,6 +197,12 @@ export class AuthService {
     });
     if (pending) throw new ConflictException('Pending invitation already exists');
 
+    // Fetch sender to inherit tenantId
+    const sender = await this.prisma.user.findUnique({
+      where: { id: senderId },
+      select: { role: true, tenantId: true },
+    });
+
     // Random 6-digit password generate
     const plainPassword = Math.floor(100000 + Math.random() * 900000).toString();
     const passwordHash = await bcrypt.hash(plainPassword, 10);
@@ -211,14 +217,11 @@ export class AuthService {
         passwordHash,
         role: dto.role,
         status: dto.role === UserRole.super_admin ? 'active' : 'pending',
+        tenantId: sender?.tenantId ?? null, // Link to admin's tenant
       },
     });
 
     if (dto.role === UserRole.worker) {
-      const sender = await this.prisma.user.findUnique({
-        where: { id: senderId },
-        select: { role: true },
-      });
       if (sender?.role === UserRole.manager) {
         await this.prisma.workerManagerMap.create({
           data: { managerId: senderId, workerId: user.id },
