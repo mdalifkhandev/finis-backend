@@ -137,7 +137,6 @@ export class AssignTaskDto {
 
   @IsOptional()
   @IsArray()
-  @ArrayNotEmpty()
   @IsUUID('4', { each: true })
   workerIds?: string[];
 }

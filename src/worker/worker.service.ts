@@ -1460,7 +1460,8 @@ export class WorkerService {
           priority: dto.priority ?? TaskPriority.medium,
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
           estimatedHours: dto.estimatedHours ?? null,
-          status: 'in_active' as any,
+          status: 'pending' as any,
+          approvalDecision: 'pending' as any,
         },
         include: {
           task: { select: { id: true, title: true } },

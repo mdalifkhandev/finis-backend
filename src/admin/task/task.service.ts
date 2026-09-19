@@ -440,6 +440,7 @@ export class TaskService {
         completionDecision: rest.completionDecision,
         completionNotes: rest.completionNotes,
         dueDate: rest.dueDate,
+        estimatedHours: rest.estimatedHours,
       },
       floors: this.buildTaskLocations(task),
       location: this.buildTaskLocationLabel(task),
@@ -1945,11 +1946,11 @@ export class TaskService {
       });
       const approvedTask = await this.prisma.task.findUnique({
         where: { id: taskId },
-        select: { title: true },
+        select: { title: true, projectId: true },
       });
       if (approvedTask) {
         await this.notifyProjectRecipients(
-          taskId,
+          approvedTask.projectId,
           [UserRole.admin, UserRole.manager, UserRole.worker],
           {
             title: 'Task Approved',
@@ -1976,11 +1977,11 @@ export class TaskService {
     });
     const rejectedTask = await this.prisma.task.findUnique({
       where: { id: taskId },
-      select: { title: true },
+      select: { title: true, projectId: true },
     });
     if (rejectedTask) {
       await this.notifyProjectRecipients(
-        taskId,
+        rejectedTask.projectId,
         [UserRole.admin, UserRole.manager, UserRole.worker],
         {
           title: 'Task Rejected',
@@ -2072,42 +2073,41 @@ export class TaskService {
       new Set([...(dto.workerIds ?? []), ...(dto.workerId ? [dto.workerId] : [])]),
     );
 
-    if (workerIds.length === 0) {
-      throw new BadRequestException('workerId or workerIds is required');
+    if (workerIds.length > 0) {
+      const workers = await this.prisma.projectMember.findMany({
+        where: {
+          projectId: task.projectId,
+          userId: { in: workerIds },
+          role: 'worker',
+        },
+        select: { userId: true },
+      });
+
+      if (workers.length !== workerIds.length) {
+        throw new BadRequestException('One or more workers are not members of this project');
+      }
     }
-
-    const workers = await this.prisma.projectMember.findMany({
-      where: {
-        projectId: task.projectId,
-        userId: { in: workerIds },
-        role: 'worker',
-      },
-      select: { userId: true },
-    });
-
-    if (workers.length !== workerIds.length) {
-      throw new BadRequestException('One or more workers are not members of this project');
-    }
-
     await this.prisma.$transaction([
       this.prisma.taskAssignee.deleteMany({ where: { taskId } }),
       this.prisma.task.update({
         where: { id: taskId },
-        data: { assignedTo: workerIds[0] },
+        data: { assignedTo: workerIds.length > 0 ? workerIds[0] : null },
       }),
     ]);
 
-    // Task-level assignment only — one TaskAssignee row per worker.
-    // Floors/units are covered together under a single task; workers are
-    // NOT assigned separately per unit anymore.
-    await this.prisma.taskAssignee.createMany({
-      data: workerIds.map((workerId) => ({
-        taskId,
-        userId: workerId,
-        unitId: null,
-      })),
-      skipDuplicates: true,
-    });
+    if (workerIds.length > 0) {
+      // Task-level assignment only — one TaskAssignee row per worker.
+      // Floors/units are covered together under a single task; workers are
+      // NOT assigned separately per unit anymore.
+      await this.prisma.taskAssignee.createMany({
+        data: workerIds.map((workerId) => ({
+          taskId,
+          userId: workerId,
+          unitId: null,
+        })),
+        skipDuplicates: true,
+      });
+    }
 
     const taskAssignees = await this.prisma.taskAssignee.findMany({
       where: { taskId },
@@ -2130,6 +2130,12 @@ export class TaskService {
           data: { taskAssigneeId: assigneeId },
         });
       }
+    } else if (taskAssignees.length === 0 && subTasks.length > 0) {
+      // Unassign all subtasks
+      await this.prisma.subTask.updateMany({
+        where: { taskId },
+        data: { taskAssigneeId: null },
+      });
     }
 
     const updated = await this.prisma.task.findUnique({
@@ -2357,7 +2363,7 @@ export class TaskService {
     });
 
     await this.notifyProjectRecipients(
-      taskId,
+      task.projectId,
       [UserRole.admin, UserRole.manager, UserRole.worker],
       {
         title: 'Subtask Created',
@@ -2423,8 +2429,13 @@ export class TaskService {
       });
     }
 
+    const parentTask = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: { projectId: true },
+    });
+
     await this.notifyProjectRecipients(
-      taskId,
+      parentTask?.projectId ?? taskId,
       [UserRole.admin, UserRole.manager],
       {
         title: dto.reviewDecision === 'approved' ? 'Subtask Approved' : 'Subtask Rejected',
@@ -2550,7 +2561,7 @@ export class TaskService {
     });
 
     await this.notifyProjectRecipients(
-      taskId,
+      task.projectId,
       [UserRole.admin, UserRole.manager],
       {
         title: 'Task Report Submitted',
@@ -2636,7 +2647,7 @@ export class TaskService {
       });
 
       await this.notifyProjectRecipients(
-        taskId,
+        task.projectId,
         [UserRole.admin, UserRole.manager, UserRole.worker],
         {
           title: 'Task Approved',
@@ -2693,7 +2704,7 @@ export class TaskService {
     );
 
     await this.notifyProjectRecipients(
-      taskId,
+      task.projectId,
       [UserRole.admin, UserRole.manager],
       {
         title: 'Task Rejected',
