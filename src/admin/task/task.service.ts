@@ -786,14 +786,15 @@ export class TaskService {
   async createTask(dto: CreateTaskDto, userId: string, userRole: string) {
     const canCreateAsAdmin = userRole === UserRole.admin || userRole === UserRole.super_admin;
     const canCreateAsManager = userRole === UserRole.manager;
+    const canCreateAsWorker = userRole === UserRole.worker;
 
-    if (!canCreateAsAdmin && !canCreateAsManager) {
+    if (!canCreateAsAdmin && !canCreateAsManager && !canCreateAsWorker) {
       throw new ForbiddenException('You are not allowed to create tasks');
     }
 
-    if (userRole === UserRole.manager) {
+    if (userRole === UserRole.manager || userRole === UserRole.worker) {
       const member = await this.prisma.projectMember.findFirst({
-        where: { projectId: dto.projectId, userId, role: 'manager' },
+        where: { projectId: dto.projectId, userId, role: userRole === UserRole.manager ? 'manager' : 'worker' },
       });
       if (!member) {
         throw new ForbiddenException('You are not assigned to this project');
@@ -846,15 +847,15 @@ export class TaskService {
       }
     }
 
-    const approvalDecision = 'approved';
-    const initialStatus = 'pending';
+    const approvalDecision = canCreateAsWorker ? 'pending' : 'approved';
+    const initialStatus = canCreateAsWorker ? 'in_active' : 'pending';
 
     const task = await this.prisma.task.create({
       data: {
         projectId: dto.projectId,
         floorId: dto.floors?.length ? null : dto.floorId ?? null,
         unitId: dto.floors?.length ? null : dto.unitId ?? null,
-        assignedTo: null,
+        assignedTo: canCreateAsWorker ? userId : null,
         createdBy: userId,
         title: dto.title,
         description: dto.description ?? null,
@@ -868,6 +869,31 @@ export class TaskService {
         estimatedHours: dto.estimatedHours ?? null,
       } as any,
     });
+
+    const workerAssignmentUnitIds = canCreateAsWorker
+      ? (unitIds.length ? unitIds : dto.unitId ? [dto.unitId] : [null])
+      : [];
+    let workerAssignmentByUnit = new Map<string, string>();
+
+    if (canCreateAsWorker) {
+      await this.prisma.taskAssignee.createMany({
+        data: workerAssignmentUnitIds.map((unitId) => ({
+          taskId: task.id,
+          userId,
+          unitId,
+        })),
+        skipDuplicates: true,
+      });
+
+      const workerAssignments = await this.prisma.taskAssignee.findMany({
+        where: { taskId: task.id, userId },
+        select: { id: true, unitId: true },
+      });
+
+      workerAssignmentByUnit = new Map(
+        workerAssignments.map((assignment) => [assignment.unitId ?? 'main', assignment.id]),
+      );
+    }
 
     if (floorIds.length) {
       await this.prisma.taskFloor.createMany({
@@ -900,6 +926,7 @@ export class TaskService {
               dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
               estimatedHours: dto.estimatedHours ?? null,
               status: initialStatus,
+              taskAssigneeId: workerAssignmentByUnit.get(unitId) ?? null,
               approvalDecision,
               approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
               approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
@@ -928,6 +955,7 @@ export class TaskService {
             dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
             estimatedHours: dto.estimatedHours ?? null,
             status: initialStatus,
+            taskAssigneeId: workerAssignmentByUnit.get(dto.unitId) ?? null,
             approvalDecision,
             approvalReviewedBy: approvalDecision === 'approved' ? userId : null,
             approvalReviewedAt: approvalDecision === 'approved' ? new Date() : null,
@@ -1012,7 +1040,7 @@ export class TaskService {
         },
         floor: { select: { id: true, name: true, floorNumber: true } },
         unit: { select: { id: true, name: true } },
-        creator: { select: { id: true, fullName: true, avatarUrl: true } },
+        creator: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
         assignee: { select: { id: true, fullName: true, avatarUrl: true, role: true } },
         taskAssignees: {
           include: {
@@ -1972,7 +2000,7 @@ export class TaskService {
         approvalReviewedBy: userId,
         approvalReviewedAt: new Date(),
         approvalNotes: dto.reviewDescription ?? null,
-        status: 'cancelled',
+        status: 'in_active',
       },
     });
     const rejectedTask = await this.prisma.task.findUnique({
@@ -2414,7 +2442,7 @@ export class TaskService {
         approvalReviewedAt: new Date(),
         approvalNotes: reviewText,
         approvalAttachmentUrl: dto.reviewAttachmentUrl ?? null,
-        status: dto.reviewDecision === 'approved' ? 'pending' : 'cancelled',
+        status: dto.reviewDecision === 'approved' ? 'pending' : 'in_active',
       },
     });
 

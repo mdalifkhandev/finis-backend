@@ -200,11 +200,12 @@ export class WorkerService {
   }
 
   private ensureSubTaskApproved(subTask: { approvalDecision?: string; status?: string }, actionLabel: string) {
-    if (subTask.approvalDecision !== 'approved' && subTask.approvalDecision !== 'rejected') {
+    const isRevision = subTask.approvalDecision === 'rejected' && subTask.status === 'revision';
+    if (subTask.approvalDecision !== 'approved' && !isRevision) {
       throw new BadRequestException(`Subtask must be approved before ${actionLabel}`);
     }
-    if (subTask.status === 'cancelled') {
-      throw new BadRequestException(`Cannot perform action: ${actionLabel} because subtask is cancelled.`);
+    if (subTask.status === 'in_active') {
+      throw new BadRequestException(`Cannot perform action: ${actionLabel} because subtask is inactive.`);
     }
   }
 
@@ -224,11 +225,12 @@ export class WorkerService {
   }
 
   private ensureTaskApproved(task: { approvalDecision?: string; status?: string }, actionLabel: string) {
-    if (task.approvalDecision !== 'approved' && task.approvalDecision !== 'rejected') {
+    const isRevision = task.approvalDecision === 'rejected' && (task.status === 'revision' || task.status === 'in_progress');
+    if (task.approvalDecision !== 'approved' && !isRevision) {
       throw new BadRequestException(`Main task must be approved before ${actionLabel}`);
     }
-    if (task.status === 'cancelled') {
-      throw new BadRequestException(`Cannot perform action: ${actionLabel} because main task is cancelled.`);
+    if (task.status === 'in_active') {
+      throw new BadRequestException(`Cannot perform action: ${actionLabel} because main task is inactive.`);
     }
   }
 
@@ -366,6 +368,7 @@ export class WorkerService {
                 { status: 'in_progress' },
                 { status: 'pending' },
                 { status: 'review' },
+                { status: 'revision' },
                 { status: 'completed' },
               ],
             },
@@ -621,6 +624,7 @@ export class WorkerService {
             },
           },
           subTasks: {
+            where: { status: { not: 'in_active' } },
             orderBy: { createdAt: 'desc' },
             include: {
               unit: { select: { id: true, name: true } },
@@ -876,6 +880,7 @@ export class WorkerService {
     const where: any = {
       ...workerTaskFilter,
       task: { approvalDecision: 'approved' },
+      status: { not: 'in_active' },
       ...(andConditions.length > 0 && { AND: andConditions }),
     };
 
@@ -1116,6 +1121,9 @@ export class WorkerService {
     });
 
     if (!subTask) throw new NotFoundException('Task not found');
+    if (subTask.status === 'in_active') {
+      throw new NotFoundException('Task not found');
+    }
     if (!this.isWorkerAssigned(subTask, workerId)) {
       throw new ForbiddenException('This task is not assigned to you');
     }
@@ -1292,8 +1300,8 @@ export class WorkerService {
         },
       });
     }
-    if (subTask.status !== 'pending' && subTask.status !== 'review') {
-      throw new BadRequestException(`Task is already ${subTask.status}`);
+    if (subTask.status !== 'pending') {
+      throw new BadRequestException(`Task cannot be started from ${subTask.status} status`);
     }
 
     const beforePhotoUrl = files?.beforePhoto?.[0]?.filename ?? null;
@@ -1347,11 +1355,11 @@ export class WorkerService {
     }
     this.ensureTaskApproved(task, 'starting work');
 
-    if (task.status === 'in_progress') {
+    if (task.status === 'in_progress' || task.status === 'revision') {
       return this.getMainTaskDetail(taskId, workerId);
     }
-    if (task.status !== 'pending' && task.status !== 'review' && task.status !== 'in_active') {
-      throw new BadRequestException(`Task is already ${task.status}`);
+    if (task.status !== 'pending') {
+      throw new BadRequestException(`Task cannot be started from ${task.status} status`);
     }
 
     const beforePhotoUrl = files?.beforePhoto?.[0]?.filename ?? null;
@@ -1966,6 +1974,19 @@ export class WorkerService {
           },
         });
 
+    await this.prisma.subTask.update({
+      where: { id: subTask.id },
+      data: {
+        status: 'review',
+        submittedAt: new Date(),
+      },
+    });
+
+    await this.prisma.task.update({
+      where: { id: subTask.taskId },
+      data: { status: 'review' },
+    });
+
     const projectReviewRecipients = await this.prisma.projectMember.findMany({
       where: {
         projectId: subTask.taskId,
@@ -1995,7 +2016,7 @@ export class WorkerService {
     );
 
     return {
-      message: 'Task report updated successfully. Task remains pending review.',
+      message: 'Task report updated successfully. Task is now waiting for review.',
       report: updatedReport,
     };
   }
@@ -2129,6 +2150,11 @@ export class WorkerService {
           },
         });
 
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: { status: 'review' },
+    });
+
     const projectReviewRecipients = await this.prisma.projectMember.findMany({
       where: {
         projectId: task.projectId,
@@ -2158,7 +2184,7 @@ export class WorkerService {
     );
 
     return {
-      message: 'Main task report updated successfully. Task remains pending review.',
+      message: 'Main task report updated successfully. Task is now waiting for review.',
       report: updatedReport,
     };
   }
