@@ -2861,7 +2861,8 @@ export class WorkerService {
     const adjustments = await this.prisma.timeAdjustmentRequest.findMany({
       where: {
         workerId,
-        date: { in: dates },
+        // all adjustments for worker
+
       },
     });
 
@@ -3099,7 +3100,8 @@ export class WorkerService {
           include: { schedule: true },
         },
         timeAdjustments: {
-          where: { status: 'pending' },
+          orderBy: { submittedAt: 'desc' },
+          take: 20,
         },
       },
     });

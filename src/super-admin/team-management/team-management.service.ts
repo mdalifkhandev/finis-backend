@@ -88,6 +88,15 @@ export class TeamManagementService {
         workScheduleAssignments: {
           include: { schedule: true },
         },
+        timeAdjustments: {
+          orderBy: { submittedAt: 'desc' },
+          take: 30,
+        },
+        attendances: {
+          orderBy: { date: 'desc' },
+          take: 30,
+          include: { sessions: true },
+        },
         userSettings: {
           select: {
             language: true,

@@ -2085,6 +2085,55 @@ export class ProjectService {
     return { success: true, message: 'Schedules assigned successfully' };
   }
 
+  async updateSchedule(
+    projectId: string,
+    scheduleId: string,
+    data: { startTime?: string; endTime?: string; days?: any[] },
+    adminId: string,
+    userRole: string,
+  ) {
+    await this.verifyProjectAccess(projectId, adminId, userRole);
+
+    const schedule = await this.prisma.workSchedule.findUnique({ where: { id: scheduleId } });
+    if (!schedule) throw new NotFoundException('Schedule not found');
+
+    const startTime = data.startTime ?? schedule.startTime;
+    const endTime = data.endTime ?? schedule.endTime;
+    const days = data.days && data.days.length > 0 ? data.days : schedule.days;
+
+    const updated = await this.prisma.workSchedule.update({
+      where: { id: scheduleId },
+      data: {
+        startTime,
+        endTime,
+        name: `${startTime} - ${endTime}`,
+        days,
+      },
+    });
+
+    return { success: true, message: 'Schedule updated successfully', data: updated };
+  }
+
+  async deleteScheduleAssignment(
+    projectId: string,
+    assignmentId: string,
+    adminId: string,
+    userRole: string,
+  ) {
+    await this.verifyProjectAccess(projectId, adminId, userRole);
+
+    const assignment = await this.prisma.workScheduleAssignment.findUnique({
+      where: { id: assignmentId },
+    });
+    if (!assignment) throw new NotFoundException('Schedule assignment not found');
+
+    await this.prisma.workScheduleAssignment.delete({
+      where: { id: assignmentId },
+    });
+
+    return { success: true, message: 'Schedule assignment removed successfully' };
+  }
+
   // ─── GEOFENCES ─────────────────────────────────────────────────────────────
   async getGeofences(projectId: string, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);

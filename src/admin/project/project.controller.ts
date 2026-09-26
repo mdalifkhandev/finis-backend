@@ -425,6 +425,31 @@ export class ProjectController {
     return this.projectService.assignSchedule(id, body.userIds, body.startTime, body.endTime, adminId, userRole, body.days as any);
   }
 
+  /** PATCH /admin/projects/:id/schedule/:scheduleId */
+  @Patch(':id/schedule/:scheduleId')
+  @Roles(UserRole.admin, UserRole.manager)
+  updateSchedule(
+    @Param('id') projectId: string,
+    @Param('scheduleId') scheduleId: string,
+    @Body() body: { startTime?: string; endTime?: string; days?: string[] },
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.updateSchedule(projectId, scheduleId, body, adminId, userRole);
+  }
+
+  /** DELETE /admin/projects/:id/schedule/assignments/:assignmentId */
+  @Delete(':id/schedule/assignments/:assignmentId')
+  @Roles(UserRole.admin, UserRole.manager)
+  deleteScheduleAssignment(
+    @Param('id') projectId: string,
+    @Param('assignmentId') assignmentId: string,
+    @CurrentUser('id') adminId: string,
+    @CurrentUser('role') userRole: string,
+  ) {
+    return this.projectService.deleteScheduleAssignment(projectId, assignmentId, adminId, userRole);
+  }
+
   // ─── GEOFENCES ─────────────────────────────────────────────────────────────
 
   /** GET /admin/projects/:id/geofences */

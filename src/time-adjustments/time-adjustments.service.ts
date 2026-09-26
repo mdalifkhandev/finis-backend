@@ -19,35 +19,21 @@ export class TimeAdjustmentsService {
     });
   }
 
-  async getPendingRequests(user: any) {
-    let whereClause: any = { status: 'pending' };
-
-    console.log('[getPendingRequests] USER:', user);
-
-    // Temporary: remove all filtering for testing
-    // if (user.role === 'manager' || user.role === 'project_manager') {
-    //   ...
-    // } else if (user.role === 'super_admin' || user.role === 'admin' || user.role === 'company_admin') {
-    //   if (user.tenantId) {
-    //     whereClause.worker = { tenantId: user.tenantId };
-    //   }
-    // }
-
-    whereClause = { status: 'pending' };
-
-    console.log('[getPendingRequests] WHERE CLAUSE:', JSON.stringify(whereClause, null, 2));
-
-    const results = await this.prisma.timeAdjustmentRequest.findMany({
+  async getAllRequests(user?: any, status?: string) {
+    const whereClause: any = status ? { status } : {};
+    return this.prisma.timeAdjustmentRequest.findMany({
       where: whereClause,
       include: {
         worker: {
-          select: { id: true, fullName: true, employeeId: true },
+          select: { id: true, fullName: true, employeeId: true, avatarUrl: true },
         },
       },
       orderBy: { submittedAt: 'desc' },
     });
-    console.log('[getPendingRequests] RESULTS COUNT:', results.length);
-    return results;
+  }
+
+  async getPendingRequests(user?: any) {
+    return this.getAllRequests(user);
   }
 
   async updateRequestStatus(id: string, status: 'approved' | 'denied', reviewedBy: string) {
@@ -65,45 +51,57 @@ export class TimeAdjustmentsService {
     });
 
     if (status === 'approved') {
-      const attendances = await this.prisma.attendance.findMany({
-        where: { userId: request.workerId },
-        include: { sessions: { orderBy: { checkInTime: 'asc' } } },
-      });
-      
-      let attendance: any = null;
-      let targetSession: any = null;
-      for (const a of attendances) {
-        for (const s of a.sessions) {
-          const inDiff = s.checkInTime ? Math.abs(s.checkInTime.getTime() - request.originalTime.getTime()) : Infinity;
-          const outDiff = s.checkOutTime ? Math.abs(s.checkOutTime.getTime() - request.originalTime.getTime()) : Infinity;
-          if (inDiff < 1000 || outDiff < 1000) {
-            attendance = a;
-            targetSession = s;
-            break;
-          }
-        }
-        if (attendance) break;
-      }
+      const isSingleDay = request.reason?.includes('[Scope: single_day]');
+      const reqDateStr = request.date.toISOString().split('T')[0];
 
-      if (attendance && targetSession) {
-        if (request.requestType === 'check_in') {
+      if (isSingleDay) {
+        // Handle Single Day Exception: Only update/create attendance for this specific date
+        let attendance = await this.prisma.attendance.findFirst({
+          where: {
+            userId: request.workerId,
+            date: {
+              gte: new Date(`${reqDateStr}T00:00:00.000Z`),
+              lte: new Date(`${reqDateStr}T23:59:59.999Z`),
+            },
+          },
+          include: { sessions: true },
+        });
+
+        if (!attendance) {
+          attendance = await this.prisma.attendance.create({
+            data: {
+              userId: request.workerId,
+              date: new Date(`${reqDateStr}T00:00:00.000Z`),
+              status: 'present',
+            },
+            include: { sessions: true },
+          });
+        }
+
+        if (attendance.sessions.length > 0) {
+          const session = attendance.sessions[0];
           await this.prisma.attendanceSession.update({
-            where: { id: targetSession.id },
-            data: { checkInTime: request.adjustedTime },
+            where: { id: session.id },
+            data: {
+              checkInTime: request.requestType === 'check_in' ? request.adjustedTime : session.checkInTime,
+              checkOutTime: request.requestType === 'check_out' ? request.adjustedTime : session.checkOutTime,
+            },
           });
         } else {
-          await this.prisma.attendanceSession.update({
-            where: { id: targetSession.id },
-            data: { checkOutTime: request.adjustedTime },
+          await this.prisma.attendanceSession.create({
+            data: {
+              attendanceId: attendance.id,
+              checkInTime: request.requestType === 'check_in' ? request.adjustedTime : request.originalTime,
+              checkOutTime: request.requestType === 'check_out' ? request.adjustedTime : null,
+            },
           });
         }
 
-        // Recalculate total hours for attendance
+        // Recalculate total hours for that date
         const updatedAttendance = await this.prisma.attendance.findUnique({
           where: { id: attendance.id },
           include: { sessions: true },
         });
-
         if (updatedAttendance) {
           const totalHours = updatedAttendance.sessions.reduce((sum, s) => {
             if (!s.checkInTime || !s.checkOutTime) return sum;
@@ -116,26 +114,34 @@ export class TimeAdjustmentsService {
           });
         }
       } else {
-        // Fallback: This is a schedule change request
+        // Regular recurring schedule change: updates upcoming schedule without touching past history
         const assignment = await this.prisma.workScheduleAssignment.findFirst({
           where: { userId: request.workerId },
           include: { schedule: true },
         });
         
         if (assignment && assignment.schedule) {
-          const hours = request.adjustedTime.getHours();
-          const minutes = request.adjustedTime.getMinutes();
-          const ampm = hours >= 12 ? 'PM' : 'AM';
-          const hrs12 = hours % 12 || 12;
-          const minsStr = minutes < 10 ? '0' + minutes : minutes.toString();
-          const timeStr = `${hrs12.toString().padStart(2, '0')}:${minsStr} ${ampm}`;
+          const matchTime = request.reason?.match(/\[Time:\s*([^\]]+)\]/);
+          let timeStr = matchTime ? matchTime[1].trim() : null;
+
+          if (!timeStr) {
+            const hours = request.adjustedTime.getUTCHours();
+            const minutes = request.adjustedTime.getUTCMinutes();
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            const hrs12 = hours % 12 || 12;
+            const minsStr = minutes < 10 ? '0' + minutes : minutes.toString();
+            timeStr = `${hrs12.toString().padStart(2, '0')}:${minsStr} ${ampm}`;
+          }
+
+          const newStartTime = request.requestType === 'check_in' ? timeStr : assignment.schedule.startTime;
+          const newEndTime = request.requestType === 'check_out' ? timeStr : assignment.schedule.endTime;
 
           const newSchedule = await this.prisma.workSchedule.create({
             data: {
               companyId: assignment.schedule.companyId,
-              name: assignment.schedule.name.replace(/ \(Adjusted\)/g, '') + ' (Adjusted)',
-              startTime: request.requestType === 'check_in' ? timeStr : assignment.schedule.startTime,
-              endTime: request.requestType === 'check_out' ? timeStr : assignment.schedule.endTime,
+              name: `${newStartTime} - ${newEndTime} (Adjusted)`,
+              startTime: newStartTime,
+              endTime: newEndTime,
               days: assignment.schedule.days
             }
           });
