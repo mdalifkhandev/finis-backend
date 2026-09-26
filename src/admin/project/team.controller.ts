@@ -18,7 +18,7 @@ export class TeamController {
     @CurrentUser('id') adminId: string,
     @CurrentUser('role') userRole: string,
     @Query('page') page = '1',
-    @Query('limit') limit = '10',
+    @Query('limit') limit = '50',
     @Query('search') search?: string,
   ) {
     return this.projectService.getAvailableByRole(adminId, 'manager', +page, +limit, search, userRole);
@@ -29,7 +29,7 @@ export class TeamController {
     @CurrentUser('id') adminId: string,
     @CurrentUser('role') userRole: string,
     @Query('page') page = '1',
-    @Query('limit') limit = '10',
+    @Query('limit') limit = '50',
     @Query('search') search?: string,
   ) {
     return this.projectService.getAvailableByRole(adminId, 'worker', +page, +limit, search, userRole);

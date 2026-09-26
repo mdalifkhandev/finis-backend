@@ -1709,20 +1709,76 @@ export class ProjectService {
     return workers.map((w) => ({ memberId: w.id, managerId: w.managerId, ...w.user }));
   }
 
-  async getAvailableByRole(adminId: string, role: 'manager' | 'worker', page = 1, limit = 10, search?: string, userRole?: string) {
-    const whereInvitation: any = { receiverId: { not: null } };
-    if (userRole !== UserRole.admin && userRole !== UserRole.super_admin) {
-      whereInvitation.senderId = adminId;
+  async getAvailableByRole(adminId: string, role: 'manager' | 'worker', page = 1, limit = 50, search?: string, userRole?: string) {
+    const isSuperAdmin = userRole === UserRole.super_admin;
+
+    // Resolve the effective admin ID if caller is a manager
+    let effectiveAdminId = adminId;
+    if (userRole === UserRole.manager) {
+      const managerProject = await this.prisma.projectMember.findFirst({
+        where: {
+          userId: adminId,
+          role: 'manager',
+          project: { status: { notIn: [ProjectStatus.completed, ProjectStatus.cancelled] } },
+        },
+        include: {
+          project: {
+            include: { company: { select: { ownerId: true } } },
+          },
+        },
+      });
+      if (managerProject?.project?.company?.ownerId) {
+        effectiveAdminId = managerProject.project.company.ownerId;
+      }
     }
-    const invitations = await this.prisma.invitation.findMany({ where: whereInvitation, select: { receiverId: true } });
-    const invitedUserIds = invitations.map((i) => i.receiverId).filter(Boolean) as string[];
-    if (invitedUserIds.length === 0) return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
+
+    const finishedStatuses = [ProjectStatus.completed, ProjectStatus.cancelled];
+    const excludedUserIds = new Set<string>();
+
+    if (!isSuperAdmin) {
+      // Find all managers/workers who are currently assigned to a running project of a DIFFERENT admin
+      const busyMembers = await this.prisma.projectMember.findMany({
+        where: {
+          role: role === 'manager' ? 'manager' : 'worker',
+          project: {
+            status: { notIn: finishedStatuses },
+            company: {
+              ownerId: { not: effectiveAdminId },
+            },
+          },
+        },
+        select: { userId: true },
+      });
+
+      for (const m of busyMembers) {
+        excludedUserIds.add(m.userId);
+      }
+
+      if (role === 'manager') {
+        const busyDirectManagers = await this.prisma.project.findMany({
+          where: {
+            managerId: { not: null },
+            status: { notIn: finishedStatuses },
+            company: {
+              ownerId: { not: effectiveAdminId },
+            },
+          },
+          select: { managerId: true },
+        });
+
+        for (const p of busyDirectManagers) {
+          if (p.managerId && p.managerId !== effectiveAdminId) {
+            excludedUserIds.add(p.managerId);
+          }
+        }
+      }
+    }
 
     const skip = (page - 1) * limit;
-    const where = {
-      id: { in: invitedUserIds },
+    const where: any = {
       role: role === 'manager' ? UserRole.manager : UserRole.worker,
       status: UserStatus.active,
+      ...(excludedUserIds.size > 0 ? { id: { notIn: Array.from(excludedUserIds) } } : {}),
       ...(search && {
         OR: [
           { fullName: { contains: search, mode: 'insensitive' as const } },
@@ -1731,10 +1787,27 @@ export class ProjectService {
         ],
       }),
     };
+
     const [data, total] = await Promise.all([
-      this.prisma.user.findMany({ where, select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true, department: true }, orderBy: { fullName: 'asc' }, skip, take: limit }),
+      this.prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          phone: true,
+          avatarUrl: true,
+          role: true,
+          department: true,
+          status: true,
+        },
+        orderBy: { fullName: 'asc' },
+        skip,
+        take: limit,
+      }),
       this.prisma.user.count({ where }),
     ]);
+
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
 
@@ -1745,19 +1818,71 @@ export class ProjectService {
     }
     const project = await this.prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true, name: true, managerId: true },
+      select: {
+        id: true,
+        name: true,
+        managerId: true,
+        company: { select: { ownerId: true } },
+      },
     });
     if (!project) throw new NotFoundException('Project not found');
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, role: true },
+      select: { id: true, role: true, status: true },
     });
     if (!user) throw new NotFoundException('User not found');
     if (user.role !== role) throw new BadRequestException(`Only users with role '${role}' can be added as ${role}`);
     const existing = await this.prisma.projectMember.findFirst({ where: { projectId, userId } });
     if (existing) throw new BadRequestException('User is already a team member');
     if (userRole === UserRole.manager && role === 'manager') throw new ForbiddenException('Managers cannot add other managers');
+
+    const effectiveAdminId = project.company?.ownerId || adminId;
+
+    if (!this.isSuperAdmin(userRole)) {
+      // Check if user is currently assigned to a running project of another admin
+      const busyProject = await this.prisma.projectMember.findFirst({
+        where: {
+          userId,
+          project: {
+            status: { notIn: [ProjectStatus.completed, ProjectStatus.cancelled] },
+            company: {
+              ownerId: { not: effectiveAdminId },
+            },
+          },
+        },
+        include: {
+          project: {
+            select: { name: true },
+          },
+        },
+      });
+
+      if (busyProject) {
+        throw new BadRequestException(
+          `This ${role} is currently assigned to a running project (${busyProject.project.name}) under another admin and cannot be added until that project is completed.`,
+        );
+      }
+
+      if (role === 'manager') {
+        const busyDirectProject = await this.prisma.project.findFirst({
+          where: {
+            managerId: userId,
+            status: { notIn: [ProjectStatus.completed, ProjectStatus.cancelled] },
+            company: {
+              ownerId: { not: effectiveAdminId },
+            },
+          },
+          select: { name: true },
+        });
+
+        if (busyDirectProject) {
+          throw new BadRequestException(
+            `This manager is currently managing a running project (${busyDirectProject.name}) under another admin and cannot be added until that project is completed.`,
+          );
+        }
+      }
+    }
 
     if (role === 'worker') {
       const fallbackManagerId = managerId || project.managerId || (await this.prisma.projectMember.findFirst({
@@ -1781,6 +1906,13 @@ export class ProjectService {
         data: { projectId, userId, role, ...(managerId && { managerId }) },
         include: { user: { select: { id: true, fullName: true, email: true, phone: true, avatarUrl: true, role: true } } },
       });
+
+      if (role === 'manager' && (!project.managerId || project.managerId === effectiveAdminId)) {
+        await this.prisma.project.update({
+          where: { id: projectId },
+          data: { managerId: userId },
+        });
+      }
       if (role === 'worker' && managerId) {
         const existingMap = await this.prisma.workerManagerMap.findFirst({ where: { workerId: userId, managerId } });
         if (!existingMap) {
@@ -1857,15 +1989,32 @@ export class ProjectService {
 
   async removeTeamMember(projectId: string, userId: string, adminId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, adminId, userRole);
-    const member = await this.prisma.projectMember.findFirst({ where: { projectId, userId } });
+    const member = await this.prisma.projectMember.findFirst({
+      where: {
+        projectId,
+        OR: [
+          { userId },
+          { id: userId },
+        ],
+      },
+    });
     if (!member) throw new NotFoundException('Member not found');
+
+    const targetUserId = member.userId;
 
     // Clean up any worker-manager mappings related to this member
     if (member.role === 'manager') {
-      await this.prisma.workerManagerMap.deleteMany({ where: { managerId: userId } });
+      await this.prisma.workerManagerMap.deleteMany({ where: { managerId: targetUserId } });
+      const proj = await this.prisma.project.findUnique({ where: { id: projectId }, select: { managerId: true } });
+      if (proj?.managerId === targetUserId) {
+        await this.prisma.project.update({
+          where: { id: projectId },
+          data: { managerId: null },
+        });
+      }
     }
     if (member.role === 'worker') {
-      await this.prisma.workerManagerMap.deleteMany({ where: { workerId: userId } });
+      await this.prisma.workerManagerMap.deleteMany({ where: { workerId: targetUserId } });
     }
 
     // Remove from project chat group
@@ -1874,7 +2023,7 @@ export class ProjectService {
     });
     if (projectThread) {
       await this.prisma.threadParticipant.deleteMany({
-        where: { threadId: projectThread.id, userId }
+        where: { threadId: projectThread.id, userId: targetUserId }
       });
     }
 

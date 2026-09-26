@@ -30,6 +30,16 @@ export class SubscriptionController {
     return this.subscriptionService.verifyAndCheckout(dto);
   }
 
+  @Post('create-in-app')
+  createInApp(@Body() dto: VerifyCheckoutDto) {
+    return this.subscriptionService.createInAppSubscription(dto);
+  }
+
+  @Post('confirm-in-app')
+  confirmInApp(@Body('subscriptionId') subscriptionId: string) {
+    return this.subscriptionService.confirmInAppSubscription(subscriptionId);
+  }
+
   @Post('webhook')
   async webhook(
     @Req() req: RawBodyRequest<Request>,

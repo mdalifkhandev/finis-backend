@@ -564,6 +564,185 @@ export class SubscriptionService {
     return { checkoutUrl: session.url };
   }
 
+  async createInAppSubscription(dto: VerifyCheckoutDto) {
+    // 1. Admin verify
+    const user = await this.prisma.user.findFirst({
+      where: { email: dto.email, role: 'admin', status: 'active' },
+    });
+    if (!user) throw new NotFoundException('Admin user not found');
+
+    const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!isPasswordValid) throw new ForbiddenException('Invalid credentials');
+
+    // 2. Plan verify
+    const plan = await this.prisma.subscriptionPlan.findUnique({
+      where: { id: dto.planId },
+    });
+    if (!plan) throw new NotFoundException('Subscription plan not found');
+    if (!plan.isActive) throw new BadRequestException('This plan is not currently available');
+
+    // 3. Tenant check
+    const tenant = user.tenantId
+      ? await this.prisma.tenant.findUnique({
+          where: { id: user.tenantId },
+          include: { plan: true },
+        })
+      : null;
+
+    if (tenant) {
+      const isSamePlanActive =
+        tenant.subscriptionStatus === 'active' &&
+        tenant.planId === plan.id &&
+        tenant.planInterval === dto.interval &&
+        tenant.currentPeriodEnd != null &&
+        new Date(tenant.currentPeriodEnd).getTime() > Date.now();
+
+      if (isSamePlanActive) {
+        throw new BadRequestException(
+          'You already have an active subscription for this plan and billing cycle.',
+        );
+      }
+    }
+
+    // 4. Create tenant if not exists
+    const activeTenant =
+      tenant ??
+      (await this.prisma.tenant.create({
+        data: {
+          name: user.fullName || user.email.split('@')[0] || 'New Tenant',
+          billingEmail: user.email,
+          planId: plan.id,
+          status: 'trial',
+          subscriptionStatus: 'pending',
+          planInterval: dto.interval,
+        },
+      }));
+
+    // 5. Stripe customer
+    const customer = activeTenant.stripeCustomerId
+      ? await this.stripe.customers.retrieve(activeTenant.stripeCustomerId)
+      : await this.stripe.customers.create({
+          email: activeTenant.billingEmail || user.email,
+          name: activeTenant.name,
+          metadata: { tenantId: activeTenant.id },
+        });
+
+    // 6. Ensure Stripe prices exist
+    const syncedPlan = await this.ensurePlanStripePrices(plan);
+    const priceId =
+      dto.interval === 'yearly'
+        ? (syncedPlan.stripePriceYearlyId ?? syncedPlan.stripePriceMonthlyId)
+        : syncedPlan.stripePriceMonthlyId;
+
+    if (!priceId) {
+      throw new BadRequestException('Stripe price not configured for this plan');
+    }
+
+    // 7. Create Stripe subscription with default_incomplete
+    const subscription = await this.stripe.subscriptions.create({
+      customer: customer.id,
+      items: [{ price: priceId }],
+      payment_behavior: 'default_incomplete',
+      payment_settings: { save_default_payment_method: 'on_subscription' },
+      expand: ['latest_invoice.payment_intent'],
+      metadata: {
+        tenantId: activeTenant.id,
+        planId: plan.id,
+        adminUserId: user.id,
+        interval: dto.interval,
+        priceId,
+      },
+    });
+
+    let clientSecret: string | undefined;
+
+    // 1. Try from expanded invoice
+    const invoice = subscription.latest_invoice as any;
+    if (invoice && typeof invoice === 'object') {
+      if (typeof invoice.payment_intent === 'string') {
+        try {
+          const pi = await this.stripe.paymentIntents.retrieve(invoice.payment_intent);
+          clientSecret = pi.client_secret ?? undefined;
+        } catch {
+          // ignore
+        }
+      } else if (invoice.payment_intent?.client_secret) {
+        clientSecret = invoice.payment_intent.client_secret;
+      }
+    }
+
+    // 2. Try looking up the customer's recent PaymentIntents
+    if (!clientSecret && customer.id) {
+      try {
+        const paymentIntents = await this.stripe.paymentIntents.list({
+          customer: customer.id,
+          limit: 5,
+        });
+        const matchedPi = paymentIntents.data.find(
+          (pi: any) =>
+            pi.status === 'requires_payment_method' ||
+            pi.status === 'requires_action' ||
+            pi.status === 'requires_confirmation'
+        );
+        if (matchedPi?.client_secret) {
+          clientSecret = matchedPi.client_secret;
+        }
+      } catch (err) {
+        console.warn('Failed to list payment intents for customer:', err);
+      }
+    }
+
+    // 3. Try setup intent if applicable
+    if (!clientSecret && subscription.pending_setup_intent) {
+      try {
+        const setupIntent =
+          typeof subscription.pending_setup_intent === 'string'
+            ? await this.stripe.setupIntents.retrieve(subscription.pending_setup_intent)
+            : subscription.pending_setup_intent;
+        clientSecret = setupIntent?.client_secret ?? undefined;
+      } catch (err) {
+        console.warn('Failed to retrieve setup intent for customer:', err);
+      }
+    }
+
+    if (!clientSecret) {
+      throw new BadRequestException('Could not create payment intent for subscription');
+    }
+
+    // Save customer + subscription reference on tenant
+    await this.prisma.tenant.update({
+      where: { id: activeTenant.id },
+      data: {
+        stripeCustomerId: customer.id,
+        stripePriceId: priceId,
+        planInterval: dto.interval,
+        stripeSubscriptionId: subscription.id,
+        ...(user.tenantId == null ? { users: { connect: { id: user.id } } } : {}),
+      },
+    });
+
+    if (user.tenantId == null) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { tenantId: activeTenant.id },
+      });
+    }
+
+    return {
+      clientSecret,
+      subscriptionId: subscription.id,
+      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+    };
+  }
+
+  async confirmInAppSubscription(subscriptionId: string) {
+    const updatedTenant = await this.syncTenantFromStripeSubscription(subscriptionId);
+    return {
+      success: true,
+      tenant: updatedTenant,
+    };
+  }
+
   async handleWebhook(rawBody: Buffer | undefined, signature?: string) {
     const secret = process.env.STRIPE_WEBHOOK_SECRET;
     if (!secret) throw new BadRequestException('Stripe webhook secret is missing');

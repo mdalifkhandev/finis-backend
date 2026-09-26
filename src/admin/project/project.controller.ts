@@ -403,7 +403,7 @@ export class ProjectController {
 
   /** DELETE /admin/projects/:id/team/:userId */
   @Delete(':id/team/:userId')
-  @Roles(UserRole.admin, UserRole.manager)
+  @Roles(UserRole.admin, UserRole.manager, UserRole.super_admin)
   removeTeamMember(
     @Param('id') id: string,
     @Param('userId') userId: string,
