@@ -75,3 +75,46 @@ export class PayrollManagementQueryDto {
   @IsString()
   year?: string;
 }
+
+export class PayWorkerPayrollDto {
+  @IsString()
+  workerId: string;
+
+  @IsString()
+  payPeriodStart: string;
+
+  @IsString()
+  payPeriodEnd: string;
+
+  @IsOptional()
+  @IsNumber()
+  hours?: number;
+
+  @IsOptional()
+  @IsNumber()
+  ratePerHour?: number;
+
+  @IsOptional()
+  @IsNumber()
+  grossPay?: number;
+
+  @IsOptional()
+  @IsNumber()
+  deductions?: number;
+
+  @IsOptional()
+  @IsNumber()
+  netPay?: number;
+
+  @IsOptional()
+  @IsString()
+  paymentMethod?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
+  payrollId?: string;
+}

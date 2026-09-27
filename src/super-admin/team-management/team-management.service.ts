@@ -5,10 +5,14 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole, UserStatus } from '../../generated/prisma/client';
+import { StorageService } from '../../storage/storage.service';
 
 @Injectable()
 export class TeamManagementService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    private storageService: StorageService,
+  ) { }
 
   // ── Admin Stats ──────────────────────────────────────────────────────
   async getAdminStats(userId: string, userRole: string) {
@@ -85,6 +89,9 @@ export class TeamManagementService {
         updatedAt: true,
         emergencyContacts: true,
         certifications: true,
+        uploadedDocuments: {
+          orderBy: { uploadedAt: 'desc' },
+        },
         workScheduleAssignments: {
           include: { schedule: true },
         },
@@ -403,4 +410,160 @@ export class TeamManagementService {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  // ── Worker Documents CRUD ──────────────────────────────────────────
+  async getWorkerDocuments(workerId: string, search?: string, category?: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: workerId },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        uploadedDocuments: {
+          orderBy: { uploadedAt: 'desc' },
+        },
+        certifications: {
+          orderBy: { issuedAt: 'desc' },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Worker not found');
+    }
+
+    const docs = user.uploadedDocuments.map((d) => ({
+      id: d.id,
+      name: d.fileName,
+      category: d.fileType || 'Employment Document',
+      date: d.uploadedAt ? d.uploadedAt.toISOString().split('T')[0] : 'Current',
+      size: d.fileSizeMb ? `${d.fileSizeMb} MB` : '1.2 MB',
+      status: 'verified',
+      url: d.fileUrl,
+      source: 'document',
+      uploadedAt: d.uploadedAt,
+    }));
+
+    const certs = user.certifications.map((c) => ({
+      id: c.id,
+      name: `${c.name}.pdf`,
+      category: 'Certification',
+      date: c.issuedAt ? c.issuedAt.toISOString().split('T')[0] : 'Current',
+      size: 'Verified',
+      status: c.status || 'verified',
+      url: c.documentUrl,
+      source: 'certification',
+      uploadedAt: c.issuedAt,
+    }));
+
+    let allDocs = [...docs, ...certs];
+
+    if (search) {
+      const q = search.toLowerCase();
+      allDocs = allDocs.filter(d => 
+        d.name.toLowerCase().includes(q) || d.category.toLowerCase().includes(q)
+      );
+    }
+
+    if (category && category !== 'all') {
+      allDocs = allDocs.filter(d => d.category.toLowerCase() === category.toLowerCase());
+    }
+
+    return allDocs;
+  }
+
+  async uploadWorkerDocument(
+    workerId: string,
+    file?: Express.Multer.File,
+    category?: string,
+    customName?: string,
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: workerId },
+      include: {
+        companyMembers: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Worker not found');
+    }
+
+    if (!file) {
+      throw new BadRequestException('File is required');
+    }
+
+    const fileUrl = await this.storageService.uploadFile(file, 'worker-documents');
+    const fileSizeMb = Math.round((file.size / (1024 * 1024)) * 100) / 100;
+    const documentName = customName?.trim() || file.originalname;
+    const documentCategory = category?.trim() || 'General Document';
+
+    // Store in Prisma Document table
+    const doc = await this.prisma.document.create({
+      data: {
+        uploadedBy: workerId,
+        companyId: user.companyMembers?.[0]?.companyId || undefined,
+        fileName: documentName,
+        fileUrl,
+        fileType: documentCategory,
+        fileSizeMb,
+      },
+    });
+
+    // If category is Certification, also create/sync a UserCertification record
+    if (documentCategory.toLowerCase().includes('cert')) {
+      await this.prisma.userCertification.create({
+        data: {
+          userId: workerId,
+          name: documentName.replace(/\.[^/.]+$/, ''),
+          documentUrl: fileUrl,
+          issuedAt: new Date(),
+          status: 'active',
+        },
+      }).catch(() => {});
+    }
+
+    return {
+      id: doc.id,
+      name: doc.fileName,
+      category: doc.fileType,
+      date: doc.uploadedAt.toISOString().split('T')[0],
+      size: `${doc.fileSizeMb} MB`,
+      status: 'verified',
+      url: doc.fileUrl,
+      source: 'document',
+      uploadedAt: doc.uploadedAt,
+    };
+  }
+
+  async deleteWorkerDocument(workerId: string, documentId: string) {
+    // Check if in Document table
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, uploadedBy: workerId },
+    });
+
+    if (doc) {
+      if (doc.fileUrl) {
+        await this.storageService.deleteFile(doc.fileUrl).catch(() => {});
+      }
+      await this.prisma.document.delete({ where: { id: documentId } });
+      return { message: 'Document deleted successfully' };
+    }
+
+    // Check if in UserCertification table
+    const cert = await this.prisma.userCertification.findFirst({
+      where: { id: documentId, userId: workerId },
+    });
+
+    if (cert) {
+      if (cert.documentUrl) {
+        await this.storageService.deleteFile(cert.documentUrl).catch(() => {});
+      }
+      await this.prisma.userCertification.delete({ where: { id: documentId } });
+      return { message: 'Certification document deleted successfully' };
+    }
+
+    throw new NotFoundException('Document not found');
+  }
 }
+

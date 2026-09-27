@@ -643,65 +643,68 @@ export class SuperAdminDashboardService {
   // ─── ATTENDANCE SUMMARY (Super Admin) ─────────────────────────────────────
   async getAttendanceSummary(query: AttendanceQueryDto) {
     const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
-    const date = query.date ? new Date(query.date) : new Date();
+    const limit = query.limit ?? 50;
+    const isAll = query.date === 'all';
 
-    const start = new Date(date);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(date);
-    end.setHours(23, 59, 59, 999);
+    let dateWhere: any = {};
 
-    const sessionDateWhere = {
-      checkInTime: { gte: start, lte: end },
-    };
+    if (!isAll) {
+      const dateStr = query.date || new Date().toISOString().split('T')[0];
+      const parts = dateStr.split('-');
+      let start: Date;
+      let end: Date;
+
+      if (parts.length === 3) {
+        // Base UTC day
+        const baseUtc = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 0, 0, 0));
+        // Covers client day (UTC+6 / BST) with cushion (covers UTC to UTC+8):
+        // start: 16:00 UTC previous day, end: 20:00 UTC current day
+        start = new Date(baseUtc.getTime() - 8 * 60 * 60 * 1000);
+        end = new Date(baseUtc.getTime() + 20 * 60 * 60 * 1000);
+      } else {
+        const d = new Date(dateStr);
+        start = new Date(d.getTime() - 8 * 60 * 60 * 1000);
+        end = new Date(d.getTime() + 20 * 60 * 60 * 1000);
+      }
+
+      const sessionDateWhere = {
+        checkInTime: { gte: start, lte: end },
+      };
+
+      dateWhere = {
+        OR: [
+          { date: { gte: start, lte: end } },
+          { sessions: { some: sessionDateWhere } },
+        ],
+      };
+    }
 
     const [total, present, late, absent, activeCheckIns, records] = await Promise.all([
       this.prisma.attendance.count({
-        where: {
-          OR: [
-            { date: { gte: start, lte: end } },
-            { sessions: { some: sessionDateWhere } },
-          ],
-        },
+        where: isAll ? undefined : dateWhere,
       }),
       this.prisma.attendance.count({
-        where: {
-          OR: [
-            { date: { gte: start, lte: end }, status: { in: ['present', 'late'] } },
-            { sessions: { some: sessionDateWhere } },
-          ],
-        },
+        where: isAll
+          ? { OR: [{ status: { in: ['present', 'late'] } }, { sessions: { some: { checkOutTime: null } } }] }
+          : { AND: [dateWhere, { OR: [{ status: { in: ['present', 'late'] } }, { sessions: { some: { checkOutTime: null } } }] }] },
       }),
       this.prisma.attendance.count({
-        where: {
-          OR: [
-            { date: { gte: start, lte: end }, status: 'late' },
-            { sessions: { some: sessionDateWhere } },
-          ],
-        },
+        where: isAll
+          ? { status: 'late' }
+          : { AND: [dateWhere, { status: 'late' }] },
       }),
       this.prisma.attendance.count({
-        where: {
-          OR: [
-            { date: { gte: start, lte: end }, status: 'absent' },
-          ],
-        },
+        where: isAll
+          ? { status: 'absent' }
+          : { AND: [dateWhere, { status: 'absent' }] },
       }),
       this.prisma.attendance.count({
-        where: {
-          OR: [
-            { date: { gte: start, lte: end }, sessions: { some: sessionDateWhere } },
-            { sessions: { some: sessionDateWhere } },
-          ],
-        },
+        where: isAll
+          ? { sessions: { some: { checkOutTime: null } } }
+          : { AND: [dateWhere, { sessions: { some: { checkOutTime: null } } }] },
       }),
       this.prisma.attendance.findMany({
-        where: {
-          OR: [
-            { date: { gte: start, lte: end } },
-            { sessions: { some: sessionDateWhere } },
-          ],
-        },
+        where: isAll ? undefined : dateWhere,
         skip: (page - 1) * limit,
         take: limit,
         orderBy: { updatedAt: 'desc' },
@@ -745,30 +748,37 @@ export class SuperAdminDashboardService {
         activeCheckIns,
         attendanceRate: total > 0 ? Math.round((present / total) * 1000) / 10 : 0,
       },
-      data: records.map((attendance) => ({
-        id: attendance.id,
-        date: attendance.date,
-        status: attendance.status,
-        totalHours: attendance.totalHours ?? 0,
-        worker: {
-          id: attendance.user.id,
-          fullName: attendance.user.fullName,
-          avatarUrl: attendance.user.avatarUrl,
-          role: attendance.user.projectMemberships?.[0]?.role ?? attendance.user.role,
-          projectName: attendance.user.projectMemberships?.[0]?.project?.name ?? null,
-        },
-        session: attendance.sessions[0]
-          ? {
-              checkInTime: attendance.sessions[0].checkInTime,
-              checkOutTime: attendance.sessions[0].checkOutTime,
-              inLat: attendance.sessions[0].inLat,
-              inLng: attendance.sessions[0].inLng,
-              outLat: attendance.sessions[0].outLat,
-              outLng: attendance.sessions[0].outLng,
-              zoneSeconds: attendance.sessions[0].zoneSeconds ?? 0,
-            }
-          : null,
-      })),
+      data: records.map((attendance) => {
+        const latestSession = attendance.sessions[0];
+        const isActiveCheckIn = Boolean(latestSession && !latestSession.checkOutTime);
+        const displayDate = attendance.date;
+        const displayStatus = isActiveCheckIn ? 'present' : attendance.status;
+
+        return {
+          id: attendance.id,
+          date: displayDate,
+          status: displayStatus,
+          totalHours: attendance.totalHours ?? 0,
+          worker: {
+            id: attendance.user.id,
+            fullName: attendance.user.fullName,
+            avatarUrl: attendance.user.avatarUrl,
+            role: attendance.user.projectMemberships?.[0]?.role ?? attendance.user.role,
+            projectName: attendance.user.projectMemberships?.[0]?.project?.name ?? null,
+          },
+          session: latestSession
+            ? {
+                checkInTime: latestSession.checkInTime,
+                checkOutTime: latestSession.checkOutTime,
+                inLat: latestSession.inLat,
+                inLng: latestSession.inLng,
+                outLat: latestSession.outLat,
+                outLng: latestSession.outLng,
+                zoneSeconds: latestSession.zoneSeconds ?? 0,
+              }
+            : null,
+        };
+      }),
       meta: {
         total,
         page,

@@ -8,7 +8,7 @@ import { SuperAdminDashboardQueryDto, PaginationQueryDto, AttendanceQueryDto } f
 
 @Controller('super-admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.super_admin)
+@Roles(UserRole.super_admin, UserRole.admin)
 export class SuperAdminDashboardController {
   constructor(private superAdminDashboardService: SuperAdminDashboardService) {}
 

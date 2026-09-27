@@ -1,4 +1,4 @@
-import { IsOptional, IsInt, Min, IsEnum, IsDateString, Max } from 'class-validator';
+import { IsOptional, IsInt, Min, IsEnum, IsDateString, IsString, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class DashboardQueryDto {
@@ -73,7 +73,7 @@ export class PaginationQueryDto {
 
 export class AttendanceQueryDto {
   @IsOptional()
-  @IsDateString()
+  @IsString()
   date?: string;
 
   @IsOptional()

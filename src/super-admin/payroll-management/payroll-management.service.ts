@@ -7,6 +7,7 @@ import { UserRole } from '../../generated/prisma/client';
 import {
     UpdatePayrollConfigDto,
     PayrollManagementQueryDto,
+    PayWorkerPayrollDto,
 } from './dto/payroll-management.dto';
 
 // ─── Default config values ────────────────────────────────────────────────────
@@ -543,5 +544,141 @@ export class PayrollManagementService {
                 totalEmployerCost: employerCosts.totalEmployerCost,
             },
         };
+    }
+
+    // ─── Pay Worker Payroll ───────────────────────────────────────────────────
+    async payWorkerPayroll(userId: string, userRole: string, dto: PayWorkerPayrollDto) {
+        const worker = await this.prisma.user.findUnique({
+            where: { id: dto.workerId },
+            include: {
+                companyMembers: { take: 1 },
+            },
+        });
+
+        if (!worker) {
+            throw new NotFoundException('Worker not found');
+        }
+
+        let companyId = worker.companyMembers?.[0]?.companyId;
+        if (!companyId) {
+            const anyCompany = await this.prisma.company.findFirst();
+            companyId = anyCompany?.id;
+        }
+
+        if (!companyId) {
+            throw new NotFoundException('No company found to assign payroll');
+        }
+
+        const payPeriodStart = new Date(dto.payPeriodStart);
+        const payPeriodEnd = new Date(dto.payPeriodEnd);
+        const rate = dto.ratePerHour ?? worker.hourlyRate ?? 35;
+        const hours = dto.hours ?? 0;
+        const grossPay = dto.grossPay ?? Math.round(hours * rate * 100) / 100;
+        const deductions = dto.deductions ?? Math.round(grossPay * 0.18 * 100) / 100;
+        const netPay = dto.netPay ?? Math.round((grossPay - deductions) * 100) / 100;
+
+        let payrollRecord;
+
+        if (dto.payrollId) {
+            payrollRecord = await this.prisma.payroll.update({
+                where: { id: dto.payrollId },
+                data: {
+                    status: 'paid',
+                    processedAt: new Date(),
+                    processedBy: userId,
+                    regularHours: hours,
+                    ratePerHour: rate,
+                    grossPay,
+                    deductions,
+                    netPay,
+                },
+            });
+        } else {
+            // Find existing for this period or create
+            const existing = await this.prisma.payroll.findFirst({
+                where: {
+                    workerId: dto.workerId,
+                    payPeriodStart: { gte: new Date(payPeriodStart.getTime() - 24 * 3600 * 1000) },
+                    payPeriodEnd: { lte: new Date(payPeriodEnd.getTime() + 24 * 3600 * 1000) },
+                },
+            });
+
+            if (existing) {
+                payrollRecord = await this.prisma.payroll.update({
+                    where: { id: existing.id },
+                    data: {
+                        status: 'paid',
+                        processedAt: new Date(),
+                        processedBy: userId,
+                        regularHours: hours,
+                        ratePerHour: rate,
+                        grossPay,
+                        deductions,
+                        netPay,
+                    },
+                });
+            } else {
+                payrollRecord = await this.prisma.payroll.create({
+                    data: {
+                        companyId,
+                        workerId: dto.workerId,
+                        payPeriodStart,
+                        payPeriodEnd,
+                        regularHours: hours,
+                        ratePerHour: rate,
+                        grossPay,
+                        deductions,
+                        netPay,
+                        status: 'paid',
+                        processedAt: new Date(),
+                        processedBy: userId,
+                    },
+                });
+            }
+        }
+
+        return {
+            success: true,
+            message: 'Payroll successfully processed and marked as paid',
+            payroll: payrollRecord,
+        };
+    }
+
+    // ─── Mark Payroll as Paid ─────────────────────────────────────────────────
+    async markPayrollPaid(userId: string, userRole: string, payrollId: string) {
+        const existing = await this.prisma.payroll.findUnique({
+            where: { id: payrollId },
+        });
+        if (!existing) {
+            throw new NotFoundException('Payroll record not found');
+        }
+
+        const updated = await this.prisma.payroll.update({
+            where: { id: payrollId },
+            data: {
+                status: 'paid',
+                processedAt: new Date(),
+                processedBy: userId,
+            },
+        });
+
+        return {
+            success: true,
+            message: 'Payroll marked as paid',
+            payroll: updated,
+        };
+    }
+
+    // ─── Get Worker Payrolls ──────────────────────────────────────────────────
+    async getWorkerPayrolls(workerId: string) {
+        const payrolls = await this.prisma.payroll.findMany({
+            where: { workerId },
+            orderBy: { payPeriodEnd: 'desc' },
+            include: {
+                company: { select: { id: true, name: true } },
+            },
+        });
+
+        return payrolls;
     }
 }

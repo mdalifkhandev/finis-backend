@@ -5,6 +5,7 @@ import {
   Put,
   Body,
   Query,
+  Param,
   UseGuards,
 } from '@nestjs/common';
 import { PayrollManagementService } from './payroll-management.service';
@@ -16,6 +17,7 @@ import { UserRole } from '../../generated/prisma/client';
 import {
   UpdatePayrollConfigDto,
   PayrollManagementQueryDto,
+  PayWorkerPayrollDto,
 } from './dto/payroll-management.dto';
 
 @Controller('super_admin/payroll-management')
@@ -112,5 +114,33 @@ export class PayrollManagementController {
       userId,
       userRole,
     );
+  }
+
+  /** POST /super_admin/payroll-management/pay */
+  @Post('pay')
+  payWorkerPayroll(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+    @Body() dto: PayWorkerPayrollDto,
+  ) {
+    return this.payrollManagementService.payWorkerPayroll(userId, userRole, dto);
+  }
+
+  /** POST /super_admin/payroll-management/mark-paid/:payrollId */
+  @Post('mark-paid/:payrollId')
+  markPayrollPaid(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
+    @Param('payrollId') payrollId: string,
+  ) {
+    return this.payrollManagementService.markPayrollPaid(userId, userRole, payrollId);
+  }
+
+  /** GET /super_admin/payroll-management/worker/:workerId */
+  @Get('worker/:workerId')
+  getWorkerPayrolls(
+    @Param('workerId') workerId: string,
+  ) {
+    return this.payrollManagementService.getWorkerPayrolls(workerId);
   }
 }

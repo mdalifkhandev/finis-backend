@@ -1,12 +1,18 @@
 import {
   Controller,
   Get,
+  Post,
+  Delete,
   Patch,
   Body,
   Param,
   Query,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../../auth/guards/jwt.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
@@ -100,5 +106,39 @@ export class TeamManagementController {
     @Query('status') status?: string,
   ) {
     return this.teamService.getManagerList(search, status);
+  }
+
+  /** GET /super_admin/team/users/:id/documents */
+  @Get('users/:id/documents')
+  @Roles(UserRole.super_admin, UserRole.admin, UserRole.manager)
+  getWorkerDocuments(
+    @Param('id') id: string,
+    @Query('search') search?: string,
+    @Query('category') category?: string,
+  ) {
+    return this.teamService.getWorkerDocuments(id, search, category);
+  }
+
+  /** POST /super_admin/team/users/:id/documents */
+  @Post('users/:id/documents')
+  @Roles(UserRole.super_admin, UserRole.admin)
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+  uploadWorkerDocument(
+    @Param('id') id: string,
+    @UploadedFile() file?: Express.Multer.File,
+    @Body('category') category?: string,
+    @Body('name') customName?: string,
+  ) {
+    return this.teamService.uploadWorkerDocument(id, file, category, customName);
+  }
+
+  /** DELETE /super_admin/team/users/:id/documents/:documentId */
+  @Delete('users/:id/documents/:documentId')
+  @Roles(UserRole.super_admin, UserRole.admin)
+  deleteWorkerDocument(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+  ) {
+    return this.teamService.deleteWorkerDocument(id, documentId);
   }
 }
