@@ -66,6 +66,7 @@ export class CompanyController {
 
   /** POST /admin/companies — create company */
   @Post()
+  @Roles(UserRole.admin)
   @UseInterceptors(FileInterceptor('logo', { storage: memoryStorage(), fileFilter: imageLogoFileFilter }))
   async createCompany(
     @Body() dto: CreateCompanyDto,

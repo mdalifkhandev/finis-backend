@@ -850,7 +850,7 @@ export class ProjectService {
   async getFloorPlan(projectId: string, userId: string, userRole: string) {
     await this.verifyProjectAccess(projectId, userId, userRole);
 
-    const [floors, taskLinks] = await Promise.all([
+    const [floors, tasks, subTasks] = await Promise.all([
       this.prisma.floor.findMany({
         where: { projectId },
         orderBy: { floorNumber: 'asc' },
@@ -876,7 +876,36 @@ export class ProjectService {
           },
         },
       }),
+      this.prisma.subTask.findMany({
+        where: { task: { projectId } },
+        select: {
+          id: true,
+          status: true,
+          unitId: true,
+          unit: { select: { id: true, floorId: true } },
+          subTaskUnits: {
+            select: {
+              unit: { select: { id: true, floorId: true } },
+            },
+          },
+        },
+      }),
     ]);
+
+    const taskLinks = [
+      ...tasks,
+      ...subTasks.map(st => ({
+        id: st.id,
+        status: st.status,
+        floorId: null,
+        unitId: st.unitId,
+        taskFloors: [],
+        taskUnits: [
+          ...(st.unit ? [{ unit: st.unit }] : []),
+          ...st.subTaskUnits.map(stu => ({ unit: stu.unit }))
+        ],
+      }))
+    ];
 
     const statusesByFloorId = new Map<string, Map<string, string>>();
     const statusesByUnitId = new Map<string, Map<string, string>>();

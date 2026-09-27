@@ -82,8 +82,7 @@ export class SuperAdminCompaniesController {
     @Body() dto: CreateCompanyDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const logoUrl = file ? await this.storageService.uploadFile(file, 'company-logos') : undefined;
-    return this.companiesService.createCompany(dto, logoUrl);
+    throw new ForbiddenException('Super Admin cannot create companies. Companies are created by their own admins.');
   }
 
 
@@ -146,15 +145,14 @@ export class SuperAdminCompaniesController {
     return this.companiesService.getCompanyDocuments(companyId, query);
   }
 
-    // Upload document
+    // Upload document — blocked for super admin (read-only access)
   @Post(':id/documents')
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
   async uploadCompanyDocument(
     @Param('id', ParseUUIDPipe) companyId: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const fileUrl = file ? await this.storageService.uploadFile(file, 'company-documents') : undefined;
-    return this.companiesService.uploadCompanyDocument(companyId, file, fileUrl);
+    throw new ForbiddenException('Super Admin cannot upload company documents. Only company admins can manage their documents.');
   }
 
   @Delete(':id/documents/:documentId')
@@ -162,6 +160,6 @@ export class SuperAdminCompaniesController {
     @Param('id', ParseUUIDPipe) companyId: string,
     @Param('documentId', ParseUUIDPipe) documentId: string,
   ) {
-    return this.companiesService.deleteCompanyDocument(companyId, documentId);
+    throw new ForbiddenException('Super Admin cannot delete company documents. Only company admins can manage their documents.');
   }
 }
