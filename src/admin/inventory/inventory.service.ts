@@ -49,7 +49,22 @@ export class InventoryService {
     if (user.role === 'super_admin') return {};
 
     if (user.role === 'admin') {
-      return { companyId: user.companyId };
+      let companyId = user.companyId;
+      if (!companyId) {
+        const company = await this.prisma.company.findFirst({
+          where: { ownerId: user.id },
+          select: { id: true },
+        });
+        companyId = company?.id;
+      }
+      if (!companyId) {
+        const member = await this.prisma.companyMember.findFirst({
+          where: { userId: user.id },
+          select: { companyId: true },
+        });
+        companyId = member?.companyId;
+      }
+      return companyId ? { companyId } : {};
     }
 
     const memberships = await this.prisma.projectMember.findMany({

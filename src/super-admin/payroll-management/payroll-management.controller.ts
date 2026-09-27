@@ -17,6 +17,7 @@ import { UserRole } from '../../generated/prisma/client';
 import {
   UpdatePayrollConfigDto,
   PayrollManagementQueryDto,
+  GeneratePayrollReportDto,
   PayWorkerPayrollDto,
 } from './dto/payroll-management.dto';
 
@@ -63,9 +64,10 @@ export class PayrollManagementController {
   generateReport(
     @CurrentUser('id') userId: string,
     @CurrentUser('role') userRole: string,
+    @Body() body: GeneratePayrollReportDto,
     @Query() query: PayrollManagementQueryDto,
   ) {
-    return this.payrollManagementService.generateReport(userId, userRole, query);
+    return this.payrollManagementService.generateReport(userId, userRole, { ...query, ...body });
   }
 
   // ─── IMAGE 2: Configuration ───────────────────────────────────────────────

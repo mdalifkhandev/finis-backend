@@ -555,8 +555,12 @@ export class PayrollService {
     const overtimePay = overtimeHours * ratePerHour * 1.5;
     const grossPay = Math.round((regularPay + overtimePay) * 100) / 100;
 
-    const deductions = 0;
-    const netPay = grossPay;
+    const cppEmployee = Math.round(grossPay * (config.cppEmployeeRate || 0.0595) * 100) / 100;
+    const eiEmployee = Math.round(grossPay * (config.eiEmployeeRate || 0.0166) * 100) / 100;
+    const federalTax = Math.round(grossPay * (config.federalTaxRate || 0.15) * 100) / 100;
+    const provincialTax = Math.round(grossPay * (config.provincialTaxRate || 0.0505) * 100) / 100;
+    const deductions = Math.round((cppEmployee + eiEmployee + federalTax + provincialTax) * 100) / 100;
+    const netPay = Math.round((grossPay - deductions) * 100) / 100;
 
     const cppEmployer = Math.round(grossPay * config.cppEmployerRate * 100) / 100;
     const eiEmployer = Math.round(grossPay * config.eiEmployerRate * 100) / 100;
@@ -571,10 +575,10 @@ export class PayrollService {
       netPay,
       employerCost,
       breakdown: {
-        cppEmployee: 0,
-        eiEmployee: 0,
-        federalTax: 0,
-        provincialTax: 0,
+        cppEmployee,
+        eiEmployee,
+        federalTax,
+        provincialTax,
       },
     };
   }

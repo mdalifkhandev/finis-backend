@@ -69,11 +69,28 @@ export class PayrollManagementQueryDto {
 
   @IsOptional()
   @IsString()
+  startDate?: string;
+
+  @IsOptional()
+  @IsString()
+  endDate?: string;
+
+  @IsOptional()
+  @IsString()
   month?: string;
 
   @IsOptional()
   @IsString()
   year?: string;
+}
+
+export class GeneratePayrollReportDto extends PayrollManagementQueryDto {
+  @IsOptional()
+  companyIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  type?: string;
 }
 
 export class PayWorkerPayrollDto {

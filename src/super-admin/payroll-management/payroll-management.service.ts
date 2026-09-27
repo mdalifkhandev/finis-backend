@@ -46,13 +46,20 @@ export class PayrollManagementService {
 
     // ─── Calculate deductions ─────────────────────────────────────────────────
     private calculateDeductions(grossPay: number, config: any) {
+        const cppEmployee = Math.round(grossPay * (config.cppEmployeeRate ?? 0.0595) * 100) / 100;
+        const eiEmployee = Math.round(grossPay * (config.eiEmployeeRate ?? 0.0163) * 100) / 100;
+        const federalTax = Math.round(grossPay * (config.federalTaxRate ?? 0.15) * 100) / 100;
+        const provincialTax = Math.round(grossPay * (config.provincialTaxRate ?? 0.0505) * 100) / 100;
+        const totalDeductions = Math.round((cppEmployee + eiEmployee + federalTax + provincialTax) * 100) / 100;
+        const netPay = Math.round((grossPay - totalDeductions) * 100) / 100;
+
         return {
-            cppEmployee: 0,
-            eiEmployee: 0,
-            federalTax: 0,
-            provincialTax: 0,
-            totalDeductions: 0,
-            netPay: Math.round(grossPay * 100) / 100,
+            cppEmployee,
+            eiEmployee,
+            federalTax,
+            provincialTax,
+            totalDeductions,
+            netPay,
         };
     }
 
@@ -133,13 +140,15 @@ export class PayrollManagementService {
             };
         }
 
-        // সব company র payroll আনো
+        // Fetch payrolls
+        const whereClause: any = { companyId: { in: companyIds } };
+        if (query.month || query.year) {
+            whereClause.payPeriodStart = { gte: startDate };
+            whereClause.payPeriodEnd = { lte: endDate };
+        }
+
         const payrolls = await this.prisma.payroll.findMany({
-            where: {
-                companyId: { in: companyIds },
-                payPeriodStart: { gte: startDate },
-                payPeriodEnd: { lte: endDate },
-            },
+            where: whereClause,
             include: {
                 worker: {
                     select: {
@@ -163,18 +172,56 @@ export class PayrollManagementService {
         const config = await this.getOrCreateConfig(companyIds[0]);
 
         const totalGrossPay = payrolls.reduce((s, p) => s + p.grossPay, 0);
+        const totalDeductions = payrolls.reduce((s, p) => s + p.deductions, 0);
         const totalNetPay = payrolls.reduce((s, p) => s + p.netPay, 0);
-        const totalEmployerCost = payrolls.reduce((s, p) => s + (p.employerCost ?? 0), 0);
+        const totalEmployerCost = payrolls.reduce((s, p) => s + (p.employerCost ?? (p.grossPay * 0.13)), 0);
         const pendingCount = payrolls.filter((p) => p.status === 'draft').length;
         const workersCount = new Set(payrolls.map((p) => p.workerId)).size;
+
+        // Compute 6-month monthly trends
+        const sixMonthsAgo = new Date(y, m - 5, 1);
+        const trendsPayrolls = await this.prisma.payroll.findMany({
+            where: {
+                companyId: { in: companyIds },
+                payPeriodStart: { gte: sixMonthsAgo },
+            },
+        });
+
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const monthlyTrends: Array<{ month: string; grossPay: number; deductions: number; netPay: number }> = [];
+
+        for (let i = 5; i >= 0; i--) {
+            const targetDate = new Date(y, m - i, 1);
+            const tMonth = targetDate.getMonth();
+            const tYear = targetDate.getFullYear();
+            const label = `${monthNames[tMonth]} '${tYear.toString().slice(-2)}`;
+
+            const mPayrolls = trendsPayrolls.filter(p => {
+                const d = new Date(p.payPeriodStart);
+                return d.getMonth() === tMonth && d.getFullYear() === tYear;
+            });
+
+            const mGross = mPayrolls.reduce((s, p) => s + p.grossPay, 0);
+            const mDeductions = mPayrolls.reduce((s, p) => s + p.deductions, 0);
+            const mNet = mPayrolls.reduce((s, p) => s + p.netPay, 0);
+
+            monthlyTrends.push({
+                month: label,
+                grossPay: Math.round(mGross * 100) / 100,
+                deductions: Math.round(mDeductions * 100) / 100,
+                netPay: Math.round(mNet * 100) / 100,
+            });
+        }
 
         return {
             summary: {
                 totalGrossPay: Math.round(totalGrossPay * 100) / 100,
+                totalDeductions: Math.round(totalDeductions * 100) / 100,
                 totalNetPay: Math.round(totalNetPay * 100) / 100,
                 totalEmployerCost: Math.round(totalEmployerCost * 100) / 100,
                 payrollPeriod: config.period,
             },
+            monthlyTrends,
             currentPeriod: {
                 period: `${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`,
                 workers: workersCount,
@@ -334,21 +381,54 @@ export class PayrollManagementService {
         userRole: string,
         query: PayrollManagementQueryDto,
     ) {
-        const companyId = query.companyId;
-        if (!companyId) throw new NotFoundException('companyId is required');
+        let companyId = query.companyId;
+        let companyName = 'Company';
+        if (!companyId) {
+            const firstCompany = await this.prisma.company.findFirst({
+                where: userRole === UserRole.super_admin ? {} : { ownerId: userId },
+                select: { id: true, name: true },
+            });
+            companyId = firstCompany?.id;
+            if (firstCompany?.name) companyName = firstCompany.name;
+        }
+
+        if (!companyId) throw new NotFoundException('No company found to generate report');
 
         const config = await this.getOrCreateConfig(companyId);
-        const { startDate, endDate } = this.getPeriodDates(
-            config.period,
-            query.month,
-            query.year,
-        );
+
+        let filterStart: Date;
+        let filterEnd: Date;
+
+        if (query.startDate && query.endDate) {
+            filterStart = new Date(query.startDate);
+            filterStart.setHours(0, 0, 0, 0);
+
+            filterEnd = new Date(query.endDate);
+            filterEnd.setHours(23, 59, 59, 999);
+        } else {
+            const periodDates = this.getPeriodDates(
+                config.period,
+                query.month,
+                query.year,
+            );
+            filterStart = periodDates.startDate;
+            filterStart.setHours(0, 0, 0, 0);
+            filterEnd = periodDates.endDate;
+            filterEnd.setHours(23, 59, 59, 999);
+        }
 
         const payrolls = await this.prisma.payroll.findMany({
             where: {
                 companyId,
-                payPeriodStart: { gte: startDate },
-                payPeriodEnd: { lte: endDate },
+                OR: [
+                    {
+                        payPeriodStart: { lte: filterEnd },
+                        payPeriodEnd: { gte: filterStart },
+                    },
+                    {
+                        createdAt: { gte: filterStart, lte: filterEnd },
+                    },
+                ],
             },
             include: {
                 worker: {
@@ -357,9 +437,17 @@ export class PayrollManagementService {
                         fullName: true,
                         department: true,
                         hourlyRate: true,
+                        avatarUrl: true,
+                    },
+                },
+                company: {
+                    select: {
+                        id: true,
+                        name: true,
                     },
                 },
             },
+            orderBy: { createdAt: 'desc' },
         });
 
         const totalGrossPay = payrolls.reduce((s, p) => s + p.grossPay, 0);
@@ -369,13 +457,64 @@ export class PayrollManagementService {
             (s, p) => s + (p.employerCost ?? 0), 0,
         );
 
+        const workersList = payrolls.map((p) => {
+            const cppEmp = p.grossPay * (config.cppEmployeeRate || 0.0595);
+            const eiEmp = p.grossPay * (config.eiEmployeeRate || 0.0163);
+            const fedTax = p.grossPay * (config.federalTaxRate || 0.15);
+            const provTax = p.grossPay * (config.provincialTaxRate || 0.0505);
+            const cppEmployer = p.grossPay * (config.cppEmployerRate || 0.0595);
+            const eiEmployer = p.grossPay * (config.eiEmployerRate || 0.0228);
+            const wsib = p.grossPay * (config.wsibRate || 0.02);
+            const vacationPay = p.grossPay * (config.vacationPayRate || 0.04);
+
+            const totalHours = (p.regularHours || 0) + (p.overtimeHours || 0);
+
+            return {
+                payrollId: p.id,
+                workerId: p.workerId,
+                workerName: p.worker?.fullName || 'Worker',
+                worker: p.worker,
+                role: p.worker?.department || 'Staff',
+                companies: [p.company?.name || companyName],
+                totalHours: Math.round(totalHours * 100) / 100,
+                grossPay: p.grossPay,
+                netPay: p.netPay,
+                status: p.status,
+                deductions: {
+                    cppEmployee: `$${cppEmp.toFixed(2)}`,
+                    eiEmployee: `$${eiEmp.toFixed(2)}`,
+                    federalTax: `$${fedTax.toFixed(2)}`,
+                    provincialTax: `$${provTax.toFixed(2)}`,
+                    total: p.deductions,
+                },
+                employerCosts: {
+                    cppEmployer: `$${cppEmployer.toFixed(2)}`,
+                    eiEmployer: `$${eiEmployer.toFixed(2)}`,
+                    wsib: `$${wsib.toFixed(2)}`,
+                    vacationPay: `$${vacationPay.toFixed(2)}`,
+                    total: p.employerCost ?? 0,
+                },
+                totalEmployerCost: p.employerCost ?? 0,
+                employerCost: p.employerCost ?? 0,
+                payPeriodStart: p.payPeriodStart,
+                payPeriodEnd: p.payPeriodEnd,
+                createdAt: p.createdAt,
+            };
+        });
+
         return {
-            reportGeneratedAt: new Date(),
+            reportGeneratedAt: new Date().toISOString(),
+            startDate: filterStart.toISOString(),
+            endDate: filterEnd.toISOString(),
             period: {
-                start: startDate,
-                end: endDate,
+                start: filterStart,
+                end: filterEnd,
                 type: config.period,
             },
+            totalGrossPay: Math.round(totalGrossPay * 100) / 100,
+            totalDeductions: Math.round(totalDeductions * 100) / 100,
+            totalNetPay: Math.round(totalNetPay * 100) / 100,
+            totalEmployerCost: Math.round(totalEmployerCost * 100) / 100,
             summary: {
                 totalWorkers: payrolls.length,
                 totalGrossPay: Math.round(totalGrossPay * 100) / 100,
@@ -395,14 +534,8 @@ export class PayrollManagementService {
                 wsib: `${(config.wsibRate * 100).toFixed(2)}%`,
                 vacationPay: `${(config.vacationPayRate * 100).toFixed(0)}%`,
             },
-            records: payrolls.map((p) => ({
-                worker: p.worker,
-                grossPay: p.grossPay,
-                deductions: p.deductions,
-                netPay: p.netPay,
-                employerCost: p.employerCost,
-                status: p.status,
-            })),
+            workers: workersList,
+            records: workersList,
         };
     }
 
@@ -423,16 +556,16 @@ export class PayrollManagementService {
             companyName: companies[0].name,
             period: config.period,
             employeeDeductions: {
-                cppEmployeeRate: config.cppEmployeeRate * 100,
-                eiEmployeeRate: config.eiEmployeeRate * 100,
-                federalTaxRate: config.federalTaxRate * 100,
-                provincialTaxRate: config.provincialTaxRate * 100,
+                cppEmployeeRate: Math.round(config.cppEmployeeRate * 10000) / 100,
+                eiEmployeeRate: Math.round(config.eiEmployeeRate * 10000) / 100,
+                federalTaxRate: Math.round(config.federalTaxRate * 10000) / 100,
+                provincialTaxRate: Math.round(config.provincialTaxRate * 10000) / 100,
             },
             employerContributions: {
-                cppEmployerRate: config.cppEmployerRate * 100,
-                eiEmployerRate: config.eiEmployerRate * 100,
-                wsibRate: config.wsibRate * 100,
-                vacationPayRate: config.vacationPayRate * 100,
+                cppEmployerRate: Math.round(config.cppEmployerRate * 10000) / 100,
+                eiEmployerRate: Math.round(config.eiEmployerRate * 10000) / 100,
+                wsibRate: Math.round(config.wsibRate * 10000) / 100,
+                vacationPayRate: Math.round(config.vacationPayRate * 10000) / 100,
             },
         };
     }
@@ -574,8 +707,14 @@ export class PayrollManagementService {
         const rate = dto.ratePerHour ?? worker.hourlyRate ?? 35;
         const hours = dto.hours ?? 0;
         const grossPay = dto.grossPay ?? Math.round(hours * rate * 100) / 100;
-        const deductions = dto.deductions ?? Math.round(grossPay * 0.18 * 100) / 100;
+
+        const config = await this.getOrCreateConfig(companyId);
+        const calculatedDeductions = this.calculateDeductions(grossPay, config);
+        const calculatedEmployer = this.calculateEmployerCost(grossPay, config);
+
+        const deductions = dto.deductions ?? calculatedDeductions.totalDeductions;
         const netPay = dto.netPay ?? Math.round((grossPay - deductions) * 100) / 100;
+        const employerCost = calculatedEmployer.totalEmployerCost;
 
         let payrollRecord;
 
@@ -591,6 +730,7 @@ export class PayrollManagementService {
                     grossPay,
                     deductions,
                     netPay,
+                    employerCost,
                 },
             });
         } else {
@@ -615,6 +755,7 @@ export class PayrollManagementService {
                         grossPay,
                         deductions,
                         netPay,
+                        employerCost,
                     },
                 });
             } else {
@@ -629,6 +770,7 @@ export class PayrollManagementService {
                         grossPay,
                         deductions,
                         netPay,
+                        employerCost,
                         status: 'paid',
                         processedAt: new Date(),
                         processedBy: userId,
