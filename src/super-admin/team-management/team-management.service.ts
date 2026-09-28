@@ -85,6 +85,7 @@ export class TeamManagementService {
         joinDate: true,
         avatarUrl: true,
         lastLoginAt: true,
+        isExemptFromSubscription: true,
         createdAt: true,
         updatedAt: true,
         emergencyContacts: true,
@@ -211,16 +212,28 @@ export class TeamManagementService {
 
   // ── Manager Stats ────────────────────────────────────────────────────
   async getManagerStats(userId: string, userRole: string) {
+    const adminFilter =
+      userRole === UserRole.admin
+        ? {
+            projectMemberships: {
+              some: { project: { company: { ownerId: userId } } },
+            },
+          }
+        : {};
+
     const totalManagers = await this.prisma.user.count({
-      where: { role: UserRole.manager },
+      where: { role: UserRole.manager, ...adminFilter },
     });
 
     const activeManagers = await this.prisma.user.count({
-      where: { role: UserRole.manager, status: UserStatus.active },
+      where: { role: UserRole.manager, status: UserStatus.active, ...adminFilter },
     });
 
     const managedProjects = await this.prisma.projectMember.findMany({
-      where: { role: 'manager' },
+      where: { 
+        role: 'manager',
+        ...(userRole === UserRole.admin ? { project: { company: { ownerId: userId } } } : {})
+      },
       select: { projectId: true },
       distinct: ['projectId'],
     });
@@ -374,7 +387,7 @@ export class TeamManagementService {
 
 
   // ── Manager List ─────────────────────────────────────────────────────────
-  async getManagerList(search?: string, status?: string) {
+  async getManagerList(search?: string, status?: string, userId?: string, userRole?: string) {
     return this.prisma.user.findMany({
       where: {
         role: UserRole.manager,
@@ -386,6 +399,19 @@ export class TeamManagementService {
               { email: { contains: search, mode: 'insensitive' } },
             ],
           }
+          : {}),
+        ...(userRole === UserRole.admin && userId
+          ? {
+              projectMemberships: {
+                some: {
+                  project: {
+                    company: {
+                      ownerId: userId,
+                    },
+                  },
+                },
+              },
+            }
           : {}),
       },
       select: {

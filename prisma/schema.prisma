@@ -106,6 +106,7 @@ model User {
   resetExpiresAt          DateTime?                @map("reset_expires_at")
   createdAt               DateTime                 @default(now()) @map("created_at")
   updatedAt               DateTime                 @updatedAt @map("updated_at")
+  isExemptFromSubscription Boolean                 @default(false) @map("is_exempt_from_subscription")
   stripeAccountId         String?                  @map("stripe_account_id")
   stripeAccountStatus     String?                  @default("pending") @map("stripe_account_status")
   attendances             Attendance[]

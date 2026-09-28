@@ -19,7 +19,18 @@ export class SuperAdminUsersService {
     // otherwise return users by role
     return this.prisma.user.findMany({
       where: role ? { role: role as any } : {},
-      select: { id: true, fullName: true, email: true, role: true, avatarUrl: true },
+      select: { id: true, fullName: true, email: true, role: true, avatarUrl: true, isExemptFromSubscription: true },
+    });
+  }
+
+  async toggleSubscriptionExemption(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new Error('User not found');
+    
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { isExemptFromSubscription: !user.isExemptFromSubscription },
+      select: { id: true, isExemptFromSubscription: true },
     });
   }
 }

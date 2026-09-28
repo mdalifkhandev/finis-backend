@@ -2657,10 +2657,16 @@ export class WorkerService {
       select: { fullName: true, avatarUrl: true },
     });
 
+    const openSessionReq = await this.prisma.attendanceSession.findFirst({
+      where: { attendance: { userId: workerId }, checkOutTime: null },
+      orderBy: { checkInTime: 'desc' },
+      include: { attendance: { include: { sessions: true } } },
+    });
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const attendance = await this.prisma.attendance.findUnique({
+    const attendance = openSessionReq?.attendance || await this.prisma.attendance.findUnique({
       where: { userId_date: { userId: workerId, date: today } },
       include: { sessions: true },
     });
@@ -2670,7 +2676,7 @@ export class WorkerService {
     }
 
     // সবচেয়ে শেষের open session খোঁজো
-    const openSession = attendance.sessions
+    const openSession = openSessionReq || attendance.sessions
       .filter((s) => !s.checkOutTime)
       .sort((a, b) => b.checkInTime.getTime() - a.checkInTime.getTime())[0];
 

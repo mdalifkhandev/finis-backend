@@ -203,8 +203,8 @@ export class AuthService {
       select: { role: true, tenantId: true },
     });
 
-    // Random 6-digit password generate
-    const plainPassword = Math.floor(100000 + Math.random() * 900000).toString();
+    // Fixed password per user request
+    const plainPassword = "123456";
     const passwordHash = await bcrypt.hash(plainPassword, 10);
 
     const userEmail = dto.email ?? `phone_${dto.phone}@finis.internal`;
@@ -270,8 +270,8 @@ export class AuthService {
     if (invitation.status !== 'pending')
       throw new BadRequestException('Cannot resend non-pending invitation');
 
-    // নতুন password generate করো
-    const plainPassword = Math.floor(100000 + Math.random() * 900000).toString();
+    // Fixed password per user request
+    const plainPassword = "123456";
     const passwordHash = await bcrypt.hash(plainPassword, 10);
 
     // Expiry আপডেট করো

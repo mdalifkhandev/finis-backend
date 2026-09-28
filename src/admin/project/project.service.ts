@@ -194,8 +194,10 @@ export class ProjectService {
   private async checkProjectLimit(adminId: string) {
     const admin = await this.prisma.user.findUnique({
       where: { id: adminId },
-      select: { tenantId: true },
+      select: { tenantId: true, isExemptFromSubscription: true },
     });
+
+    if (admin?.isExemptFromSubscription) return;
 
     if (!admin?.tenantId) {
       throw new ForbiddenException('Please purchase a subscription before creating a project.');
@@ -239,8 +241,10 @@ export class ProjectService {
   private async checkUserLimit(adminId: string) {
     const admin = await this.prisma.user.findUnique({
       where: { id: adminId },
-      select: { tenantId: true },
+      select: { tenantId: true, isExemptFromSubscription: true },
     });
+
+    if (admin?.isExemptFromSubscription) return;
 
     if (!admin?.tenantId) {
       throw new ForbiddenException('Please purchase a subscription before adding users.');
@@ -275,8 +279,10 @@ export class ProjectService {
   private async checkGeofencingAccess(adminId: string) {
     const admin = await this.prisma.user.findUnique({
       where: { id: adminId },
-      select: { tenantId: true },
+      select: { tenantId: true, isExemptFromSubscription: true },
     });
+
+    if (admin?.isExemptFromSubscription) return;
 
     if (!admin?.tenantId) {
       throw new ForbiddenException('Please purchase a subscription to use geofencing.');
@@ -574,14 +580,14 @@ export class ProjectService {
       select: { id: true, name: true },
     });
 
-    await this.notificationsService.send({
+    this.notificationsService.send({
       targetRole: 'super_admin',
       title: 'New project created',
       body: `${dto.name} project has been created${company?.name ? ` under ${company.name}` : ''}`,
       type: 'general',
       refType: 'project',
       refId: project.id,
-    });
+    }).catch(e => console.error('Failed to send notification:', e));
 
     if (dto.autoGenerateFloors && numFloorsValue && unitPerFloorValue) {
       const floorStart = numFloorsRange.min ?? 1;

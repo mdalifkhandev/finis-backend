@@ -87,11 +87,13 @@ export class CompanyService {
   }
 
   // ─── PLAN LIMIT CHECK ─────────────────────────────────────────────────────
-  private async checkCompanyLimit(adminId: string) {
+  public async checkCompanyLimit(adminId: string) {
     const admin = await this.prisma.user.findUnique({
       where: { id: adminId },
-      select: { tenantId: true },
+      select: { tenantId: true, isExemptFromSubscription: true },
     });
+
+    if (admin?.isExemptFromSubscription) return;
 
     if (!admin?.tenantId) {
       throw new ForbiddenException('Please purchase a subscription before creating a company.');
@@ -526,14 +528,14 @@ export class CompanyService {
       },
     });
 
-    await this.notificationsService.send({
+    this.notificationsService.send({
       targetRole: 'super_admin',
       title: 'New company created',
       body: `${dto.name} company has been created`,
       type: 'general',
       refType: 'company',
       refId: company.id,
-    });
+    }).catch(e => console.error('Failed to send notification:', e));
 
     return company;
   }
