@@ -102,10 +102,12 @@ export class TeamManagementController {
   /** GET /super_admin/team/managers?search=&status= */
   @Get('managers')
   getManagerList(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') userRole: string,
     @Query('search') search?: string,
     @Query('status') status?: string,
   ) {
-    return this.teamService.getManagerList(search, status);
+    return this.teamService.getManagerList(search, status, userId, userRole);
   }
 
   /** GET /super_admin/team/users/:id/documents */

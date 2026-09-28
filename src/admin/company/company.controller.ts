@@ -73,6 +73,9 @@ export class CompanyController {
     @CurrentUser('id') adminId: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
+    // Check limit first so we don't upload file if they are not allowed
+    await this.companyService.checkCompanyLimit(adminId);
+    
     const logoUrl = file ? await this.storageService.uploadFile(file, 'company-logos') : undefined;
     return this.companyService.createCompany(dto, adminId, logoUrl);
   }

@@ -93,11 +93,11 @@ export class NotificationsService {
       this.gateway.broadcastAll(notification);
     }
 
-    await this.sendFirebasePush(dto.userId, dto.title, dto.body, {
+    this.sendFirebasePush(dto.userId, dto.title, dto.body, {
       type: dto.type,
       refId: dto.refId,
       refType: dto.refType,
-    });
+    }).catch(e => this.logger.error('Firebase push error', e));
     return notification;
   }
 
@@ -141,11 +141,12 @@ export class NotificationsService {
 
     await Promise.all(users.map((user) => this.pruneUserNotifications(user.id)));
 
-    await this.sendFirebasePushToRole(role, dto.title, dto.body, {
+    this.sendFirebasePushToRole(role, dto.title, dto.body, {
       type: dto.type,
       refId: dto.refId,
       refType: dto.refType,
-    });
+    }).catch(e => this.logger.error('Firebase push error', e));
+    
     return notifications;
   }
 

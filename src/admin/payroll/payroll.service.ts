@@ -466,10 +466,11 @@ export class PayrollService {
         id: true,
         tenantId: true,
         role: true,
+        isExemptFromSubscription: true,
       },
     });
 
-    if (!admin?.tenantId) {
+    if (!admin?.tenantId && !admin?.isExemptFromSubscription) {
       return {
         tenantId: null,
         tenantName: null,
@@ -477,6 +478,7 @@ export class PayrollService {
         currentPeriodEnd: null,
         plan: null,
         isExpired: false,
+        isExemptFromSubscription: admin?.isExemptFromSubscription ?? false,
       };
     }
 
@@ -493,6 +495,7 @@ export class PayrollService {
         currentPeriodEnd: null,
         plan: null,
         isExpired: false,
+        isExemptFromSubscription: admin.isExemptFromSubscription,
       };
     }
 
@@ -517,6 +520,7 @@ export class PayrollService {
           }
         : null,
       isExpired,
+      isExemptFromSubscription: admin.isExemptFromSubscription,
     };
   }
 
@@ -524,6 +528,9 @@ export class PayrollService {
     if (userRole === UserRole.super_admin) return this.getTenantSubscriptionContext(adminId);
 
     const ctx = await this.getTenantSubscriptionContext(adminId);
+    
+    if (ctx.isExemptFromSubscription) return ctx;
+    
     if (!ctx.tenantId) {
       throw new ForbiddenException('Please purchase a subscription before using payroll.');
     }
