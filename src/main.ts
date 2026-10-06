@@ -7,6 +7,7 @@ import { join } from 'path';
 import { NextFunction, Request, Response } from 'express';
 
 import { AppModule } from './app.module';
+import { globalRequestTimestamps } from './app.service';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 
@@ -27,6 +28,7 @@ async function bootstrap() {
 
   app.use((request: Request, response: Response, next: NextFunction) => {
     const startedAt = Date.now();
+    globalRequestTimestamps.push(startedAt);
     const { method, originalUrl, query, body } = request;
     const payload =
       method === 'GET' || method === 'DELETE'
