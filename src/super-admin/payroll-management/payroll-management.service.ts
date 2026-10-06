@@ -121,27 +121,20 @@ export class PayrollManagementService {
         });
 
         const companyIds = companies.map((c) => c.id);
-
-        if (companyIds.length === 0) {
-            return {
-                summary: {
-                    totalGrossPay: 0,
-                    totalNetPay: 0,
-                    totalEmployerCost: 0,
-                    payrollPeriod: 'biweekly',
-                },
-                currentPeriod: {
-                    period: `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`,
-                    workers: 0,
-                    pending: 0,
-                    status: 'No Data',
-                },
-                recentRecords: [],
-            };
+        
+        // Fetch payrolls
+        const whereClause: any = {};
+        
+        if (userRole === UserRole.super_admin) {
+            // super_admin sees all
+        } else {
+            // admin sees payrolls of their companies OR payrolls they processed
+            whereClause.OR = [
+                ...(companyIds.length > 0 ? [{ companyId: { in: companyIds } }] : []),
+                { processedBy: userId }
+            ];
         }
 
-        // Fetch payrolls
-        const whereClause: any = { companyId: { in: companyIds } };
         if (query.month || query.year) {
             whereClause.payPeriodStart = { gte: startDate };
             whereClause.payPeriodEnd = { lte: endDate };
@@ -168,8 +161,9 @@ export class PayrollManagementService {
             orderBy: { createdAt: 'desc' },
         });
 
-        // Config — first company এর config থেকে rates দেখাবো
-        const config = await this.getOrCreateConfig(companyIds[0]);
+        // Config — first company এর config থেকে rates দেখাবো, or from a fetched payroll
+        const targetCompanyId = companyIds[0] || payrolls[0]?.companyId;
+        const config = targetCompanyId ? await this.getOrCreateConfig(targetCompanyId) : { period: 'biweekly', cppEmployeeRate: 0.0595, eiEmployeeRate: 0.0163, federalTaxRate: 0.15, provincialTaxRate: 0.0505, cppEmployerRate: 0.0595, eiEmployerRate: 0.0228, wsibRate: 0.01, vacationPayRate: 0.04 };
 
         const totalGrossPay = payrolls.reduce((s, p) => s + p.grossPay, 0);
         const totalDeductions = payrolls.reduce((s, p) => s + p.deductions, 0);
@@ -180,11 +174,19 @@ export class PayrollManagementService {
 
         // Compute 6-month monthly trends
         const sixMonthsAgo = new Date(y, m - 5, 1);
+        const trendsWhereClause: any = {
+            payPeriodStart: { gte: sixMonthsAgo },
+        };
+        
+        if (userRole !== UserRole.super_admin) {
+            trendsWhereClause.OR = [
+                ...(companyIds.length > 0 ? [{ companyId: { in: companyIds } }] : []),
+                { processedBy: userId }
+            ];
+        }
+
         const trendsPayrolls = await this.prisma.payroll.findMany({
-            where: {
-                companyId: { in: companyIds },
-                payPeriodStart: { gte: sixMonthsAgo },
-            },
+            where: trendsWhereClause,
         });
 
         const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -268,12 +270,32 @@ export class PayrollManagementService {
         const startDate = new Date(y, m, 1);
         const endDate = new Date(y, m + 1, 0);
 
+        const companies = await this.prisma.company.findMany({
+            where: userRole === UserRole.super_admin ? {} : { ownerId: userId },
+            select: { id: true },
+        });
+        const companyIds = companies.map(c => c.id);
+
+        const whereClause: any = {};
+        
+        if (userRole !== UserRole.super_admin) {
+            whereClause.OR = [
+                ...(companyIds.length > 0 ? [{ companyId: { in: companyIds } }] : []),
+                { processedBy: userId }
+            ];
+        }
+        
+        if (companyId) {
+            whereClause.companyId = companyId;
+        }
+
+        if (query.month || query.year) {
+            whereClause.payPeriodStart = { gte: startDate };
+            whereClause.payPeriodEnd = { lte: endDate };
+        }
+
         const payrolls = await this.prisma.payroll.findMany({
-            where: {
-                ...(companyId && { companyId }),
-                payPeriodStart: { gte: startDate },
-                payPeriodEnd: { lte: endDate },
-            },
+            where: whereClause,
             include: {
                 worker: {
                     select: {
