@@ -35,8 +35,6 @@ lerna-debug.log*
 !.vscode/extensions.json
 
 # dotenv environment variable files
-.env
-.env.*
 .env*.local
 !.env.example
 
@@ -59,3 +57,4 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .agents
 Thumbs.db
 
+config.bat
