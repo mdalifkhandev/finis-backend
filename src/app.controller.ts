@@ -12,6 +12,11 @@ export class AppController {
     res.send(this.appService.getDashboardHtml());
   }
 
+  @Get('health')
+  async getHealth() {
+    return this.appService.getHealth();
+  }
+
   @Get('telemetry')
   async getTelemetry() {
     return this.appService.getTelemetryData();

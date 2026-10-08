@@ -32,6 +32,11 @@ export class CreateTaskDto {
   @IsString()
   description?: string;
 
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  price?: number;
+
   @IsString()
   projectId!: string;
 
@@ -84,6 +89,11 @@ export class UpdateTaskDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  price?: number;
 
   @IsOptional()
   @IsEnum(TaskPriority)
@@ -160,6 +170,11 @@ export class CreateSubTaskDto {
   description?: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  price?: number;
+
+  @IsOptional()
   @IsEnum(TaskPriority)
   priority?: TaskPriority;
 
@@ -182,6 +197,12 @@ export class UpdateSubTaskDto {
   @IsString()
   @Transform(({ value }) => value === '' ? undefined : value)
   description?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Transform(({ value }) => value === '' ? undefined : value)
+  price?: number;
 
   @IsOptional()
   @IsEnum(TaskPriority)

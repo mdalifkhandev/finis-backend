@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "main",
+    "quote-based-project-flow",
+    "update"
+  ],
+  "parent": {
+    "main": null,
+    "quote-based-project-flow": "main",
+    "update": "main"
+  },
+  "order": [
+    "main",
+    "quote-based-project-flow",
+    "update"
+  ]
+}

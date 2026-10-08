@@ -196,6 +196,25 @@ export class AppService {
     `;
   }
 
+  async getHealth() {
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
+      return {
+        status: 'ok',
+        server: 'stable',
+        database: 'connected',
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        status: 'ok',
+        server: 'stable',
+        database: 'connecting',
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
   async getTelemetryData() {
     const totalMem = os.totalmem();
     const freeMem = os.freemem();

@@ -480,6 +480,7 @@ model Task {
   createdBy             String                 @map("created_by") @db.Uuid
   title                 String
   description           String?
+  price                 Float?
   priority              TaskPriority           @default(medium)
   status                TaskStatus             @default(pending)
   approvalDecision      ReviewDecision         @default(pending) @map("approval_decision")
@@ -521,6 +522,7 @@ model SubTask {
   createdBy             String          @map("created_by") @db.Uuid
   title                 String
   description           String?
+  price                 Float?
   priority              TaskPriority    @default(medium)
   dueDate               DateTime?       @map("due_date") @db.Date
   estimatedHours        Int?            @map("estimated_hours")

@@ -442,6 +442,7 @@ export class TaskService {
         id: rest.id,
         title: rest.title,
         description: rest.description,
+        price: rest.price ?? null,
         priority: rest.priority,
         status: rest.status,
         allowSubTaskCreation: rest.allowSubTaskCreation,
@@ -469,6 +470,7 @@ export class TaskService {
         id: subTask.id,
         title: subTask.title,
         description: subTask.description,
+        price: subTask.price ?? null,
         priority: subTask.priority,
         dueDate: subTask.dueDate,
         estimatedHours: subTask.estimatedHours,
@@ -512,6 +514,7 @@ export class TaskService {
       id: task.id,
       title: task.title,
       description: task.description,
+      price: task.price ?? null,
       priority: task.priority,
       startDate: task.createdAt ?? null,
       dueDate: task.dueDate,
@@ -584,6 +587,7 @@ export class TaskService {
       id: subTask.id,
       title: subTask.title,
       description: subTask.description,
+      price: subTask.price ?? null,
       priority: subTask.priority,
       startDate: subTask.createdAt ?? null,
       dueDate: subTask.dueDate,
@@ -626,6 +630,7 @@ export class TaskService {
       id: subTask.id,
       title: subTask.title,
       description: subTask.description,
+      price: subTask.price ?? null,
       priority: subTask.priority,
       status: subTask.status,
       approvalDecision: subTask.approvalDecision,
@@ -869,6 +874,7 @@ export class TaskService {
         createdBy: userId,
         title: dto.title,
         description: dto.description ?? null,
+        price: canCreateAsAdmin ? dto.price ?? null : null,
         priority: dto.priority ?? TaskPriority.medium,
         status: initialStatus,
         approvalDecision,
@@ -932,6 +938,7 @@ export class TaskService {
               createdBy: userId,
               title: dto.title,
               description: dto.description ?? null,
+              price: canCreateAsAdmin ? dto.price ?? null : null,
               priority: dto.priority ?? TaskPriority.medium,
               dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
               estimatedHours: dto.estimatedHours ?? null,
@@ -961,6 +968,7 @@ export class TaskService {
             createdBy: userId,
             title: dto.title,
             description: dto.description ?? null,
+            price: canCreateAsAdmin ? dto.price ?? null : null,
             priority: dto.priority ?? TaskPriority.medium,
             dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
             estimatedHours: dto.estimatedHours ?? null,
@@ -1523,6 +1531,7 @@ export class TaskService {
         id: subTask.id,
         title: subTask.title,
         description: subTask.description,
+        price: subTask.price ?? null,
         priority: subTask.priority,
         dueDate: subTask.dueDate,
         estimatedHours: subTask.estimatedHours,
@@ -1679,6 +1688,7 @@ export class TaskService {
         id: subTask.id,
         title: subTask.title,
         description: subTask.description,
+        price: subTask.price ?? null,
         priority: subTask.priority,
         createdAt: subTask.createdAt,
         dueDate: subTask.dueDate,
@@ -1903,6 +1913,10 @@ export class TaskService {
       where: { id: taskId },
       data: {
         ...taskUpdates,
+        price:
+          userRole === UserRole.admin || userRole === UserRole.super_admin
+            ? taskUpdates.price
+            : undefined,
         dueDate: taskUpdates.dueDate ? new Date(taskUpdates.dueDate) : undefined,
       },
     });
@@ -2001,6 +2015,10 @@ export class TaskService {
       data: {
         title: dto.title,
         description: dto.description,
+        price:
+          userRole === UserRole.admin || userRole === UserRole.super_admin
+            ? dto.price
+            : undefined,
         priority: dto.priority as any,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
       },
@@ -2348,6 +2366,7 @@ export class TaskService {
           createdBy: userId,
           title: dto.title,
           description: dto.description ?? null,
+          price: userRole === UserRole.admin || userRole === UserRole.super_admin ? dto.price ?? null : null,
           priority: dto.priority ?? 'medium',
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
           estimatedHours: dto.estimatedHours ?? null,
